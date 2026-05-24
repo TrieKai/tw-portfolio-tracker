@@ -1,0 +1,116 @@
+/**
+ * 資產管理核心型別定義
+ * ----------------------------------------
+ * 持倉（Holding）為單一買入紀錄；同一標的可有多筆 Holding（不同買入日）。
+ * 價格歷史（PricePoint）以 holdingId 為 key 儲存於本地端。
+ */
+
+/** 資產大類：台股 / 境內基金 */
+export type AssetType = "stock" | "fund";
+
+/**
+ * 台股上市櫃別
+ * - tse：台灣證券交易所（上市）
+ * - otc：櫃買中心（上櫃）
+ */
+export type StockMarket = "tse" | "otc";
+
+/** 價格來源：自動 API / 使用者手動輸入 */
+export type PriceSource = "api" | "manual";
+
+/**
+ * 單筆持倉
+ * @property id - 本地唯一識別（UUID）
+ * @property symbol - 股票代號（4 碼）或基金代碼（數字）
+ * @property buyPrice - 買入均價（股票：元/股；基金：元/單位）
+ * @property quantity - 股數或單位數
+ */
+export interface Holding {
+  id: string;
+  assetType: AssetType;
+  /** 顯示名稱（可從 API 更新） */
+  name: string;
+  symbol: string;
+  /** 僅 stock 需要；fund 可省略 */
+  market?: StockMarket;
+  buyPrice: number;
+  quantity: number;
+  /** 買入日期 ISO YYYY-MM-DD */
+  buyDate: string;
+  /** 最新價格或淨值 */
+  currentPrice?: number;
+  /** 價格對應日期 */
+  priceDate?: string;
+  priceSource?: PriceSource;
+  /** 最後成功/嘗試更新時間 */
+  lastUpdatedAt?: string;
+  /** 最近一次更新錯誤訊息（供 UI 提示） */
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 單日價格快照（用於趨勢圖） */
+export interface PricePoint {
+  /** YYYY-MM-DD */
+  date: string;
+  price: number;
+  source: PriceSource;
+}
+
+/** 價格歷史：holdingId → 依日期排序的點列 */
+export type PriceHistoryMap = Record<string, PricePoint[]>;
+
+/** 本地儲存完整狀態 */
+export interface PortfolioStorage {
+  version: 1;
+  holdings: Holding[];
+  priceHistory: PriceHistoryMap;
+  settings: PortfolioSettings;
+}
+
+export interface PortfolioSettings {
+  /** 是否啟用每日自動更新（需使用者開啟分頁或 PWA 才有效） */
+  autoUpdateEnabled: boolean;
+  /** 上次批次更新時間 */
+  lastBatchUpdateAt?: string;
+  /** 偏好主題；null 表示跟隨系統 */
+  theme?: "light" | "dark" | "system";
+}
+
+/** 持倉加上計算後的損益欄位（僅前端使用，不寫入 storage） */
+export interface HoldingWithMetrics extends Holding {
+  costBasis: number;
+  marketValue: number;
+  pnl: number;
+  returnRate: number;
+  /** 是否有有效現價可計算 */
+  hasLivePrice: boolean;
+}
+
+/** 投資組合彙總指標 */
+export interface PortfolioSummary {
+  totalCost: number;
+  totalValue: number;
+  totalPnl: number;
+  totalReturnRate: number;
+  stockValue: number;
+  fundValue: number;
+  holdingCount: number;
+}
+
+/** 新增持倉表單 payload（尚未含 id / 時間戳） */
+export interface CreateHoldingInput {
+  assetType: AssetType;
+  name: string;
+  symbol: string;
+  market?: StockMarket;
+  buyPrice: number;
+  quantity: number;
+  buyDate: string;
+}
+
+/** 編輯持倉（保留 id、現價與價格歷史） */
+export interface EditHoldingInput extends CreateHoldingInput {
+  id: string;
+}

@@ -1,0 +1,181 @@
+@import "react-day-picker/style.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * 語意化 CSS 變數：支援 Tailwind darkMode: 'class'
+ * 圖表 Tooltip 透過 var(--tooltip-bg) 等變數適配深淺色
+ */
+@layer base {
+  :root {
+    --page: #f8fafc;
+    --foreground: #0f172a;
+    --muted: #64748b;
+    --surface: #ffffff;
+    --surface-raised: #f1f5f9;
+    --border: #e2e8f0;
+    --accent: #059669;
+    --accent-muted: #047857;
+    --accent-dim: rgba(5, 150, 105, 0.12);
+    --gain: #059669;
+    --loss: #dc2626;
+    --tooltip-bg: #ffffff;
+    --chart-grid: #e2e8f0;
+  }
+
+  .dark {
+    --page: #0f1419;
+    --foreground: #f1f5f9;
+    --muted: #94a3b8;
+    --surface: #0f1419;
+    --surface-raised: #1a222d;
+    --border: #2a3544;
+    --accent: #10b981;
+    --accent-muted: #059669;
+    --accent-dim: rgba(16, 185, 129, 0.12);
+    --gain: #34d399;
+    --loss: #f87171;
+    --tooltip-bg: #1a222d;
+    --chart-grid: #2a3544;
+  }
+
+  body {
+    @apply min-h-screen bg-page text-foreground;
+  }
+
+  input,
+  button,
+  select {
+    @apply outline-none;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply rounded-2xl border border-border bg-surface-raised shadow-lg backdrop-blur-sm;
+    background-color: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+  }
+
+  .input-field {
+    @apply w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-foreground;
+  }
+
+  .input-field::placeholder {
+    color: var(--muted);
+    opacity: 0.65;
+  }
+
+  .input-field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-accent-muted disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-muted transition hover:text-foreground disabled:opacity-50;
+  }
+}
+
+@layer utilities {
+  .bg-page {
+    background-color: var(--page);
+  }
+  .text-foreground {
+    color: var(--foreground);
+  }
+  .text-muted {
+    color: var(--muted);
+  }
+  .bg-surface {
+    background-color: var(--surface);
+  }
+  .bg-surface-raised {
+    background-color: var(--surface-raised);
+  }
+  .border-border {
+    border-color: var(--border);
+  }
+  .text-accent {
+    color: var(--accent);
+  }
+  .bg-accent {
+    background-color: var(--accent);
+  }
+  .bg-accent-muted {
+    background-color: var(--accent-muted);
+  }
+  .bg-accent-dim {
+    background-color: var(--accent-dim);
+  }
+  .text-gain {
+    color: var(--gain);
+  }
+  .text-loss {
+    color: var(--loss);
+  }
+  .hover\:bg-accent-muted:hover {
+    background-color: var(--accent-muted);
+  }
+}
+
+/* DatePicker（react-day-picker）深淺色主題 */
+.datepicker-popover .rdp-root {
+  --rdp-accent-color: var(--accent);
+  --rdp-accent-background-color: var(--accent-dim);
+  --rdp-day-height: 2.25rem;
+  --rdp-day-width: 2.25rem;
+  color: var(--foreground);
+}
+
+.datepicker-popover .rdp-month-caption {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.datepicker-popover .rdp-nav-btn {
+  border-radius: 0.5rem;
+  color: var(--muted);
+}
+
+.datepicker-popover .rdp-nav-btn:hover {
+  background: var(--surface-raised);
+  color: var(--foreground);
+}
+
+.datepicker-popover .rdp-weekday {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.datepicker-popover .rdp-day-btn {
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.datepicker-popover .rdp-day-btn:hover:not(:disabled) {
+  background: var(--surface-raised);
+}
+
+.datepicker-popover .rdp-selected .rdp-day-btn {
+  background: var(--accent);
+  color: #fff;
+}
+
+.datepicker-popover .rdp-today:not(.rdp-selected) .rdp-day-btn {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.datepicker-popover .rdp-outside .rdp-day-btn {
+  color: var(--muted);
+  opacity: 0.45;
+}
+
+.datepicker-popover .rdp-disabled .rdp-day-btn {
+  opacity: 0.35;
+}
