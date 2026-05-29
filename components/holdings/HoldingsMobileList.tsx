@@ -11,6 +11,7 @@ export function HoldingsMobileList({
   updatingId,
   onRefresh,
   onEdit,
+  onSell,
   onManual,
   onRemove,
 }: {
@@ -18,6 +19,7 @@ export function HoldingsMobileList({
   updatingId: string | null;
   onRefresh: (id: string) => void;
   onEdit: (id: string) => void;
+  onSell: (id: string) => void;
   onManual: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
@@ -95,6 +97,13 @@ export function HoldingsMobileList({
               className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
             >
               編輯
+            </button>
+            <button
+              type="button"
+              onClick={() => onSell(h.id)}
+              className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
+            >
+              賣出
             </button>
             <button
               type="button"

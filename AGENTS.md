@@ -44,7 +44,8 @@ providers/                 # ThemeProvider、PortfolioProvider
 
 - `Holding`：單筆持倉（`assetType: 'stock' | 'fund'`）
 - `PricePoint`：單日價格快照，key 為 `holdingId`
-- `PortfolioStorage`：`{ version, holdings, priceHistory, settings }`
+- `PortfolioStorage`：`{ version, holdings, priceHistory, sales, settings }`
+- `SaleTransaction`：單筆賣出與已實現損益（`realizedPnl = proceeds − costBasis`）
 
 ## API 慣例
 
@@ -69,6 +70,8 @@ providers/                 # ThemeProvider、PortfolioProvider
 - 趨勢頁「我的資產」→ `refreshPortfolioForRange(range)` 更新現價並批次載入各持倉歷史；`buildPortfolioTimeline` 加總繪圖
 - 趨勢頁「載入歷史」→ `importPriceHistory`（基金→集保；上市股票→TWSE）
 - 持倉列表「編輯」→ `edit()` / `EditHoldingModal`（類型不可變，可改正規化代號如 00631L）
+- 持倉列表「賣出」→ `sell()` / `SellHoldingModal`；寫入 `storage.sales`（`SaleTransaction`：已實現損益、賣出日等）；部分賣出減少 `quantity`，全部賣出移除持倉
+- 總覽「已實現損益」、持倉頁「賣出紀錄」→ 累加／列表 `sales`
 
 ## 修改時注意
 

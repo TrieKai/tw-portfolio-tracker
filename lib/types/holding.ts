@@ -61,11 +61,37 @@ export interface PricePoint {
 /** 價格歷史：holdingId → 依日期排序的點列 */
 export type PriceHistoryMap = Record<string, PricePoint[]>;
 
+/** 單筆賣出紀錄（已實現損益） */
+export interface SaleTransaction {
+  id: string;
+  /** 賣出當下對應的持倉 id（全部賣出後持倉可能已刪除） */
+  holdingId: string;
+  assetType: AssetType;
+  name: string;
+  symbol: string;
+  market?: StockMarket;
+  /** 賣出時該筆持倉的成本均價 */
+  buyPrice: number;
+  quantity: number;
+  sellPrice: number;
+  /** 賣出日期 ISO YYYY-MM-DD */
+  sellDate: string;
+  /** 賣出成本 = buyPrice × quantity */
+  costBasis: number;
+  /** 成交金額 = sellPrice × quantity */
+  proceeds: number;
+  /** 已實現損益 = proceeds − costBasis */
+  realizedPnl: number;
+  createdAt: string;
+}
+
 /** 本地儲存完整狀態 */
 export interface PortfolioStorage {
   version: 1;
   holdings: Holding[];
   priceHistory: PriceHistoryMap;
+  /** 賣出紀錄（依 createdAt 追加；展示時依 sellDate 排序） */
+  sales: SaleTransaction[];
   settings: PortfolioSettings;
 }
 
@@ -92,8 +118,12 @@ export interface HoldingWithMetrics extends Holding {
 export interface PortfolioSummary {
   totalCost: number;
   totalValue: number;
+  /** 未實現損益（現有持倉） */
   totalPnl: number;
   totalReturnRate: number;
+  /** 累計已實現損益（歷次賣出） */
+  totalRealizedPnl: number;
+  saleCount: number;
   stockValue: number;
   fundValue: number;
   holdingCount: number;
@@ -113,4 +143,15 @@ export interface CreateHoldingInput {
 /** 編輯持倉（保留 id、現價與價格歷史） */
 export interface EditHoldingInput extends CreateHoldingInput {
   id: string;
+}
+
+/** 賣出持倉（部分賣出減少數量；全部賣出則移除持倉） */
+export interface SellHoldingInput {
+  id: string;
+  /** 賣出股數或單位數 */
+  quantity: number;
+  /** 賣出成交價（元/股或元/單位） */
+  sellPrice: number;
+  /** 賣出日期 ISO YYYY-MM-DD */
+  sellDate: string;
 }

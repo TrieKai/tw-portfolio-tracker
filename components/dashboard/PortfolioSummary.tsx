@@ -7,10 +7,11 @@ import {
 import type { PortfolioSummary as Summary } from "@/lib/types/holding";
 
 export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
-  const pnlPositive = summary.totalPnl >= 0;
+  const unrealizedPositive = summary.totalPnl >= 0;
+  const realizedPositive = summary.totalRealizedPnl >= 0;
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       <StatCard label="總資產" value={formatCurrency(summary.totalValue)} />
       <StatCard
         label="總成本"
@@ -18,14 +19,24 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
         muted
       />
       <StatCard
-        label="總損益"
+        label="未實現損益"
         value={formatCurrency(summary.totalPnl)}
-        highlight={pnlPositive ? "gain" : "loss"}
+        highlight={unrealizedPositive ? "gain" : "loss"}
       />
       <StatCard
-        label="總報酬率"
+        label="已實現損益"
+        value={formatCurrency(summary.totalRealizedPnl)}
+        sub={
+          summary.saleCount > 0
+            ? `${summary.saleCount} 筆賣出`
+            : "尚無賣出紀錄"
+        }
+        highlight={realizedPositive ? "gain" : "loss"}
+      />
+      <StatCard
+        label="未實現報酬率"
         value={formatPercent(summary.totalReturnRate)}
-        highlight={pnlPositive ? "gain" : "loss"}
+        highlight={unrealizedPositive ? "gain" : "loss"}
       />
     </div>
   );
@@ -34,11 +45,13 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
 function StatCard({
   label,
   value,
+  sub,
   muted,
   highlight,
 }: {
   label: string;
   value: string;
+  sub?: string;
   muted?: boolean;
   highlight?: "gain" | "loss";
 }) {
@@ -56,6 +69,7 @@ function StatCard({
       <p className={`mt-1 text-xl font-semibold tabular-nums sm:text-2xl ${valueClass}`}>
         {value}
       </p>
+      {sub && <p className="mt-1 text-xs text-muted">{sub}</p>}
     </div>
   );
 }

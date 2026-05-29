@@ -14,6 +14,8 @@ import type {
   PriceHistoryMap,
   PricePoint,
   PriceSource,
+  SaleTransaction,
+  SellHoldingInput,
 } from "@/lib/types/holding";
 
 const DEFAULT_SETTINGS: PortfolioSettings = {
@@ -26,6 +28,7 @@ function defaultStorage(): PortfolioStorage {
     version: 1,
     holdings: [],
     priceHistory: {},
+    sales: [],
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -43,6 +46,7 @@ export function loadPortfolio(): PortfolioStorage {
     return {
       ...defaultStorage(),
       ...parsed,
+      sales: Array.isArray(parsed.sales) ? parsed.sales : [],
       settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
     };
   } catch {
@@ -109,6 +113,63 @@ export function editHolding(
     buyPrice: input.buyPrice,
     quantity: input.quantity,
     buyDate: input.buyDate,
+    lastError: undefined,
+  });
+}
+
+function buildSaleRecord(
+  holding: Holding,
+  input: SellHoldingInput
+): SaleTransaction {
+  const costBasis = holding.buyPrice * input.quantity;
+  const proceeds = input.sellPrice * input.quantity;
+  return {
+    id: newId(),
+    holdingId: holding.id,
+    assetType: holding.assetType,
+    name: holding.name,
+    symbol: holding.symbol,
+    market: holding.market,
+    buyPrice: holding.buyPrice,
+    quantity: input.quantity,
+    sellPrice: input.sellPrice,
+    sellDate: input.sellDate,
+    costBasis,
+    proceeds,
+    realizedPnl: proceeds - costBasis,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * 賣出持倉：寫入賣出紀錄與已實現損益；
+ * 部分賣出僅減少 quantity（成本均價不變），全部賣出則移除持倉與價格歷史。
+ */
+export function sellHolding(
+  state: PortfolioStorage,
+  input: SellHoldingInput
+): PortfolioStorage {
+  const holding = state.holdings.find((h) => h.id === input.id);
+  if (!holding) return state;
+
+  const qty = input.quantity;
+  if (!Number.isFinite(qty) || qty <= 0) return state;
+  if (!Number.isFinite(input.sellPrice) || input.sellPrice <= 0) return state;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.sellDate)) return state;
+  if (qty > holding.quantity) return state;
+
+  const sale = buildSaleRecord(holding, input);
+  let next: PortfolioStorage = {
+    ...state,
+    sales: [...state.sales, sale],
+  };
+
+  if (qty >= holding.quantity) {
+    return removeHolding(next, input.id);
+  }
+
+  return updateHolding(next, input.id, {
+    quantity: holding.quantity - qty,
     lastError: undefined,
   });
 }

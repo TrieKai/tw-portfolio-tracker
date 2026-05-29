@@ -8,6 +8,7 @@ import type {
   PortfolioSummary,
   PriceHistoryMap,
   PricePoint,
+  SaleTransaction,
 } from "@/lib/types/holding";
 import {
   chartRangeToIsoDates,
@@ -38,8 +39,22 @@ export function computeHoldingMetrics(holding: Holding): HoldingWithMetrics {
   };
 }
 
+export function computeTotalRealizedPnl(sales: SaleTransaction[]): number {
+  return sales.reduce((sum, s) => sum + s.realizedPnl, 0);
+}
+
+/** 依賣出日期新到舊排序 */
+export function sortSalesByDateDesc(sales: SaleTransaction[]): SaleTransaction[] {
+  return [...sales].sort((a, b) => {
+    const byDate = b.sellDate.localeCompare(a.sellDate);
+    if (byDate !== 0) return byDate;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
 export function computePortfolioSummary(
-  holdings: HoldingWithMetrics[]
+  holdings: HoldingWithMetrics[],
+  sales: SaleTransaction[] = []
 ): PortfolioSummary {
   let totalCost = 0;
   let totalValue = 0;
@@ -57,11 +72,15 @@ export function computePortfolioSummary(
   const totalReturnRate =
     totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
 
+  const totalRealizedPnl = computeTotalRealizedPnl(sales);
+
   return {
     totalCost,
     totalValue,
     totalPnl,
     totalReturnRate,
+    totalRealizedPnl,
+    saleCount: sales.length,
     stockValue,
     fundValue,
     holdingCount: holdings.length,

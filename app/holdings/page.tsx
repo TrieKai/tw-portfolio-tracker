@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
+import { SaleHistoryTable } from "@/components/holdings/SaleHistoryTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export default function HoldingsPage() {
-  const { ready, holdings } = usePortfolio();
+  const { ready, holdings, sales } = usePortfolio();
 
   if (!ready) return <LoadingSpinner />;
 
@@ -22,6 +23,11 @@ export default function HoldingsPage() {
         }
       />
       <HoldingsTable holdings={holdings} />
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold">已實現損益 · 賣出紀錄</h2>
+        <SaleHistoryTable sales={sales} />
+      </section>
     </div>
   );
 }

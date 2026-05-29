@@ -23,6 +23,7 @@ import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
 import {
   enrichHoldings,
   computePortfolioSummary,
+  sortSalesByDateDesc,
 } from "@/lib/portfolio/calculations";
 import {
   addHolding,
@@ -31,6 +32,7 @@ import {
   editHolding,
   loadPortfolio,
   removeHolding,
+  sellHolding,
   savePortfolio,
   updateHolding,
   updateSettings,
@@ -42,6 +44,8 @@ import type {
   HoldingWithMetrics,
   PortfolioStorage,
   PortfolioSummary,
+  SaleTransaction,
+  SellHoldingInput,
 } from "@/lib/types/holding";
 
 type UpdateStatus = "idle" | "loading" | "partial" | "done" | "error";
@@ -49,12 +53,14 @@ type UpdateStatus = "idle" | "loading" | "partial" | "done" | "error";
 interface PortfolioContextValue {
   ready: boolean;
   holdings: HoldingWithMetrics[];
+  sales: SaleTransaction[];
   summary: PortfolioSummary;
   storage: PortfolioStorage;
   batchStatus: UpdateStatus;
   batchMessage: string | null;
   add: (input: CreateHoldingInput) => string | null;
   edit: (input: EditHoldingInput) => void;
+  sell: (input: SellHoldingInput) => void;
   remove: (id: string) => void;
   setManualPrice: (id: string, price: number, priceDate: string) => void;
   updateOne: (id: string) => Promise<boolean>;
@@ -98,9 +104,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [storage?.holdings]
   );
 
+  const sales = useMemo(
+    () => sortSalesByDateDesc(storage?.sales ?? []),
+    [storage?.sales]
+  );
+
   const summary = useMemo(
-    () => computePortfolioSummary(holdings),
-    [holdings]
+    () => computePortfolioSummary(holdings, storage?.sales ?? []),
+    [holdings, storage?.sales]
   );
 
   const add = useCallback(
@@ -118,6 +129,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     (input: EditHoldingInput) => {
       if (!storage) return;
       persist(editHolding(storage, input));
+    },
+    [storage, persist]
+  );
+
+  const sell = useCallback(
+    (input: SellHoldingInput) => {
+      if (!storage) return;
+      persist(sellHolding(storage, input));
     },
     [storage, persist]
   );
@@ -352,12 +371,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ready: storage !== null,
       holdings,
+      sales,
       summary,
       storage: storage ?? loadPortfolio(),
       batchStatus,
       batchMessage,
       add,
       edit,
+      sell,
       remove,
       setManualPrice,
       updateOne,
@@ -370,11 +391,13 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [
       storage,
       holdings,
+      sales,
       summary,
       batchStatus,
       batchMessage,
       add,
       edit,
+      sell,
       remove,
       setManualPrice,
       updateOne,

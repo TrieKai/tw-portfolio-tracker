@@ -47,6 +47,16 @@ export default function DashboardPage() {
               <span className="text-muted">基金市值</span>
               <span>{summary.fundValue.toLocaleString("zh-TW")} 元</span>
             </li>
+            <li className="flex justify-between border-t border-border/60 pt-2">
+              <span className="text-muted">已實現損益</span>
+              <span
+                className={
+                  summary.totalRealizedPnl >= 0 ? "text-gain" : "text-loss"
+                }
+              >
+                {summary.totalRealizedPnl.toLocaleString("zh-TW")} 元
+              </span>
+            </li>
           </ul>
         </div>
       </div>

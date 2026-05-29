@@ -10,17 +10,19 @@ import { usePortfolio } from "@/providers/PortfolioProvider";
 import { EditHoldingModal } from "./EditHoldingModal";
 import { HoldingsMobileList } from "./HoldingsMobileList";
 import { ManualPriceModal } from "./ManualPriceModal";
+import { SellHoldingModal } from "./SellHoldingModal";
 
 type SortKey = "name" | "value" | "pnl" | "returnRate";
 
 export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) {
-  const { updateOne, edit, remove, setManualPrice } = usePortfolio();
+  const { updateOne, edit, sell, remove, setManualPrice } = usePortfolio();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortAsc, setSortAsc] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [manualId, setManualId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
+  const [sellId, setSellId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -68,6 +70,7 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
 
   const manualHolding = holdings.find((h) => h.id === manualId);
   const editHoldingRow = holdings.find((h) => h.id === editId);
+  const sellHoldingRow = holdings.find((h) => h.id === sellId);
 
   if (holdings.length === 0) {
     return (
@@ -94,6 +97,7 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
         updatingId={updatingId}
         onRefresh={handleRefresh}
         onEdit={setEditId}
+        onSell={setSellId}
         onManual={setManualId}
         onRemove={(id) => {
           const h = holdings.find((x) => x.id === id);
@@ -174,6 +178,13 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
                     </button>
                     <button
                       type="button"
+                      onClick={() => setSellId(h.id)}
+                      className="btn-secondary text-xs py-1 px-2"
+                    >
+                      賣出
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setManualId(h.id)}
                       className="btn-secondary text-xs py-1 px-2"
                     >
@@ -204,6 +215,17 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
             setEditId(null);
           }}
           onClose={() => setEditId(null)}
+        />
+      )}
+
+      {sellHoldingRow && (
+        <SellHoldingModal
+          holding={sellHoldingRow}
+          onSave={(input) => {
+            sell(input);
+            setSellId(null);
+          }}
+          onClose={() => setSellId(null)}
         />
       )}
 
