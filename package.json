@@ -3,6 +3,7 @@
   "description": "台股與境內基金個人資產追蹤（Next.js，資料存於本機）",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.8.1",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

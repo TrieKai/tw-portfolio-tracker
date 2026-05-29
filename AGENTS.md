@@ -4,7 +4,7 @@
 
 ## 專案簡述
 
-- **專案名稱**：`tw-portfolio-tracker`（npm package；產品稱「台股基金資產追蹤」）
+- **專案名稱**：`tw-portfolio-tracker`（pnpm 套件；產品稱「台股基金資產追蹤」）
 - **框架**：Next.js 15 App Router、TypeScript、Tailwind CSS（`darkMode: 'class'`）
 - **部署**：Vercel Serverless
 - **資料**：持倉與價格歷史僅存於瀏覽器 **LocalStorage**（`portfolio-tracker-v1`）
@@ -82,8 +82,8 @@ providers/                 # ThemeProvider、PortfolioProvider
 ## 本地開發
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 ## 環境變數（可選）
@@ -92,6 +92,6 @@ npm run dev
 
 ## 測試建議
 
-- `npm run build` 必須通過
+- `pnpm build` 必須通過
 - 手動：新增台股 2330、基金代碼各一筆 → 更新全部 → 趨勢頁確認圖表
 - 斷網或錯誤代碼時確認「手動輸入價格」流程

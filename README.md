@@ -11,8 +11,8 @@
 ## 開發
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 瀏覽 [http://localhost:3000](http://localhost:3000)。
@@ -20,12 +20,12 @@ npm run dev
 ## 建置
 
 ```bash
-npm run build
-npm start
+pnpm build
+pnpm start
 ```
 
 ## 目錄說明
 
 詳見 [AGENTS.md](./AGENTS.md)。
 
-> **備註**：API 路徑 `/api/fund-nav` 等沿用早期命名，指「基金淨值」整合模組，與 npm 套件名無關。
+> **備註**：API 路徑 `/api/fund-nav` 等沿用早期命名，指「基金淨值」整合模組，與套件名稱 `tw-portfolio-tracker` 無關。
