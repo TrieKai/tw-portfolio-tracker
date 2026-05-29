@@ -9,7 +9,7 @@ export function PortfolioTimelineTooltip({
   point: PortfolioTimelinePoint;
 }) {
   return (
-    <div className="max-w-xs space-y-2 text-xs">
+    <div className="max-w-[min(18rem,85vw)] space-y-2 text-xs">
       <p className="font-medium">{point.date}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1">
         <span className="text-muted">總市值</span>

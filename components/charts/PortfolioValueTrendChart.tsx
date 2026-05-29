@@ -21,6 +21,7 @@ import {
   summarizeTimelineChange,
 } from "@/lib/portfolio/portfolio-timeline";
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
+import { ChartFrame } from "@/components/ui/ChartFrame";
 import { PortfolioTimelineTooltip } from "./PortfolioTimelineTooltip";
 
 interface PortfolioValueTrendChartProps {
@@ -107,8 +108,9 @@ export function PortfolioValueTrendChart({
         </div>
       )}
 
-      <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={chartData}>
+      <ChartFrame>
+        <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
           <XAxis
             dataKey="dateLabel"
@@ -184,7 +186,8 @@ export function PortfolioValueTrendChart({
             dot={false}
           />
         </LineChart>
-      </ResponsiveContainer>
+        </ResponsiveContainer>
+      </ChartFrame>
 
       {buyMarkers.length > 0 && (
         <p className="text-xs text-muted">

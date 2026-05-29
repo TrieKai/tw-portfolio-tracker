@@ -92,7 +92,7 @@ export function AddHoldingForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="glass-card max-w-lg space-y-5 p-6">
+    <form onSubmit={handleSubmit} className="glass-card mx-auto w-full max-w-lg space-y-5 p-4 sm:p-6">
       <div className="flex gap-2">
         {(["stock", "fund"] as const).map((t) => (
           <button

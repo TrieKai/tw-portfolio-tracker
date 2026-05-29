@@ -41,8 +41,13 @@
     --chart-grid: #2a3544;
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     @apply min-h-screen bg-page text-foreground;
+    overflow-x: hidden;
   }
 
   input,
@@ -53,9 +58,13 @@
 }
 
 @layer components {
-  .glass-card {
+  .glass-card-base {
     @apply rounded-2xl border border-border bg-surface-raised shadow-lg backdrop-blur-sm;
     background-color: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+  }
+
+  .glass-card {
+    @apply glass-card-base;
   }
 
   .input-field {
@@ -78,6 +87,41 @@
 
   .btn-secondary {
     @apply inline-flex items-center justify-center rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-muted transition hover:text-foreground disabled:opacity-50;
+  }
+
+  .page-title {
+    @apply text-xl font-bold sm:text-2xl;
+  }
+
+  .main-with-bottom-nav {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (min-width: 768px) {
+    .main-with-bottom-nav {
+      padding-bottom: 2rem;
+    }
+  }
+
+  .footer-with-bottom-nav {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (min-width: 768px) {
+    .footer-with-bottom-nav {
+      padding-bottom: 2rem;
+    }
+  }
+
+  .touch-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+
+  .scroll-x-chips {
+    @apply -mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
 }
 

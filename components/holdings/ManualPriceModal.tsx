@@ -41,13 +41,14 @@ export function ManualPriceModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
       role="dialog"
       aria-modal
     >
       <form
         onSubmit={handleSubmit}
-        className="glass-card w-full max-w-md space-y-4 p-6"
+        className="glass-card w-full max-w-md space-y-4 rounded-b-none p-4 sm:rounded-2xl sm:p-6"
+        style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
       >
         <h3 className="font-semibold">手動輸入價格</h3>
         <p className="text-sm text-muted">

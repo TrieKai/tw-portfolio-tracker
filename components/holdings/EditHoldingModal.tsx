@@ -84,14 +84,15 @@ export function EditHoldingModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
       role="dialog"
       aria-modal
       aria-labelledby="edit-holding-title"
     >
       <form
         onSubmit={handleSubmit}
-        className="glass-card max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto p-6"
+        className="glass-card max-h-[90dvh] w-full max-w-lg space-y-4 overflow-y-auto rounded-b-none p-4 sm:rounded-2xl sm:p-6"
+        style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
       >
         <h3 id="edit-holding-title" className="font-semibold">
           編輯持倉

@@ -8,6 +8,7 @@ import {
 import type { HoldingWithMetrics } from "@/lib/types/holding";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 import { EditHoldingModal } from "./EditHoldingModal";
+import { HoldingsMobileList } from "./HoldingsMobileList";
 import { ManualPriceModal } from "./ManualPriceModal";
 
 type SortKey = "name" | "value" | "pnl" | "returnRate";
@@ -84,11 +85,23 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
           placeholder="搜尋名稱或代號…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="input-field max-w-xs"
+          className="input-field w-full sm:max-w-xs"
         />
       </div>
 
-      <div className="glass-card overflow-x-auto">
+      <HoldingsMobileList
+        holdings={filtered}
+        updatingId={updatingId}
+        onRefresh={handleRefresh}
+        onEdit={setEditId}
+        onManual={setManualId}
+        onRemove={(id) => {
+          const h = holdings.find((x) => x.id === id);
+          if (h && confirm(`確定刪除 ${h.name}？`)) remove(id);
+        }}
+      />
+
+      <div className="glass-card hidden overflow-x-auto md:block">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead>
             <tr className="border-b border-border text-muted">

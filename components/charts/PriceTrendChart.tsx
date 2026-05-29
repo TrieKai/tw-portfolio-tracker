@@ -16,6 +16,7 @@ import {
   getSortedHistory,
 } from "@/lib/portfolio/calculations";
 import type { PriceHistoryMap } from "@/lib/types/holding";
+import { ChartFrame } from "@/components/ui/ChartFrame";
 
 interface PriceTrendChartProps {
   priceHistory: PriceHistoryMap;
@@ -52,8 +53,9 @@ export function PriceTrendChart({
   return (
     <div>
       <p className="mb-2 text-sm font-medium">{title}</p>
-      <ResponsiveContainer width="100%" height={200}>
-        <LineChart data={chartData}>
+      <ChartFrame className="h-[200px] sm:h-[220px]">
+        <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
           <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="var(--muted)" />
           <YAxis
@@ -83,7 +85,8 @@ export function PriceTrendChart({
             dot={false}
           />
         </LineChart>
-      </ResponsiveContainer>
+        </ResponsiveContainer>
+      </ChartFrame>
     </div>
   );
 }

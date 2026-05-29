@@ -53,7 +53,7 @@ function StatCard({
   return (
     <div className="glass-card p-5">
       <p className="text-sm text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${valueClass}`}>
+      <p className={`mt-1 text-xl font-semibold tabular-nums sm:text-2xl ${valueClass}`}>
         {value}
       </p>
     </div>

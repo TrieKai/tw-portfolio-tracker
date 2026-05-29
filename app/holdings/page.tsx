@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
@@ -12,12 +13,14 @@ export default function HoldingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">持倉列表</h1>
-        <Link href="/holdings/new" className="btn-primary">
-          新增持倉
-        </Link>
-      </div>
+      <PageHeader
+        title="持倉列表"
+        action={
+          <Link href="/holdings/new" className="btn-primary w-full sm:w-auto touch-target">
+            新增持倉
+          </Link>
+        }
+      />
       <HoldingsTable holdings={holdings} />
     </div>
   );

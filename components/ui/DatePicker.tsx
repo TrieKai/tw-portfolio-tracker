@@ -81,7 +81,10 @@ export function DatePicker({
         <div
           role="dialog"
           aria-label="日期選擇器"
-          className="datepicker-popover absolute left-0 top-full z-50 mt-1 rounded-xl border border-border bg-surface p-3 shadow-xl"
+          className="datepicker-popover fixed inset-x-4 bottom-4 z-50 rounded-xl border border-border bg-surface p-3 shadow-xl sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:right-auto sm:top-full sm:mt-1"
+          style={{
+            paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
+          }}
         >
           <DayPicker
             mode="single"

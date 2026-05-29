@@ -1,5 +1,6 @@
 {
-  "name": "fund-nav-api",
+  "name": "tw-portfolio-tracker",
+  "description": "台股與境內基金個人資產追蹤（Next.js，資料存於本機）",
   "version": "0.1.0",
   "private": true,
   "scripts": {

@@ -11,9 +11,19 @@ const notoSansTc = Noto_Sans_TC({
 });
 
 export const metadata: Metadata = {
-  title: "個人資產管理 | 台股與基金",
+  title: {
+    default: "台股基金資產追蹤",
+    template: "%s · 台股基金資產追蹤",
+  },
   description:
     "台股與境內基金持倉管理、自動更新價格、損益與趨勢圖表，資料儲存於本機",
+  applicationName: "tw-portfolio-tracker",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

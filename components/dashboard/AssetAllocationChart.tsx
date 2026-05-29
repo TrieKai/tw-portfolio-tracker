@@ -34,7 +34,8 @@ export function AssetAllocationChart({
   return (
     <div className="glass-card p-5">
       <h2 className="mb-4 text-sm font-medium text-muted">資產配置</h2>
-      <ResponsiveContainer width="100%" height={240}>
+      <div className="h-[200px] w-full min-w-0 sm:h-[240px]">
+      <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
             data={data}
@@ -42,8 +43,8 @@ export function AssetAllocationChart({
             nameKey="name"
             cx="50%"
             cy="50%"
-            innerRadius={55}
-            outerRadius={85}
+            innerRadius="45%"
+            outerRadius="70%"
             paddingAngle={2}
           >
             {data.map((_, i) => (
@@ -61,6 +62,7 @@ export function AssetAllocationChart({
           <Legend />
         </PieChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }

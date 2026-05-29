@@ -9,10 +9,9 @@ import { PriceTrendChart } from "@/components/charts/PriceTrendChart";
 import { ErrorAlert } from "@/components/ui/ErrorAlert";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import type { ChartRange } from "@/lib/portfolio/calculations";
-import {
-  CHART_RANGE_OPTIONS,
-  getChartRangeLabel,
-} from "@/lib/portfolio/chart-date-range";
+import { ChartRangePicker } from "@/components/ui/ChartRangePicker";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 type TrendTab = "portfolio" | "holding";
@@ -86,56 +85,41 @@ export default function TrendsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">趨勢分析</h1>
-        <p className="mt-1 text-sm text-muted">
-          資產總覽依持倉歷史價格加總；單一標的則顯示股價或淨值走勢
-        </p>
-      </div>
+      <PageHeader
+        title="趨勢分析"
+        description="資產總覽依持倉歷史價格加總；單一標的則顯示股價或淨值走勢"
+      />
 
       {holdings.length === 0 ? (
         <p className="text-muted">請先新增持倉並更新價格</p>
       ) : (
         <>
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div className="flex gap-1 rounded-lg border border-border p-1">
+          <div className="space-y-3">
+            <div className="flex w-full gap-1 rounded-lg border border-border p-1">
               <TabButton
                 active={tab === "portfolio"}
                 onClick={() => setTab("portfolio")}
+                className="flex-1"
               >
                 我的資產
               </TabButton>
               <TabButton
                 active={tab === "holding"}
                 onClick={() => setTab("holding")}
+                className="flex-1"
               >
                 單一標的
               </TabButton>
             </div>
 
-            <div className="flex flex-wrap items-end gap-1">
-              {CHART_RANGE_OPTIONS.map(({ key, label }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setRange(key)}
-                  className={`rounded-lg px-3 py-2 text-sm transition ${
-                    range === key
-                      ? "bg-accent-dim text-accent font-medium"
-                      : "text-muted hover:bg-surface-raised"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <ChartRangePicker value={range} onChange={setRange} />
           </div>
 
           {tab === "portfolio" ? (
             <section className="space-y-6">
-              <div className="glass-card p-5">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div>
+              <div className="glass-card p-4 sm:p-5">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
                     <h2 className="font-semibold">資產市值趨勢</h2>
                     <p className="mt-1 text-xs text-muted">
                       每筆依各自買入日／買入價納入；新買入日成本階梯上升
@@ -145,7 +129,7 @@ export default function TrendsPage() {
                     type="button"
                     onClick={handlePortfolioRefresh}
                     disabled={isPortfolioLoading}
-                    className="btn-primary text-sm"
+                    className="btn-primary w-full shrink-0 text-sm sm:w-auto touch-target"
                   >
                     {isPortfolioLoading
                       ? "更新中…"
@@ -172,7 +156,7 @@ export default function TrendsPage() {
                 />
               </div>
 
-              <div className="glass-card p-5">
+              <div className="glass-card p-4 sm:p-5">
                 <PortfolioReturnChart
                   holdings={storage.holdings}
                   priceHistory={storage.priceHistory}
@@ -180,7 +164,7 @@ export default function TrendsPage() {
                 />
               </div>
 
-              <div className="glass-card p-5">
+              <div className="glass-card p-4 sm:p-5">
                 <h2 className="mb-1 font-semibold">持倉建倉明細</h2>
                 <p className="mb-4 text-xs text-muted">
                   各筆基金／股票可不同時間、不同價格買入；趨勢圖僅在買入日後計入該筆
@@ -195,8 +179,8 @@ export default function TrendsPage() {
             </section>
           ) : (
             <section className="space-y-4">
-              <div className="flex flex-wrap items-end gap-4">
-                <label className="text-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                <label className="block w-full text-sm sm:min-w-[200px] sm:flex-1">
                   <span className="text-muted">選擇標的</span>
                   <select
                     value={activeId}
@@ -205,7 +189,7 @@ export default function TrendsPage() {
                       setHistoryMessage(null);
                       setHistoryError(null);
                     }}
-                    className="input-field mt-1 min-w-[200px]"
+                    className="input-field mt-1 w-full"
                   >
                     {holdings.map((h) => (
                       <option key={h.id} value={h.id}>
@@ -219,7 +203,7 @@ export default function TrendsPage() {
                   type="button"
                   onClick={handleImportHistory}
                   disabled={loadingHistory || isOtc}
-                  className="btn-primary"
+                  className="btn-primary w-full sm:w-auto touch-target"
                   title={
                     isOtc ? "上櫃歷史股價暫不支援自動載入" : undefined
                   }
@@ -244,7 +228,7 @@ export default function TrendsPage() {
                 />
               )}
 
-              <div className="glass-card p-5">
+              <div className="glass-card p-4 sm:p-5">
                 {active && (
                   <PriceTrendChart
                     priceHistory={storage.priceHistory}
@@ -266,20 +250,22 @@ function TabButton({
   active,
   onClick,
   children,
+  className = "",
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+      className={`rounded-md px-3 py-2.5 text-sm font-medium transition touch-target sm:px-4 ${
         active
           ? "bg-accent-dim text-accent"
           : "text-muted hover:text-foreground"
-      }`}
+      } ${className}`}
     >
       {children}
     </button>

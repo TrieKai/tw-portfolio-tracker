@@ -18,6 +18,7 @@ import {
   periodPnlFromTimeline,
 } from "@/lib/portfolio/portfolio-timeline";
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
+import { ChartFrame } from "@/components/ui/ChartFrame";
 
 /** 累積損益面積圖（類似庫存損益走勢） */
 export function PortfolioReturnChart({
@@ -56,10 +57,13 @@ export function PortfolioReturnChart({
     <div>
       <p className="mb-2 text-sm font-medium">
         累積損益
-        <span className="ml-2 font-normal text-muted">（相對所選區間起點）</span>
+        <span className="mt-0.5 block font-normal text-muted sm:ml-2 sm:mt-0 sm:inline">
+          （相對所選區間起點）
+        </span>
       </p>
-      <ResponsiveContainer width="100%" height={180}>
-        <AreaChart data={chartData}>
+      <ChartFrame className="h-[180px] sm:h-[200px] md:h-[220px]">
+        <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
           <defs>
             <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
@@ -104,7 +108,8 @@ export function PortfolioReturnChart({
             strokeWidth={2}
           />
         </AreaChart>
-      </ResponsiveContainer>
+        </ResponsiveContainer>
+      </ChartFrame>
     </div>
   );
 }

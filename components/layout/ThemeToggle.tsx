@@ -22,7 +22,7 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={cycle}
-      className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-muted transition hover:text-foreground"
+      className="touch-target rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-muted transition hover:text-foreground"
       title="切換主題"
     >
       {LABELS[theme]}

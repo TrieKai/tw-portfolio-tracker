@@ -1,9 +1,10 @@
-# AGENTS.md — 個人資產管理專案（fund-nav-api）
+# AGENTS.md — 台股基金資產追蹤（tw-portfolio-tracker）
 
 本文件供 AI 代理與協作者快速理解專案結構、慣例與部署限制。
 
 ## 專案簡述
 
+- **專案名稱**：`tw-portfolio-tracker`（npm package；產品稱「台股基金資產追蹤」）
 - **框架**：Next.js 15 App Router、TypeScript、Tailwind CSS（`darkMode: 'class'`）
 - **部署**：Vercel Serverless
 - **資料**：持倉與價格歷史僅存於瀏覽器 **LocalStorage**（`portfolio-tracker-v1`）

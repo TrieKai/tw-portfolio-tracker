@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { AssetAllocationChart } from "@/components/dashboard/AssetAllocationChart";
 import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
@@ -17,17 +18,15 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">投資總覽</h1>
-          <p className="mt-1 text-sm text-muted">
-            台股與境內基金持倉 · 本機儲存
-          </p>
-        </div>
-        <Link href="/holdings/new" className="btn-primary">
-          新增持倉
-        </Link>
-      </div>
+      <PageHeader
+        title="投資總覽"
+        description="台股與境內基金持倉 · 本機儲存"
+        action={
+          <Link href="/holdings/new" className="btn-primary w-full sm:w-auto touch-target">
+            新增持倉
+          </Link>
+        }
+      />
 
       <PortfolioSummaryCards summary={summary} />
 
@@ -52,9 +51,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <section className="glass-card p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">資產趨勢（今年度）</h2>
+      <section className="glass-card p-4 sm:p-5">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-base font-semibold sm:text-lg">資產趨勢（今年度）</h2>
           <Link href="/trends" className="text-sm text-accent hover:underline">
             查看完整趨勢 →
           </Link>
