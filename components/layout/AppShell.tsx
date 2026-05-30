@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePortfolio } from "@/providers/PortfolioProvider";
+import { AuthMenu } from "./AuthMenu";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -15,7 +16,7 @@ const NAV = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { updateAll, batchStatus, batchMessage } = usePortfolio();
+  const { updateAll, batchStatus, batchMessage, storageMode } = usePortfolio();
 
   const isUpdating = batchStatus === "loading";
 
@@ -74,6 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </>
               )}
             </button>
+            <AuthMenu />
             <ThemeToggle />
           </div>
         </div>
@@ -97,7 +99,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
 
       <footer className="footer-with-bottom-nav mx-auto max-w-6xl px-4 pb-6 text-center text-xs text-muted sm:px-6 sm:pb-8">
-        資料僅儲存於本機瀏覽器 · 價格來源 TWSE / 集保中心
+        {storageMode === "cloud"
+          ? "已登入 Google · 持倉同步至雲端 · 價格來源 TWSE / 集保中心"
+          : "匿名模式 · 資料僅存於本機瀏覽器 · 價格來源 TWSE / 集保中心"}
       </footer>
 
       <MobileBottomNav />

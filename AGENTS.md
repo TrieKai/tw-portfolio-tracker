@@ -7,7 +7,9 @@
 - **專案名稱**：`tw-portfolio-tracker`（pnpm 套件；產品稱「台股基金資產追蹤」）
 - **框架**：Next.js 15 App Router、TypeScript、Tailwind CSS（`darkMode: 'class'`）
 - **部署**：Vercel Serverless
-- **資料**：持倉與價格歷史僅存於瀏覽器 **LocalStorage**（`portfolio-tracker-v1`）
+- **資料**：
+  - 匿名：僅 **LocalStorage**（`portfolio-tracker-v1`）
+  - Google 登入：同上作本機快取 + **KV**（`portfolio:user:{userId}`）跨裝置同步
 - **外部 API**（經 Serverless Route 代理，避開 CORS）：
   - 台股即時：TWSE MIS `getStockInfo.jsp`
   - 台股歷史（上市）：TWSE `afterTrading/STOCK_DAY` 月報 API
@@ -24,6 +26,8 @@ app/
   holdings/new/page.tsx    # 新增持倉
   trends/page.tsx          # 價格趨勢圖
   api/
+    auth/[...nextauth]/route.ts  # NextAuth（Google）
+    portfolio/sync/route.ts      # GET/PUT 雲端持倉（需登入）
     fund-nav/route.ts          # 基金最新淨值
     fund-nav/history/route.ts  # 基金歷史淨值
     prices/update/route.ts     # 統一單筆 updatePrice
@@ -37,7 +41,10 @@ lib/
   fund-nav/                # 基金抓取與快取
   portfolio/calculations.ts
   storage/portfolio-store.ts
-providers/                 # ThemeProvider、PortfolioProvider
+  storage/cloud-portfolio.ts
+  storage/parse-portfolio.ts
+auth.ts                    # NextAuth 設定
+providers/                 # SessionProvider、ThemeProvider、PortfolioProvider
 ```
 
 ## 核心型別
@@ -57,6 +64,7 @@ providers/                 # ThemeProvider、PortfolioProvider
 | `POST /api/fund-nav/history` | `{ fundCode, startDate, endDate }` 或 `{ fundCode, range, buyDate? }` |
 | `POST /api/prices/stock-history` | `{ symbol, market?, range }` 或自訂起訖日（僅上市 `tse`） |
 | `POST /api/instruments/lookup` | `{ assetType, symbol, market? }` → 官方名稱（TWSE / 集保） |
+| `GET/PUT /api/portfolio/sync` | 登入使用者雲端持倉（需 `KV_*`） |
 
 - 所有 price routes：`export const maxDuration = 25`、`dynamic = 'force-dynamic'`
 - 錯誤回傳 `{ success: false, error, code, suggestion? }`
@@ -64,7 +72,8 @@ providers/                 # ThemeProvider、PortfolioProvider
 
 ## 前端狀態
 
-- `PortfolioProvider`：讀寫 localStorage、呼叫 batch/update API
+- `SessionProvider` + `PortfolioProvider`：匿名僅 localStorage；登入後 debounce 同步至 `/api/portfolio/sync`
+- 頂部 `AuthMenu`：Google 登入／登出；本機與雲端皆有資料時 `CloudMergeModal`
 - `ThemeProvider`：light / dark / system，寫入 `portfolio-theme`
 - 頂部「更新全部資產」→ `fetchBatchPriceUpdate`
 - 趨勢頁「我的資產」→ `refreshPortfolioForRange(range)` 更新現價並批次載入各持倉歷史；`buildPortfolioTimeline` 加總繪圖
@@ -75,7 +84,7 @@ providers/                 # ThemeProvider、PortfolioProvider
 
 ## 修改時注意
 
-1. **勿將持倉上傳伺服器**（隱私與產品設計）
+1. **持倉上傳伺服器僅在使用者 Google 登入且已設定 KV 時發生**；匿名路徑維持純本機
 2. **批次更新**請維持 `MAX_BATCH_SIZE`，避免超過 Vercel 執行時間
 3. 新增資產類型時：擴充 `AssetType`、`updatePrice()`、表單與 API schema
 4. 圖表使用 **Recharts**；需至少 2 個 `PricePoint` 才繪圖
@@ -89,9 +98,10 @@ pnpm install
 pnpm dev
 ```
 
-## 環境變數（可選）
+## 環境變數
 
-- `KV_REST_API_URL`、`KV_REST_API_TOKEN`：基金淨值跨 instance 快取（`@vercel/kv`）
+- `AUTH_SECRET`、`GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`：Google 登入（見 `.env.example`）
+- `KV_REST_API_URL`、`KV_REST_API_TOKEN`：基金淨值快取 + 登入使用者持倉同步（`@vercel/kv`）
 
 ## 測試建議
 

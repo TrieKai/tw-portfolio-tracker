@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: "%s · 台股基金資產追蹤",
   },
   description:
-    "台股與境內基金持倉管理、自動更新價格、損益與趨勢圖表，資料儲存於本機",
+    "台股與境內基金持倉管理、自動更新價格、損益與趨勢圖表；可匿名本機儲存或 Google 登入雲端同步",
   applicationName: "tw-portfolio-tracker",
 };
 

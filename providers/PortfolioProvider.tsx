@@ -6,8 +6,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { useSession } from "next-auth/react";
+import {
+  CloudMergeModal,
+  portfolioItemCount,
+} from "@/components/auth/CloudMergeModal";
 import {
   canImportHistory,
   fetchHoldingHistoryPoints,
@@ -18,6 +24,10 @@ import {
   holdingToUpdateRequest,
   isPriceError,
 } from "@/lib/client/price-api";
+import {
+  fetchCloudPortfolio,
+  pushCloudPortfolio,
+} from "@/lib/client/portfolio-sync-api";
 import type { ChartRange } from "@/lib/portfolio/chart-date-range";
 import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
 import {
@@ -25,6 +35,7 @@ import {
   computePortfolioSummary,
   sortSalesByDateDesc,
 } from "@/lib/portfolio/calculations";
+import { hasPortfolioData } from "@/lib/storage/parse-portfolio";
 import {
   addHolding,
   applyImportedPriceHistory,
@@ -49,9 +60,16 @@ import type {
 } from "@/lib/types/holding";
 
 type UpdateStatus = "idle" | "loading" | "partial" | "done" | "error";
+export type StorageMode = "anonymous" | "cloud";
+export type SyncStatus = "idle" | "syncing" | "synced" | "error";
+
+const SYNC_DEBOUNCE_MS = 900;
 
 interface PortfolioContextValue {
   ready: boolean;
+  storageMode: StorageMode;
+  syncStatus: SyncStatus;
+  syncMessage: string | null;
   holdings: HoldingWithMetrics[];
   sales: SaleTransaction[];
   summary: PortfolioSummary;
@@ -65,7 +83,6 @@ interface PortfolioContextValue {
   setManualPrice: (id: string, price: number, priceDate: string) => void;
   updateOne: (id: string) => Promise<boolean>;
   updateAll: () => Promise<void>;
-  /** 更新全部現價 + 依區間載入各持倉歷史（趨勢圖用） */
   refreshPortfolioForRange: (range: ChartRange) => Promise<{
     ok: boolean;
     message?: string;
@@ -75,7 +92,6 @@ interface PortfolioContextValue {
     holdingId: string,
     range: ChartRange
   ) => Promise<{ ok: boolean; count?: number; error?: string }>;
-  /** @deprecated 請用 importPriceHistory */
   importFundHistory: (
     holdingId: string,
     range: ChartRange
@@ -86,18 +102,165 @@ interface PortfolioContextValue {
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 
 export function PortfolioProvider({ children }: { children: React.ReactNode }) {
+  const { status: authStatus } = useSession();
+  const isAuthenticated = authStatus === "authenticated";
+
   const [storage, setStorage] = useState<PortfolioStorage | null>(null);
+  const [storageMode, setStorageMode] = useState<StorageMode>("anonymous");
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<UpdateStatus>("idle");
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [mergePrompt, setMergePrompt] = useState<{
+    local: PortfolioStorage;
+    cloud: PortfolioStorage;
+  } | null>(null);
+
+  const cloudUpdatedAtRef = useRef<string | undefined>(undefined);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initGenerationRef = useRef(0);
+
+  const flushCloudSync = useCallback(async (next: PortfolioStorage) => {
+    setSyncStatus("syncing");
+    setSyncMessage(null);
+    const res = await pushCloudPortfolio(next, cloudUpdatedAtRef.current);
+    if (res.ok) {
+      cloudUpdatedAtRef.current = res.updatedAt;
+      setSyncStatus("synced");
+      return;
+    }
+    if (res.status === 409 && res.remote) {
+      cloudUpdatedAtRef.current = res.remote.updatedAt;
+      setStorage(res.remote.portfolio);
+      savePortfolio(res.remote.portfolio);
+      setSyncStatus("synced");
+      setSyncMessage("已套用雲端較新版本");
+      return;
+    }
+    setSyncStatus("error");
+    setSyncMessage(res.error);
+  }, []);
+
+  const scheduleCloudSync = useCallback(
+    (next: PortfolioStorage) => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = setTimeout(() => {
+        void flushCloudSync(next);
+      }, SYNC_DEBOUNCE_MS);
+    },
+    [flushCloudSync]
+  );
+
+  const applyStorage = useCallback(
+    (next: PortfolioStorage, options?: { skipCloud?: boolean }) => {
+      setStorage(next);
+      savePortfolio(next);
+      if (storageMode === "cloud" && isAuthenticated && !options?.skipCloud) {
+        scheduleCloudSync(next);
+      }
+    },
+    [storageMode, isAuthenticated, scheduleCloudSync]
+  );
+
+  const uploadToCloud = useCallback(async (next: PortfolioStorage) => {
+    setSyncStatus("syncing");
+    const res = await pushCloudPortfolio(next);
+    if (res.ok) {
+      cloudUpdatedAtRef.current = res.updatedAt;
+      setSyncStatus("synced");
+      setSyncMessage(null);
+      return true;
+    }
+    setSyncStatus("error");
+    setSyncMessage(res.error);
+    return false;
+  }, []);
+
+  const initCloudStorage = useCallback(async () => {
+    const generation = ++initGenerationRef.current;
+    setSyncStatus("syncing");
+    setSyncMessage("正在載入雲端資料…");
+
+    const local = loadPortfolio();
+    const res = await fetchCloudPortfolio();
+
+    if (generation !== initGenerationRef.current) return;
+
+    if (!res.ok) {
+      setStorageMode("anonymous");
+      setStorage(local);
+      setSyncStatus("error");
+      setSyncMessage(res.error);
+      return;
+    }
+
+    setStorageMode("cloud");
+    const cloud = res.data?.portfolio;
+    const cloudUpdatedAt = res.data?.updatedAt;
+    cloudUpdatedAtRef.current = cloudUpdatedAt;
+
+    if (!cloud || !hasPortfolioData(cloud)) {
+      if (hasPortfolioData(local)) {
+        setStorage(local);
+        savePortfolio(local);
+        await uploadToCloud(local);
+      } else {
+        setStorage(local);
+      }
+      setSyncStatus("synced");
+      setSyncMessage(null);
+      return;
+    }
+
+    if (!hasPortfolioData(local)) {
+      setStorage(cloud);
+      savePortfolio(cloud);
+      setSyncStatus("synced");
+      setSyncMessage(null);
+      return;
+    }
+
+    setMergePrompt({ local, cloud });
+    setStorage(cloud);
+    savePortfolio(cloud);
+    setSyncStatus("synced");
+    setSyncMessage(null);
+  }, [uploadToCloud]);
 
   useEffect(() => {
-    setStorage(loadPortfolio());
+    if (authStatus === "loading") return;
+
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+    initGenerationRef.current += 1;
+
+    if (!isAuthenticated) {
+      setStorageMode("anonymous");
+      setStorage(loadPortfolio());
+      setSyncStatus("idle");
+      setSyncMessage(null);
+      setMergePrompt(null);
+      cloudUpdatedAtRef.current = undefined;
+      return;
+    }
+
+    void initCloudStorage();
+  }, [authStatus, isAuthenticated, initCloudStorage]);
+
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
   }, []);
 
-  const persist = useCallback((next: PortfolioStorage) => {
-    setStorage(next);
-    savePortfolio(next);
-  }, []);
+  const persist = useCallback(
+    (next: PortfolioStorage) => {
+      applyStorage(next);
+    },
+    [applyStorage]
+  );
 
   const holdings = useMemo(
     () => enrichHoldings(storage?.holdings ?? []),
@@ -173,9 +336,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
       const res = await fetchPriceUpdate(holdingToUpdateRequest(holding));
       if (isPriceError(res)) {
-        persist(
-          updateHolding(storage, id, { lastError: res.error })
-        );
+        persist(updateHolding(storage, id, { lastError: res.error }));
         return false;
       }
 
@@ -254,7 +415,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       holdingId: string,
       range: ChartRange
     ): Promise<{ ok: boolean; count?: number; error?: string }> => {
-      if (!storage) return { ok: false, error: "尚未載入本機資料" };
+      if (!storage) return { ok: false, error: "尚未載入資料" };
       const holding = storage.holdings.find((h) => h.id === holdingId);
       if (!holding) return { ok: false, error: "找不到持倉" };
 
@@ -371,9 +532,28 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const importFundHistory = importPriceHistory;
 
+  const handleMergeLocal = useCallback(async () => {
+    if (!mergePrompt) return;
+    const { local } = mergePrompt;
+    setMergePrompt(null);
+    applyStorage(local, { skipCloud: true });
+    await uploadToCloud(local);
+  }, [mergePrompt, applyStorage, uploadToCloud]);
+
+  const handleMergeCloud = useCallback(() => {
+    if (!mergePrompt) return;
+    const { cloud } = mergePrompt;
+    setMergePrompt(null);
+    applyStorage(cloud, { skipCloud: true });
+    void uploadToCloud(cloud);
+  }, [mergePrompt, applyStorage, uploadToCloud]);
+
   const value = useMemo(
     () => ({
-      ready: storage !== null,
+      ready: storage !== null && authStatus !== "loading",
+      storageMode,
+      syncStatus,
+      syncMessage,
       holdings,
       sales,
       summary,
@@ -394,6 +574,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       storage,
+      authStatus,
+      storageMode,
+      syncStatus,
+      syncMessage,
       holdings,
       sales,
       summary,
@@ -415,6 +599,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <PortfolioContext.Provider value={value}>
+      {mergePrompt && (
+        <CloudMergeModal
+          localCount={portfolioItemCount(mergePrompt.local)}
+          cloudCount={portfolioItemCount(mergePrompt.cloud)}
+          onChooseLocal={handleMergeLocal}
+          onChooseCloud={handleMergeCloud}
+          onDismiss={() => setMergePrompt(null)}
+        />
+      )}
       {children}
     </PortfolioContext.Provider>
   );

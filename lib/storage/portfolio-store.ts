@@ -1,9 +1,13 @@
 /**
- * 本地投資組合儲存（LocalStorage）
- * 資料僅存在使用者瀏覽器，不上傳伺服器。
+ * 投資組合儲存（LocalStorage）
+ * 匿名模式僅寫入本機；登入 Google 時另由 API 同步至雲端，本機仍作快取。
  */
 
 import { PORTFOLIO_STORAGE_KEY, MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+import {
+  defaultPortfolioStorage,
+  normalizePortfolioStorage,
+} from "@/lib/storage/parse-portfolio";
 import { normalizeStockSymbol } from "@/lib/prices/stock-symbol";
 import type {
   CreateHoldingInput,
@@ -18,39 +22,16 @@ import type {
   SellHoldingInput,
 } from "@/lib/types/holding";
 
-const DEFAULT_SETTINGS: PortfolioSettings = {
-  autoUpdateEnabled: false,
-  theme: "system",
-};
-
-function defaultStorage(): PortfolioStorage {
-  return {
-    version: 1,
-    holdings: [],
-    priceHistory: {},
-    sales: [],
-    settings: { ...DEFAULT_SETTINGS },
-  };
-}
-
 export function loadPortfolio(): PortfolioStorage {
-  if (typeof window === "undefined") return defaultStorage();
+  if (typeof window === "undefined") return defaultPortfolioStorage();
 
   try {
     const raw = localStorage.getItem(PORTFOLIO_STORAGE_KEY);
-    if (!raw) return defaultStorage();
-    const parsed = JSON.parse(raw) as PortfolioStorage;
-    if (parsed.version !== 1 || !Array.isArray(parsed.holdings)) {
-      return defaultStorage();
-    }
-    return {
-      ...defaultStorage(),
-      ...parsed,
-      sales: Array.isArray(parsed.sales) ? parsed.sales : [],
-      settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
-    };
+    if (!raw) return defaultPortfolioStorage();
+    const parsed = JSON.parse(raw) as unknown;
+    return normalizePortfolioStorage(parsed) ?? defaultPortfolioStorage();
   } catch {
-    return defaultStorage();
+    return defaultPortfolioStorage();
   }
 }
 
