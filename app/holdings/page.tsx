@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { SaleHistoryTable } from "@/components/holdings/SaleHistoryTable";
+import { PortfolioDataPanel } from "@/components/portfolio/PortfolioDataPanel";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { usePortfolio } from "@/providers/PortfolioProvider";
@@ -28,6 +29,8 @@ export default function HoldingsPage() {
         <h2 className="text-lg font-semibold">已實現損益 · 賣出紀錄</h2>
         <SaleHistoryTable sales={sales} />
       </section>
+
+      <PortfolioDataPanel />
     </div>
   );
 }

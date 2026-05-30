@@ -80,6 +80,7 @@ providers/                 # SessionProvider、ThemeProvider、PortfolioProvider
 - 趨勢頁「載入歷史」→ `importPriceHistory`（基金→集保；上市股票→TWSE）
 - 持倉列表「編輯」→ `edit()` / `EditHoldingModal`（類型不可變，可改正規化代號如 00631L）
 - 持倉列表「賣出」→ `sell()` / `SellHoldingModal`；寫入 `storage.sales`（`SaleTransaction`：已實現損益、賣出日等）；部分賣出減少 `quantity`，全部賣出移除持倉
+- 持倉頁「資料備份」→ `PortfolioDataPanel` 匯出／匯入 JSON（`lib/storage/portfolio-export.ts`）；登入時匯入後會觸發雲端同步
 - 總覽「已實現損益」、持倉頁「賣出紀錄」→ 累加／列表 `sales`
 
 ## 修改時注意

@@ -35,6 +35,8 @@ import {
   computePortfolioSummary,
   sortSalesByDateDesc,
 } from "@/lib/portfolio/calculations";
+import { applyImportMode } from "@/lib/storage/portfolio-export";
+import type { PortfolioImportMode } from "@/lib/storage/portfolio-export";
 import { hasPortfolioData } from "@/lib/storage/parse-portfolio";
 import {
   addHolding,
@@ -97,6 +99,11 @@ interface PortfolioContextValue {
     range: ChartRange
   ) => Promise<{ ok: boolean; count?: number; error?: string }>;
   setAutoUpdate: (enabled: boolean) => void;
+  /** 從 JSON 備份匯入（取代或合併） */
+  importPortfolio: (
+    incoming: PortfolioStorage,
+    mode: PortfolioImportMode
+  ) => void;
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
@@ -548,6 +555,18 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     void uploadToCloud(cloud);
   }, [mergePrompt, applyStorage, uploadToCloud]);
 
+  const importPortfolio = useCallback(
+    (incoming: PortfolioStorage, mode: PortfolioImportMode) => {
+      if (!storage) return;
+      const next = applyImportMode(storage, incoming, mode);
+      persist(next);
+      if (storageMode === "cloud" && isAuthenticated) {
+        void uploadToCloud(next);
+      }
+    },
+    [storage, persist, storageMode, isAuthenticated, uploadToCloud]
+  );
+
   const value = useMemo(
     () => ({
       ready: storage !== null && authStatus !== "loading",
@@ -571,6 +590,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importPriceHistory,
       importFundHistory,
       setAutoUpdate,
+      importPortfolio,
     }),
     [
       storage,
@@ -594,6 +614,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importPriceHistory,
       importFundHistory,
       setAutoUpdate,
+      importPortfolio,
     ]
   );
 
