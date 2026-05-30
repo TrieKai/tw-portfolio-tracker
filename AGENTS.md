@@ -72,7 +72,7 @@ providers/                 # SessionProvider、ThemeProvider、PortfolioProvider
 
 ## 前端狀態
 
-- `SessionProvider` + `PortfolioProvider`：匿名僅 localStorage；登入後 debounce 同步至 `/api/portfolio/sync`
+- `SessionProvider` + `PortfolioProvider`：匿名僅 localStorage；登入後每次變更即時同步至 `/api/portfolio/sync`；僅雲端空且本機有資料時詢問是否上傳（可「暫不上傳」記住）
 - 頂部 `AuthMenu`：Google 登入／登出；本機與雲端皆有資料時 `CloudMergeModal`
 - `ThemeProvider`：light / dark / system，寫入 `portfolio-theme`
 - 頂部「更新全部資產」→ `fetchBatchPriceUpdate`

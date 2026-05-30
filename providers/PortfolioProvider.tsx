@@ -10,11 +10,11 @@ import {
   useState,
 } from "react";
 import { useSession } from "next-auth/react";
-import {
-  CloudMergeModal,
-  portfolioItemCount,
-} from "@/components/auth/CloudMergeModal";
 import { CloudUploadPromptModal } from "@/components/auth/CloudUploadPromptModal";
+import {
+  isUploadPromptDismissed,
+  setUploadPromptDismissed,
+} from "@/lib/client/upload-prompt-storage";
 import {
   canImportHistory,
   fetchHoldingHistoryPoints,
@@ -65,8 +65,6 @@ import type {
 type UpdateStatus = "idle" | "loading" | "partial" | "done" | "error";
 export type StorageMode = "anonymous" | "cloud";
 export type SyncStatus = "idle" | "syncing" | "synced" | "error";
-
-const SYNC_DEBOUNCE_MS = 900;
 
 interface PortfolioContextValue {
   ready: boolean;
@@ -122,16 +120,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<UpdateStatus>("idle");
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
-  const [mergePrompt, setMergePrompt] = useState<{
-    local: PortfolioStorage;
-    cloud: PortfolioStorage;
-  } | null>(null);
   const [uploadPrompt, setUploadPrompt] = useState<PortfolioStorage | null>(
     null
   );
 
+  const sessionUserId = session?.user?.id;
   const cloudUpdatedAtRef = useRef<string | undefined>(undefined);
-  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cloudSyncInFlightRef = useRef(false);
+  const cloudSyncPendingRef = useRef<PortfolioStorage | null>(null);
   const initGenerationRef = useRef(0);
 
   const flushCloudSync = useCallback(async (next: PortfolioStorage) => {
@@ -155,12 +151,22 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     setSyncMessage(res.error);
   }, []);
 
-  const scheduleCloudSync = useCallback(
-    (next: PortfolioStorage) => {
-      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-      syncTimerRef.current = setTimeout(() => {
-        void flushCloudSync(next);
-      }, SYNC_DEBOUNCE_MS);
+  /** 登入後每次變更立即寫入雲端；若前一次尚在進行中則排隊最新一份 */
+  const pushCloudSync = useCallback(
+    async (next: PortfolioStorage) => {
+      if (cloudSyncInFlightRef.current) {
+        cloudSyncPendingRef.current = next;
+        return;
+      }
+      cloudSyncInFlightRef.current = true;
+      try {
+        await flushCloudSync(next);
+      } finally {
+        cloudSyncInFlightRef.current = false;
+        const pending = cloudSyncPendingRef.current;
+        cloudSyncPendingRef.current = null;
+        if (pending) void pushCloudSync(pending);
+      }
     },
     [flushCloudSync]
   );
@@ -169,11 +175,11 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     (next: PortfolioStorage, options?: { skipCloud?: boolean }) => {
       setStorage(next);
       savePortfolio(next);
-      if (storageMode === "cloud" && isAuthenticated && !options?.skipCloud) {
-        scheduleCloudSync(next);
+      if (isAuthenticated && !options?.skipCloud) {
+        void pushCloudSync(next);
       }
     },
-    [storageMode, isAuthenticated, scheduleCloudSync]
+    [isAuthenticated, pushCloudSync]
   );
 
   const uploadToCloud = useCallback(async (next: PortfolioStorage) => {
@@ -220,38 +226,28 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     if (!cloud || !hasPortfolioData(cloud)) {
       setStorage(local);
       savePortfolio(local);
-      if (hasPortfolioData(local)) {
+      if (
+        hasPortfolioData(local) &&
+        sessionUserId &&
+        !isUploadPromptDismissed(sessionUserId)
+      ) {
         setUploadPrompt(local);
-        setSyncMessage("雲端尚無資料，可選擇上傳本機持倉");
-      } else {
-        setSyncMessage(null);
       }
-      setSyncStatus("synced");
-      return;
-    }
-
-    if (!hasPortfolioData(local)) {
-      setStorage(cloud);
-      savePortfolio(cloud);
-      setSyncStatus("synced");
       setSyncMessage(null);
+      setSyncStatus("synced");
       return;
     }
 
-    setMergePrompt({ local, cloud });
+    setUploadPrompt(null);
     setStorage(cloud);
     savePortfolio(cloud);
     setSyncStatus("synced");
     setSyncMessage(null);
-  }, [uploadToCloud]);
+  }, [sessionUserId]);
 
   useEffect(() => {
     if (authStatus === "loading") return;
 
-    if (syncTimerRef.current) {
-      clearTimeout(syncTimerRef.current);
-      syncTimerRef.current = null;
-    }
     initGenerationRef.current += 1;
 
     if (!isAuthenticated) {
@@ -259,20 +255,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       setStorage(loadPortfolio());
       setSyncStatus("idle");
       setSyncMessage(null);
-      setMergePrompt(null);
       setUploadPrompt(null);
       cloudUpdatedAtRef.current = undefined;
       return;
     }
 
+    setStorageMode("cloud");
     void initCloudStorage();
   }, [authStatus, isAuthenticated, session?.user?.id, initCloudStorage]);
-
-  useEffect(() => {
-    return () => {
-      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    };
-  }, []);
 
   const persist = useCallback(
     (next: PortfolioStorage) => {
@@ -551,32 +541,13 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const importFundHistory = importPriceHistory;
 
-  const handleMergeLocal = useCallback(async () => {
-    if (!mergePrompt) return;
-    const { local } = mergePrompt;
-    setMergePrompt(null);
-    applyStorage(local, { skipCloud: true });
-    await uploadToCloud(local);
-  }, [mergePrompt, applyStorage, uploadToCloud]);
-
-  const handleMergeCloud = useCallback(() => {
-    if (!mergePrompt) return;
-    const { cloud } = mergePrompt;
-    setMergePrompt(null);
-    applyStorage(cloud, { skipCloud: true });
-    void uploadToCloud(cloud);
-  }, [mergePrompt, applyStorage, uploadToCloud]);
-
   const importPortfolio = useCallback(
     (incoming: PortfolioStorage, mode: PortfolioImportMode) => {
       if (!storage) return;
       const next = applyImportMode(storage, incoming, mode);
       persist(next);
-      if (storageMode === "cloud" && isAuthenticated) {
-        void uploadToCloud(next);
-      }
     },
-    [storage, persist, storageMode, isAuthenticated, uploadToCloud]
+    [storage, persist]
   );
 
   const refreshFromCloud = useCallback(async (): Promise<boolean> => {
@@ -615,8 +586,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     if (!uploadPrompt) return;
     const data = uploadPrompt;
     setUploadPrompt(null);
+    applyStorage(data, { skipCloud: true });
     await uploadToCloud(data);
-  }, [uploadPrompt, uploadToCloud]);
+  }, [uploadPrompt, uploadToCloud, applyStorage]);
+
+  const handleUploadPromptDismiss = useCallback(() => {
+    if (sessionUserId) setUploadPromptDismissed(sessionUserId);
+    setUploadPrompt(null);
+  }, [sessionUserId]);
 
   const value = useMemo(
     () => ({
@@ -677,16 +654,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         <CloudUploadPromptModal
           local={uploadPrompt}
           onUpload={() => void handleUploadPromptConfirm()}
-          onKeepLocalOnly={() => setUploadPrompt(null)}
-        />
-      )}
-      {mergePrompt && (
-        <CloudMergeModal
-          localCount={portfolioItemCount(mergePrompt.local)}
-          cloudCount={portfolioItemCount(mergePrompt.cloud)}
-          onChooseLocal={handleMergeLocal}
-          onChooseCloud={handleMergeCloud}
-          onDismiss={() => setMergePrompt(null)}
+          onKeepLocalOnly={handleUploadPromptDismiss}
         />
       )}
       {children}
