@@ -14,6 +14,7 @@ import {
   CloudMergeModal,
   portfolioItemCount,
 } from "@/components/auth/CloudMergeModal";
+import { CloudUploadPromptModal } from "@/components/auth/CloudUploadPromptModal";
 import {
   canImportHistory,
   fetchHoldingHistoryPoints,
@@ -104,13 +105,16 @@ interface PortfolioContextValue {
     incoming: PortfolioStorage,
     mode: PortfolioImportMode
   ) => void;
+  /** 強制從雲端重新載入（新裝置／同步異常時使用） */
+  refreshFromCloud: () => Promise<boolean>;
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 
 export function PortfolioProvider({ children }: { children: React.ReactNode }) {
-  const { status: authStatus } = useSession();
-  const isAuthenticated = authStatus === "authenticated";
+  const { data: session, status: authStatus } = useSession();
+  const isAuthenticated =
+    authStatus === "authenticated" && !!session?.user?.id;
 
   const [storage, setStorage] = useState<PortfolioStorage | null>(null);
   const [storageMode, setStorageMode] = useState<StorageMode>("anonymous");
@@ -122,6 +126,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     local: PortfolioStorage;
     cloud: PortfolioStorage;
   } | null>(null);
+  const [uploadPrompt, setUploadPrompt] = useState<PortfolioStorage | null>(
+    null
+  );
 
   const cloudUpdatedAtRef = useRef<string | undefined>(undefined);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -194,10 +201,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     if (generation !== initGenerationRef.current) return;
 
     if (!res.ok) {
-      setStorageMode("anonymous");
+      setStorageMode("cloud");
       setStorage(local);
       setSyncStatus("error");
-      setSyncMessage(res.error);
+      setSyncMessage(
+        res.code === "KV_NOT_CONFIGURED"
+          ? `${res.error}（此環境無法跨裝置同步，可用 JSON 匯出／匯入）`
+          : res.error
+      );
       return;
     }
 
@@ -207,15 +218,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     cloudUpdatedAtRef.current = cloudUpdatedAt;
 
     if (!cloud || !hasPortfolioData(cloud)) {
+      setStorage(local);
+      savePortfolio(local);
       if (hasPortfolioData(local)) {
-        setStorage(local);
-        savePortfolio(local);
-        await uploadToCloud(local);
+        setUploadPrompt(local);
+        setSyncMessage("雲端尚無資料，可選擇上傳本機持倉");
       } else {
-        setStorage(local);
+        setSyncMessage(null);
       }
       setSyncStatus("synced");
-      setSyncMessage(null);
       return;
     }
 
@@ -249,12 +260,13 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       setSyncStatus("idle");
       setSyncMessage(null);
       setMergePrompt(null);
+      setUploadPrompt(null);
       cloudUpdatedAtRef.current = undefined;
       return;
     }
 
     void initCloudStorage();
-  }, [authStatus, isAuthenticated, initCloudStorage]);
+  }, [authStatus, isAuthenticated, session?.user?.id, initCloudStorage]);
 
   useEffect(() => {
     return () => {
@@ -567,6 +579,45 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [storage, persist, storageMode, isAuthenticated, uploadToCloud]
   );
 
+  const refreshFromCloud = useCallback(async (): Promise<boolean> => {
+    if (!isAuthenticated) {
+      setSyncMessage("請先登入 Google");
+      setSyncStatus("error");
+      return false;
+    }
+
+    setSyncStatus("syncing");
+    setSyncMessage("正在從雲端載入…");
+    const res = await fetchCloudPortfolio();
+
+    if (!res.ok) {
+      setSyncStatus("error");
+      setSyncMessage(res.error);
+      return false;
+    }
+
+    const cloud = res.data?.portfolio;
+    if (!cloud || !hasPortfolioData(cloud)) {
+      setSyncStatus("error");
+      setSyncMessage("雲端尚無投資組合資料");
+      return false;
+    }
+
+    cloudUpdatedAtRef.current = res.data?.updatedAt;
+    setStorageMode("cloud");
+    applyStorage(cloud, { skipCloud: true });
+    setSyncStatus("synced");
+    setSyncMessage("已從雲端載入最新資料");
+    return true;
+  }, [isAuthenticated, applyStorage]);
+
+  const handleUploadPromptConfirm = useCallback(async () => {
+    if (!uploadPrompt) return;
+    const data = uploadPrompt;
+    setUploadPrompt(null);
+    await uploadToCloud(data);
+  }, [uploadPrompt, uploadToCloud]);
+
   const value = useMemo(
     () => ({
       ready: storage !== null && authStatus !== "loading",
@@ -591,6 +642,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importFundHistory,
       setAutoUpdate,
       importPortfolio,
+      refreshFromCloud,
     }),
     [
       storage,
@@ -615,11 +667,19 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importFundHistory,
       setAutoUpdate,
       importPortfolio,
+      refreshFromCloud,
     ]
   );
 
   return (
     <PortfolioContext.Provider value={value}>
+      {uploadPrompt && (
+        <CloudUploadPromptModal
+          local={uploadPrompt}
+          onUpload={() => void handleUploadPromptConfirm()}
+          onKeepLocalOnly={() => setUploadPrompt(null)}
+        />
+      )}
       {mergePrompt && (
         <CloudMergeModal
           localCount={portfolioItemCount(mergePrompt.local)}

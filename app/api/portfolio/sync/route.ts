@@ -1,4 +1,4 @@
-import { getSessionUserIdFromRequest } from "@/lib/auth/session-user-id";
+import { getSessionUserFromRequest } from "@/lib/auth/session-user-id";
 import {
   createCloudEnvelope,
   getCloudPortfolio,
@@ -30,8 +30,8 @@ function error(
 }
 
 export async function GET(request: Request) {
-  const userId = await getSessionUserIdFromRequest(request);
-  if (!userId) {
+  const user = await getSessionUserFromRequest(request);
+  if (!user) {
     return error(401, "UNAUTHORIZED", "請先登入 Google 帳號");
   }
 
@@ -39,12 +39,12 @@ export async function GET(request: Request) {
     return error(
       503,
       "KV_NOT_CONFIGURED",
-      "雲端同步尚未設定，請在 Vercel 綁定 Redis（KV）並設定環境變數"
+      "雲端同步尚未設定：請在 Vercel 綁定 Upstash Redis，並設定 KV_REST_API_* 或 UPSTASH_REDIS_REST_*"
     );
   }
 
   try {
-    const data = await getCloudPortfolio(userId);
+    const data = await getCloudPortfolio(user.id, user.email);
     const body: PortfolioSyncGetResponse = { success: true, data };
     return NextResponse.json(body);
   } catch {
@@ -53,8 +53,8 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const userId = await getSessionUserIdFromRequest(request);
-  if (!userId) {
+  const user = await getSessionUserFromRequest(request);
+  if (!user) {
     return error(401, "UNAUTHORIZED", "請先登入 Google 帳號");
   }
 
@@ -62,7 +62,7 @@ export async function PUT(request: Request) {
     return error(
       503,
       "KV_NOT_CONFIGURED",
-      "雲端同步尚未設定，請在 Vercel 綁定 Redis（KV）並設定環境變數"
+      "雲端同步尚未設定：請在 Vercel 綁定 Upstash Redis，並設定 KV_REST_API_* 或 UPSTASH_REDIS_REST_*"
     );
   }
 
@@ -92,7 +92,7 @@ export async function PUT(request: Request) {
       : undefined;
 
   try {
-    const existing = await getCloudPortfolio(userId);
+    const existing = await getCloudPortfolio(user.id, user.email);
     if (
       existing &&
       clientUpdatedAt &&
@@ -106,7 +106,7 @@ export async function PUT(request: Request) {
     }
 
     const envelope = createCloudEnvelope(portfolio);
-    await setCloudPortfolio(userId, envelope);
+    await setCloudPortfolio(user.id, envelope, user.email);
     const res: PortfolioSyncPutResponse = {
       success: true,
       updatedAt: envelope.updatedAt,

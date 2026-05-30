@@ -45,12 +45,15 @@ export function setMemoryCache(fundCode: string, data: FundNavData, ttlMs = DEFA
  * 需在 Vercel 專案綁定 KV 並設定 KV_REST_API_URL / KV_REST_API_TOKEN。
  */
 export async function getFromKvCache(fundCode: string): Promise<FundNavData | null> {
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
+  const { getKvRestConfig } = await import("@/lib/storage/kv-config");
+  const config = getKvRestConfig();
+  if (!config) {
     return null;
   }
 
   try {
-    const { kv } = await import("@vercel/kv");
+    const { createClient } = await import("@vercel/kv");
+    const kv = createClient(config);
     const cached = await kv.get<FundNavData>(buildCacheKey(fundCode));
     if (!cached) return null;
     return { ...cached, cached: true };
@@ -65,12 +68,15 @@ export async function setKvCache(
   data: FundNavData,
   ttlSeconds = DEFAULT_TTL_MS / 1000
 ): Promise<void> {
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
+  const { getKvRestConfig } = await import("@/lib/storage/kv-config");
+  const config = getKvRestConfig();
+  if (!config) {
     return;
   }
 
   try {
-    const { kv } = await import("@vercel/kv");
+    const { createClient } = await import("@vercel/kv");
+    const kv = createClient(config);
     await kv.set(buildCacheKey(fundCode), data, { ex: ttlSeconds });
   } catch {
     // 寫入失敗不影響主流程

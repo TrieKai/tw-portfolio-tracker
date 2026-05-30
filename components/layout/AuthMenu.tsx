@@ -5,7 +5,8 @@ import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export function AuthMenu() {
   const { data: session, status } = useSession();
-  const { syncStatus, syncMessage, storageMode } = usePortfolio();
+  const { syncStatus, syncMessage, storageMode, refreshFromCloud } =
+    usePortfolio();
 
   const loading = status === "loading";
   const signedIn = status === "authenticated" && !!session?.user;
@@ -57,6 +58,15 @@ export function AuthMenu() {
           </span>
         )}
       </div>
+      <button
+        type="button"
+        onClick={() => void refreshFromCloud()}
+        disabled={syncStatus === "syncing"}
+        className="touch-target hidden rounded-lg border border-border px-2.5 py-2 text-xs text-muted transition hover:bg-surface-raised hover:text-foreground disabled:opacity-50 sm:inline-block sm:px-3 sm:text-sm"
+        title="從雲端重新載入持倉"
+      >
+        雲端載入
+      </button>
       <button
         type="button"
         onClick={() => signOut({ callbackUrl: "/" })}

@@ -18,7 +18,8 @@ interface ImportConfirmState {
 }
 
 export function PortfolioDataPanel() {
-  const { storage, storageMode, importPortfolio } = usePortfolio();
+  const { storage, storageMode, importPortfolio, refreshFromCloud } =
+    usePortfolio();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{
     type: "ok" | "error";
@@ -107,6 +108,15 @@ export function PortfolioDataPanel() {
           >
             匯入 JSON
           </button>
+          {storageMode === "cloud" && (
+            <button
+              type="button"
+              onClick={() => void refreshFromCloud()}
+              className="touch-target rounded-lg border border-accent/40 bg-accent-dim/20 px-4 py-2.5 text-sm font-medium text-accent hover:bg-accent-dim/40"
+            >
+              從雲端載入
+            </button>
+          )}
           <input
             ref={fileInputRef}
             type="file"
