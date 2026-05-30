@@ -162,10 +162,12 @@ export function buildHoldingLotSummaries(
 /**
  * 建立投資組合每日資產曲線（分筆買入日／買入價）
  */
-export function buildPortfolioTimeline(
+/** 建立投資組合每日資產曲線，並篩選至 [startDate, endDate] */
+export function buildPortfolioTimelineBetween(
   holdings: Holding[],
   priceHistory: PriceHistoryMap,
-  range: ChartRange
+  startDate: string,
+  endDate: string
 ): PortfolioTimelinePoint[] {
   if (holdings.length === 0) return [];
 
@@ -247,9 +249,22 @@ export function buildPortfolioTimeline(
     });
   }
 
-  const { startDate, endDate } = chartRangeToIsoDates(range);
   return rawPoints.filter(
     (p) => p.date >= startDate && p.date <= endDate
+  );
+}
+
+export function buildPortfolioTimeline(
+  holdings: Holding[],
+  priceHistory: PriceHistoryMap,
+  range: ChartRange
+): PortfolioTimelinePoint[] {
+  const { startDate, endDate } = chartRangeToIsoDates(range);
+  return buildPortfolioTimelineBetween(
+    holdings,
+    priceHistory,
+    startDate,
+    endDate
   );
 }
 

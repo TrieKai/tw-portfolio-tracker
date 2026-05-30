@@ -1,5 +1,6 @@
 "use client";
 
+import { formatCurrentMonthZh } from "@/lib/date/iso-date";
 import {
   formatCurrency,
   formatPercent,
@@ -9,9 +10,13 @@ import type { PortfolioSummary as Summary } from "@/lib/types/holding";
 export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
   const unrealizedPositive = summary.totalPnl >= 0;
   const realizedPositive = summary.totalRealizedPnl >= 0;
+  const monthlyUnrealizedPositive =
+    summary.monthlyUnrealizedPnl !== null && summary.monthlyUnrealizedPnl >= 0;
+  const monthlyRealizedPositive = summary.monthlyRealizedPnl >= 0;
+  const monthLabel = formatCurrentMonthZh();
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
       <StatCard label="總資產" value={formatCurrency(summary.totalValue)} />
       <StatCard
         label="總成本"
@@ -37,6 +42,36 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
         label="未實現報酬率"
         value={formatPercent(summary.totalReturnRate)}
         highlight={unrealizedPositive ? "gain" : "loss"}
+      />
+      <StatCard
+        label="月未實現"
+        value={
+          summary.monthlyUnrealizedPnl !== null
+            ? formatCurrency(summary.monthlyUnrealizedPnl)
+            : "—"
+        }
+        sub={
+          summary.monthlyUnrealizedPnl !== null
+            ? `${monthLabel} · 相對月初`
+            : `${monthLabel} · 請載入價格歷史`
+        }
+        highlight={
+          summary.monthlyUnrealizedPnl !== null
+            ? monthlyUnrealizedPositive
+              ? "gain"
+              : "loss"
+            : undefined
+        }
+      />
+      <StatCard
+        label="月已實現"
+        value={formatCurrency(summary.monthlyRealizedPnl)}
+        sub={
+          summary.monthlySaleCount > 0
+            ? `${monthLabel} · ${summary.monthlySaleCount} 筆賣出`
+            : `${monthLabel} · 本月尚無賣出`
+        }
+        highlight={monthlyRealizedPositive ? "gain" : "loss"}
       />
     </div>
   );

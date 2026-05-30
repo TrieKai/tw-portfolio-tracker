@@ -7,6 +7,8 @@ import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { formatCurrentMonthZh } from "@/lib/date/iso-date";
+import { formatCurrency } from "@/lib/portfolio/calculations";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export default function DashboardPage() {
@@ -48,7 +50,33 @@ export default function DashboardPage() {
               <span>{summary.fundValue.toLocaleString("zh-TW")} 元</span>
             </li>
             <li className="flex justify-between border-t border-border/60 pt-2">
-              <span className="text-muted">已實現損益</span>
+              <span className="text-muted">月未實現（{formatCurrentMonthZh()}）</span>
+              <span
+                className={
+                  summary.monthlyUnrealizedPnl === null
+                    ? "text-muted"
+                    : summary.monthlyUnrealizedPnl >= 0
+                      ? "text-gain"
+                      : "text-loss"
+                }
+              >
+                {summary.monthlyUnrealizedPnl !== null
+                  ? formatCurrency(summary.monthlyUnrealizedPnl)
+                  : "—"}
+              </span>
+            </li>
+            <li className="flex justify-between">
+              <span className="text-muted">月已實現（{formatCurrentMonthZh()}）</span>
+              <span
+                className={
+                  summary.monthlyRealizedPnl >= 0 ? "text-gain" : "text-loss"
+                }
+              >
+                {formatCurrency(summary.monthlyRealizedPnl)}
+              </span>
+            </li>
+            <li className="flex justify-between">
+              <span className="text-muted">累計已實現</span>
               <span
                 className={
                   summary.totalRealizedPnl >= 0 ? "text-gain" : "text-loss"

@@ -110,8 +110,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   );
 
   const summary = useMemo(
-    () => computePortfolioSummary(holdings, storage?.sales ?? []),
-    [holdings, storage?.sales]
+    () =>
+      computePortfolioSummary(holdings, storage?.sales ?? [], {
+        holdingsForTimeline: storage?.holdings ?? [],
+        priceHistory: storage?.priceHistory ?? {},
+      }),
+    [holdings, storage?.sales, storage?.holdings, storage?.priceHistory]
   );
 
   const add = useCallback(

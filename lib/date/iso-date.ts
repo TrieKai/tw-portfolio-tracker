@@ -24,6 +24,26 @@ export function todayIsoDate(): string {
   return toIsoDate(new Date());
 }
 
+/** 當月第一天 ISO YYYY-MM-DD */
+export function startOfMonthIso(ref: Date = new Date()): string {
+  return toIsoDate(new Date(ref.getFullYear(), ref.getMonth(), 1));
+}
+
+/** 當月 YYYY-MM（供 sellDate 前綴比對） */
+export function currentYearMonthPrefix(ref: Date = new Date()): string {
+  const y = ref.getFullYear();
+  const m = String(ref.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+/** 當月顯示用，例如「2025年5月」 */
+export function formatCurrentMonthZh(ref: Date = new Date()): string {
+  return new Intl.DateTimeFormat("zh-TW", {
+    year: "numeric",
+    month: "long",
+  }).format(ref);
+}
+
 /** 顯示用：2025年5月24日 */
 export function formatIsoDateZh(iso: string): string {
   const date = parseIsoDate(iso);

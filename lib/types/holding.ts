@@ -123,6 +123,15 @@ export interface PortfolioSummary {
   totalReturnRate: number;
   /** 累計已實現損益（歷次賣出） */
   totalRealizedPnl: number;
+  /** 本月已實現損益（sellDate 落在當月） */
+  monthlyRealizedPnl: number;
+  /** 本月賣出筆數 */
+  monthlySaleCount: number;
+  /**
+   * 本月未實現損益變化（當月末日相對月初第一個可計算日的 pnl 差）
+   * 無法推算時為 null（例如本月尚無價格歷史）
+   */
+  monthlyUnrealizedPnl: number | null;
   saleCount: number;
   stockValue: number;
   fundValue: number;
