@@ -1,5 +1,3 @@
-@import "react-day-picker/style.css";
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -79,6 +77,23 @@
   .input-field:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+
+  .input-field[type="date"] {
+    color-scheme: light;
+  }
+
+  .dark .input-field[type="date"] {
+    color-scheme: dark;
+  }
+
+  .input-field[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.55;
+  }
+
+  .input-field[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 0.85;
   }
 
   .btn-primary {
@@ -165,61 +180,4 @@
   .hover\:bg-accent-muted:hover {
     background-color: var(--accent-muted);
   }
-}
-
-/* DatePicker（react-day-picker）深淺色主題 */
-.datepicker-popover .rdp-root {
-  --rdp-accent-color: var(--accent);
-  --rdp-accent-background-color: var(--accent-dim);
-  --rdp-day-height: 2.25rem;
-  --rdp-day-width: 2.25rem;
-  color: var(--foreground);
-}
-
-.datepicker-popover .rdp-month-caption {
-  font-weight: 600;
-  font-size: 0.875rem;
-}
-
-.datepicker-popover .rdp-nav-btn {
-  border-radius: 0.5rem;
-  color: var(--muted);
-}
-
-.datepicker-popover .rdp-nav-btn:hover {
-  background: var(--surface-raised);
-  color: var(--foreground);
-}
-
-.datepicker-popover .rdp-weekday {
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.datepicker-popover .rdp-day-btn {
-  border-radius: 0.5rem;
-  font-size: 0.875rem;
-}
-
-.datepicker-popover .rdp-day-btn:hover:not(:disabled) {
-  background: var(--surface-raised);
-}
-
-.datepicker-popover .rdp-selected .rdp-day-btn {
-  background: var(--accent);
-  color: #fff;
-}
-
-.datepicker-popover .rdp-today:not(.rdp-selected) .rdp-day-btn {
-  font-weight: 700;
-  color: var(--accent);
-}
-
-.datepicker-popover .rdp-outside .rdp-day-btn {
-  color: var(--muted);
-  opacity: 0.45;
-}
-
-.datepicker-popover .rdp-disabled .rdp-day-btn {
-  opacity: 0.35;
 }
