@@ -4,6 +4,9 @@
 
 import type { AssetType, StockMarket } from "./holding";
 
+/** 單次 /api/prices/batch 最多筆數（避免超過 Serverless 執行時間） */
+export const MAX_BATCH_SIZE = 15;
+
 /** 統一價格更新請求 */
 export interface UpdatePriceRequest {
   assetType: AssetType;

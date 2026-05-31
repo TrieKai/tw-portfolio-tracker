@@ -17,6 +17,7 @@ import {
 } from "@/lib/client/upload-prompt-storage";
 import {
   canImportHistory,
+  fetchHistoryForHoldings,
   fetchHoldingHistoryPoints,
 } from "@/lib/client/holding-history";
 import {
@@ -490,20 +491,19 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       let historyFail = 0;
       let historySkip = 0;
 
-      for (const h of next.holdings) {
-        if (!canImportHistory(h)) {
-          historySkip++;
-          continue;
-        }
-        try {
-          const points = await fetchHoldingHistoryPoints(h, range);
-          next = applyImportedPriceHistory(next, h.id, points);
+      const importable = next.holdings.filter(canImportHistory);
+      historySkip = next.holdings.length - importable.length;
+
+      const historyResults = await fetchHistoryForHoldings(importable, range);
+      for (const result of historyResults) {
+        if (result.ok) {
+          next = applyImportedPriceHistory(next, result.holdingId, result.points);
           historyOk++;
-        } catch (error) {
+        } else {
+          next = updateHolding(next, result.holdingId, {
+            lastError: result.error,
+          });
           historyFail++;
-          const message =
-            error instanceof Error ? error.message : "載入歷史失敗";
-          next = updateHolding(next, h.id, { lastError: message });
         }
       }
 

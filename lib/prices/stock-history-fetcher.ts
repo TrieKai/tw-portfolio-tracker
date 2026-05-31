@@ -5,7 +5,7 @@
  * 上櫃（OTC）官方 API 目前無穩定公開端點，請改用手動更新或僅支援上市。
  */
 
-import { FetchRetryError } from "@/lib/http/fetch-with-retry";
+import { FetchRetryError, fetchWithRetry } from "@/lib/http/fetch-with-retry";
 import {
   chartRangeToIsoDates,
   listMonthFirstDaysIso,
@@ -35,6 +35,14 @@ const COL = { DATE: 0, CLOSE: 6 } as const;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** 單次請求最多抓幾個月（一年約 12～13 個月） */
 const MAX_MONTHS_PER_REQUEST = 14;
+/** TWSE 回傳空資料時的重試次數（常見於短時間大量請求） */
+const EMPTY_MONTH_RETRIES = 3;
+/** 連續月份請求間隔（毫秒） */
+const INTER_MONTH_DELAY_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class StockHistoryFetchError extends Error {
   constructor(
@@ -73,44 +81,58 @@ function parseClosePrice(raw: string | undefined): number | null {
 
 async function fetchOneMonth(
   stockNo: string,
-  monthFirstYmd: string,
-  signal?: AbortSignal
+  monthFirstYmd: string
 ): Promise<StockPriceHistoryPoint[]> {
   const url = `${TWSE_STOCK_DAY_URL}?date=${monthFirstYmd}&stockNo=${encodeURIComponent(stockNo)}&response=json`;
 
-  const response = await fetch(url, {
-    headers: TWSE_HEADERS,
-    signal,
-    cache: "no-store",
-  });
+  for (let attempt = 1; attempt <= EMPTY_MONTH_RETRIES; attempt++) {
+    try {
+      const response = await fetchWithRetry(url, {
+        headers: TWSE_HEADERS,
+        timeoutMs: REQUEST_TIMEOUT_MS,
+        maxRetries: 3,
+      });
 
-  if (!response.ok) {
-    throw new StockHistoryFetchError(
-      `TWSE 月報 HTTP ${response.status}`,
-      "UPSTREAM_HTTP_ERROR"
-    );
-  }
+      const json = (await response.json()) as {
+        stat?: string;
+        data?: string[][];
+      };
 
-  const json = (await response.json()) as {
-    stat?: string;
-    data?: string[][];
-  };
+      if (json.stat !== "OK" || !Array.isArray(json.data)) {
+        if (attempt < EMPTY_MONTH_RETRIES) {
+          await sleep(400 * attempt);
+          continue;
+        }
+        return [];
+      }
 
-  if (json.stat !== "OK" || !Array.isArray(json.data)) {
-    return [];
-  }
+      const points: StockPriceHistoryPoint[] = [];
 
-  const points: StockPriceHistoryPoint[] = [];
+      for (const row of json.data) {
+        const iso = rocDateToIso(row[COL.DATE]);
+        const price = parseClosePrice(row[COL.CLOSE]);
+        if (iso && price !== null) {
+          points.push({ date: iso, price });
+        }
+      }
 
-  for (const row of json.data) {
-    const iso = rocDateToIso(row[COL.DATE]);
-    const price = parseClosePrice(row[COL.CLOSE]);
-    if (iso && price !== null) {
-      points.push({ date: iso, price });
+      return points;
+    } catch (error) {
+      if (
+        error instanceof FetchRetryError &&
+        error.code === "UPSTREAM_HTTP_ERROR"
+      ) {
+        throw new StockHistoryFetchError(error.message, "UPSTREAM_HTTP_ERROR");
+      }
+      if (attempt < EMPTY_MONTH_RETRIES) {
+        await sleep(400 * attempt);
+        continue;
+      }
+      throw error;
     }
   }
 
-  return points;
+  return [];
 }
 
 /**
@@ -146,23 +168,9 @@ export async function fetchStockPriceHistory(
 
     try {
       for (const monthYmd of months) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(
-          () => controller.abort(),
-          REQUEST_TIMEOUT_MS
-        );
-
-        try {
-          const monthPoints = await fetchOneMonth(
-            stockNo,
-            monthYmd,
-            controller.signal
-          );
-          bucket.push(...monthPoints);
-          await new Promise((r) => setTimeout(r, 120));
-        } finally {
-          clearTimeout(timeoutId);
-        }
+        const monthPoints = await fetchOneMonth(stockNo, monthYmd);
+        bucket.push(...monthPoints);
+        await sleep(INTER_MONTH_DELAY_MS);
       }
 
       if (bucket.length > 0) {

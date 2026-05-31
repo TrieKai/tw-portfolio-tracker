@@ -6,10 +6,12 @@ import type { ChartRange } from "@/lib/portfolio/calculations";
 import type { FundNavHistoryData } from "@/lib/fund-nav/types";
 import type { StockPriceHistoryData } from "@/lib/prices/stock-history-types";
 import type { Holding } from "@/lib/types/holding";
-import type {
-  BatchUpdateResponse,
-  UpdatePriceRequest,
-  UpdatePriceResponse,
+import {
+  MAX_BATCH_SIZE,
+  type BatchUpdateItemResult,
+  type BatchUpdateResponse,
+  type UpdatePriceRequest,
+  type UpdatePriceResponse,
 } from "@/lib/types/price-api";
 
 export interface FundNavHistorySuccess {
@@ -50,20 +52,47 @@ export function holdingToUpdateRequest(h: Holding): UpdatePriceRequest {
 export async function fetchBatchPriceUpdate(
   holdings: Holding[]
 ): Promise<BatchUpdateResponse> {
-  const res = await fetch("/api/prices/batch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      items: holdings.map((h) => ({
-        holdingId: h.id,
-        assetType: h.assetType,
-        symbol: h.symbol,
-        market: h.market,
-        name: h.name,
-      })),
-    }),
-  });
-  return res.json() as Promise<BatchUpdateResponse>;
+  if (holdings.length === 0) {
+    return {
+      success: false,
+      results: [],
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  const allResults: BatchUpdateItemResult[] = [];
+  let updatedAt = new Date().toISOString();
+
+  for (let i = 0; i < holdings.length; i += MAX_BATCH_SIZE) {
+    const chunk = holdings.slice(i, i + MAX_BATCH_SIZE);
+    const res = await fetch("/api/prices/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: chunk.map((h) => ({
+          holdingId: h.id,
+          assetType: h.assetType,
+          symbol: h.symbol,
+          market: h.market,
+          name: h.name,
+        })),
+      }),
+    });
+    const batch = (await res.json()) as BatchUpdateResponse & {
+      error?: string;
+    };
+    if (!res.ok || !Array.isArray(batch.results)) {
+      throw new Error(batch.error ?? `批次更新失敗 (${res.status})`);
+    }
+    allResults.push(...batch.results);
+    updatedAt = batch.updatedAt;
+  }
+
+  return {
+    success: allResults.some((r) => r.ok),
+    results: allResults,
+    updatedAt,
+  };
 }
 
 export function isPriceError(

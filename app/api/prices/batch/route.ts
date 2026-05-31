@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { updatePrice, UpdatePriceError } from "@/lib/prices/update-price";
-import type {
-  BatchUpdateItemResult,
-  BatchUpdateResponse,
+import {
+  MAX_BATCH_SIZE,
+  type BatchUpdateItemResult,
+  type BatchUpdateResponse,
 } from "@/lib/types/price-api";
 
 export const maxDuration = 25;
 export const dynamic = "force-dynamic";
-
-/** 單次批次最多更新筆數，避免超過 Serverless 執行時間 */
-const MAX_BATCH_SIZE = 15;
 
 const itemSchema = z.object({
   holdingId: z.string().min(1),
