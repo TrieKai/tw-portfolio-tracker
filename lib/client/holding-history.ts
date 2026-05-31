@@ -12,8 +12,9 @@ import {
   isStockHistoryError,
 } from "./price-api";
 
-/** 是否可自動載入歷史（上櫃股票除外） */
+/** 是否可自動載入歷史（上櫃股票、房子除外） */
 export function canImportHistory(holding: Holding): boolean {
+  if (holding.assetType === "property") return false;
   if (holding.assetType === "fund") return true;
   return holding.market !== "otc";
 }

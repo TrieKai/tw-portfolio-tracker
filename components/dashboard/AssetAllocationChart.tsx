@@ -11,7 +11,7 @@ import {
 import { formatCurrency } from "@/lib/portfolio/calculations";
 import type { PortfolioSummary } from "@/lib/types/holding";
 
-const COLORS = ["#10b981", "#3b82f6"];
+const COLORS = ["#10b981", "#3b82f6", "#f59e0b"];
 
 export function AssetAllocationChart({
   summary,
@@ -21,6 +21,7 @@ export function AssetAllocationChart({
   const data = [
     { name: "台股", value: summary.stockValue },
     { name: "基金", value: summary.fundValue },
+    { name: "房子", value: summary.propertyValue },
   ].filter((d) => d.value > 0);
 
   if (data.length === 0) {

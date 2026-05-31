@@ -4,6 +4,7 @@ import { FormEvent, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
 import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
+import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import type { HoldingWithMetrics, SellHoldingInput } from "@/lib/types/holding";
 
 export function SellHoldingModal({
@@ -15,7 +16,7 @@ export function SellHoldingModal({
   onSave: (input: SellHoldingInput) => void;
   onClose: () => void;
 }) {
-  const unitLabel = holding.assetType === "stock" ? "股" : "單位";
+  const unitLabel = getSellUnitLabel(holding.assetType);
   const [quantity, setQuantity] = useState(String(holding.quantity));
   const [sellPrice, setSellPrice] = useState(
     holding.currentPrice !== undefined ? String(holding.currentPrice) : ""

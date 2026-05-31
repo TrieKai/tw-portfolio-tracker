@@ -3,6 +3,7 @@
  */
 
 import type { ChartRange } from "@/lib/portfolio/calculations";
+import { supportsAutoPriceUpdate } from "@/lib/portfolio/asset-labels";
 import type { FundNavHistoryData } from "@/lib/fund-nav/types";
 import type { StockPriceHistoryData } from "@/lib/prices/stock-history-types";
 import type { Holding } from "@/lib/types/holding";
@@ -52,7 +53,8 @@ export function holdingToUpdateRequest(h: Holding): UpdatePriceRequest {
 export async function fetchBatchPriceUpdate(
   holdings: Holding[]
 ): Promise<BatchUpdateResponse> {
-  if (holdings.length === 0) {
+  const autoPriced = holdings.filter((h) => supportsAutoPriceUpdate(h.assetType));
+  if (autoPriced.length === 0) {
     return {
       success: false,
       results: [],
@@ -63,8 +65,8 @@ export async function fetchBatchPriceUpdate(
   const allResults: BatchUpdateItemResult[] = [];
   let updatedAt = new Date().toISOString();
 
-  for (let i = 0; i < holdings.length; i += MAX_BATCH_SIZE) {
-    const chunk = holdings.slice(i, i + MAX_BATCH_SIZE);
+  for (let i = 0; i < autoPriced.length; i += MAX_BATCH_SIZE) {
+    const chunk = autoPriced.slice(i, i + MAX_BATCH_SIZE);
     const res = await fetch("/api/prices/batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -5,6 +5,9 @@ import {
   formatPercent,
   formatQuotePrice,
 } from "@/lib/portfolio/calculations";
+import {
+  supportsAutoPriceUpdate,
+} from "@/lib/portfolio/asset-labels";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
 
 /** 單筆買入明細（展開列）：買入資訊 + 操作按鈕 */
@@ -81,14 +84,16 @@ export function HoldingLotDetailPanel({
       </dl>
 
       <div className="flex flex-wrap gap-1">
-        <button
-          type="button"
-          disabled={updatingId === lot.id}
-          onClick={() => onRefresh(lot.id)}
-          className="btn-secondary text-xs py-1 px-2"
-        >
-          {updatingId === lot.id ? "…" : "更新"}
-        </button>
+        {supportsAutoPriceUpdate(lot.assetType) && (
+          <button
+            type="button"
+            disabled={updatingId === lot.id}
+            onClick={() => onRefresh(lot.id)}
+            className="btn-secondary text-xs py-1 px-2"
+          >
+            {updatingId === lot.id ? "…" : "更新"}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onEdit(lot.id)}
@@ -108,7 +113,7 @@ export function HoldingLotDetailPanel({
           onClick={() => onManual(lot.id)}
           className="btn-secondary text-xs py-1 px-2"
         >
-          手動
+          {lot.assetType === "property" ? "估價" : "手動"}
         </button>
         <button
           type="button"

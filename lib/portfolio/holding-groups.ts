@@ -10,8 +10,13 @@ import type {
   StockMarket,
 } from "@/lib/types/holding";
 
-/** 合併分組鍵 */
-export function holdingGroupKey(h: Pick<Holding, "assetType" | "symbol" | "market">): string {
+/** 合併分組鍵（房子每筆獨立顯示，不合併） */
+export function holdingGroupKey(
+  h: Pick<Holding, "id" | "assetType" | "symbol" | "market">
+): string {
+  if (h.assetType === "property") {
+    return `property:${h.id}`;
+  }
   const symbol =
     h.assetType === "stock"
       ? normalizeStockSymbol(h.symbol)

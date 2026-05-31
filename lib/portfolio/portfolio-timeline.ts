@@ -38,6 +38,7 @@ export interface PortfolioTimelinePoint {
   returnRate: number;
   stockValue: number;
   fundValue: number;
+  propertyValue: number;
   pricedHoldings: number;
   activeHoldings: number;
   /** 當日新買入的持倉名稱 */
@@ -186,6 +187,7 @@ export function buildPortfolioTimelineBetween(
     let totalCost = 0;
     let stockValue = 0;
     let fundValue = 0;
+    let propertyValue = 0;
     let pricedHoldings = 0;
 
     for (const h of holdings) {
@@ -206,7 +208,8 @@ export function buildPortfolioTimelineBetween(
       totalCost += costBasis;
       totalValue += marketValue;
       if (h.assetType === "stock") stockValue += marketValue;
-      else fundValue += marketValue;
+      else if (h.assetType === "fund") fundValue += marketValue;
+      else propertyValue += marketValue;
 
       if (hasMarketPrice) pricedHoldings++;
 
@@ -241,6 +244,7 @@ export function buildPortfolioTimelineBetween(
       returnRate,
       stockValue,
       fundValue,
+      propertyValue,
       pricedHoldings,
       activeHoldings: snapshots.length,
       newHoldings,

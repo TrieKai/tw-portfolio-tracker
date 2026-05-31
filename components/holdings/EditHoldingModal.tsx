@@ -4,6 +4,11 @@ import { FormEvent, useState } from "react";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
 import type { EditHoldingInput } from "@/lib/types/holding";
 import { isValidStockSymbolInput } from "@/lib/prices/stock-symbol";
+import {
+  getAssetTypeLabel,
+  getBuyPriceLabel,
+  getQuantityLabel,
+} from "@/lib/portfolio/asset-labels";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
 import {
@@ -21,6 +26,7 @@ export function EditHoldingModal({
   onClose: () => void;
 }) {
   const [symbol, setSymbol] = useState(holding.symbol);
+  const [propertyName, setPropertyName] = useState(holding.name);
   const [resolvedName, setResolvedName] = useState(holding.name);
   const [market, setMarket] = useState(holding.market ?? "tse");
   const [buyPrice, setBuyPrice] = useState(String(holding.buyPrice));
@@ -30,6 +36,7 @@ export function EditHoldingModal({
   const [submitting, setSubmitting] = useState(false);
 
   const isStock = holding.assetType === "stock";
+  const isProperty = holding.assetType === "property";
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -38,20 +45,39 @@ export function EditHoldingModal({
     const price = Number.parseFloat(buyPrice);
     const qty = Number.parseFloat(quantity);
 
-    if (!symbol.trim()) {
+    if (isProperty) {
+      if (!propertyName.trim()) {
+        setError("請輸入房產名稱或地址");
+        return;
+      }
+    } else if (!symbol.trim()) {
       setError("請輸入代號");
       return;
     }
+
     if (isStock && !isValidStockSymbolInput(symbol)) {
       setError("股票代號格式無效（例：2330、00878、00631L）");
       return;
     }
     if (Number.isNaN(price) || price <= 0) {
-      setError("買入價格無效");
+      setError(`${getBuyPriceLabel(holding.assetType)}無效`);
       return;
     }
     if (Number.isNaN(qty) || qty <= 0) {
       setError("數量無效");
+      return;
+    }
+
+    if (isProperty) {
+      onSave({
+        id: holding.id,
+        assetType: "property",
+        name: propertyName.trim(),
+        symbol: symbol.trim(),
+        buyPrice: price,
+        quantity: qty,
+        buyDate,
+      });
       return;
     }
 
@@ -98,29 +124,51 @@ export function EditHoldingModal({
           編輯持倉
         </h3>
         <p className="text-sm text-muted">
-          {isStock ? "台股" : "境內基金"} · 類型不可變更 · 名稱由代號自動查詢
+          {getAssetTypeLabel(holding.assetType)} · 類型不可變更
+          {isProperty ? " · 名稱自行填寫" : " · 名稱由代號自動查詢"}
         </p>
 
-        <Field label={isStock ? "股票代號" : "基金代碼"} required>
-          <input
-            value={symbol}
-            onChange={(e) =>
-              setSymbol(
-                isStock ? e.target.value.toUpperCase() : e.target.value
-              )
-            }
-            className="input-field font-mono"
-            inputMode={isStock ? "text" : "numeric"}
-          />
-        </Field>
+        {isProperty ? (
+          <>
+            <Field label="房產名稱或地址" required>
+              <input
+                value={propertyName}
+                onChange={(e) => setPropertyName(e.target.value)}
+                className="input-field"
+              />
+            </Field>
+            <Field label="代號（選填）">
+              <input
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value)}
+                className="input-field font-mono"
+              />
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label={isStock ? "股票代號" : "基金代碼"} required>
+              <input
+                value={symbol}
+                onChange={(e) =>
+                  setSymbol(
+                    isStock ? e.target.value.toUpperCase() : e.target.value
+                  )
+                }
+                className="input-field font-mono"
+                inputMode={isStock ? "text" : "numeric"}
+              />
+            </Field>
 
-        <ResolvedInstrumentName
-          assetType={holding.assetType}
-          symbol={symbol}
-          market={market}
-          initialName={holding.name}
-          onResolved={(name) => setResolvedName(name)}
-        />
+            <ResolvedInstrumentName
+              assetType={holding.assetType}
+              symbol={symbol}
+              market={market}
+              initialName={holding.name}
+              onResolved={(name) => setResolvedName(name)}
+            />
+          </>
+        )}
 
         {isStock && (
           <Field label="市場">
@@ -138,7 +186,7 @@ export function EditHoldingModal({
         )}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="買入價格" required>
+          <Field label={getBuyPriceLabel(holding.assetType)} required>
             <input
               type="number"
               step="any"
@@ -148,7 +196,7 @@ export function EditHoldingModal({
               className="input-field"
             />
           </Field>
-          <Field label={isStock ? "股數" : "單位數"} required>
+          <Field label={getQuantityLabel(holding.assetType)} required>
             <input
               type="number"
               step="any"
@@ -188,7 +236,7 @@ export function EditHoldingModal({
           </button>
         </div>
 
-        {resolvedName && (
+        {!isProperty && resolvedName && (
           <p className="text-center text-xs text-muted">
             將以「{resolvedName}」儲存
           </p>

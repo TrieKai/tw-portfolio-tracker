@@ -84,12 +84,14 @@ export function computePortfolioSummary(
   let totalValue = 0;
   let stockValue = 0;
   let fundValue = 0;
+  let propertyValue = 0;
 
   for (const h of holdings) {
     totalCost += h.costBasis;
     totalValue += h.marketValue;
     if (h.assetType === "stock") stockValue += h.marketValue;
-    else fundValue += h.marketValue;
+    else if (h.assetType === "fund") fundValue += h.marketValue;
+    else propertyValue += h.marketValue;
   }
 
   const totalPnl = totalValue - totalCost;
@@ -119,6 +121,7 @@ export function computePortfolioSummary(
     saleCount: sales.length,
     stockValue,
     fundValue,
+    propertyValue,
     holdingCount: holdings.length,
   };
 }
@@ -163,7 +166,8 @@ export function formatQuotePrice(
   n: number,
   assetType: AssetType = "stock"
 ): string {
-  const maxFractionDigits = assetType === "fund" ? 4 : 2;
+  const maxFractionDigits =
+    assetType === "fund" ? 4 : assetType === "property" ? 0 : 2;
   return new Intl.NumberFormat("zh-TW", {
     style: "currency",
     currency: "TWD",

@@ -32,6 +32,7 @@ import {
 } from "@/lib/client/portfolio-sync-api";
 import type { ChartRange } from "@/lib/portfolio/chart-date-range";
 import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
+import { supportsAutoPriceUpdate } from "@/lib/portfolio/asset-labels";
 import {
   enrichHoldings,
   computePortfolioSummary,
@@ -78,7 +79,10 @@ interface PortfolioContextValue {
   storage: PortfolioStorage;
   batchStatus: UpdateStatus;
   batchMessage: string | null;
-  add: (input: CreateHoldingInput) => string | null;
+  add: (
+    input: CreateHoldingInput,
+    options?: { initialPrice?: number; initialPriceDate?: string }
+  ) => string | null;
   edit: (input: EditHoldingInput) => void;
   sell: (input: SellHoldingInput) => void;
   remove: (id: string) => void;
@@ -292,10 +296,30 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   );
 
   const add = useCallback(
-    (input: CreateHoldingInput): string | null => {
+    (
+      input: CreateHoldingInput,
+      options?: { initialPrice?: number; initialPriceDate?: string }
+    ): string | null => {
       if (!storage) return null;
-      const next = addHolding(storage, input);
+      let next = addHolding(storage, input);
       const created = next.holdings[next.holdings.length - 1];
+      const initialPrice = options?.initialPrice;
+      if (
+        created &&
+        initialPrice !== undefined &&
+        Number.isFinite(initialPrice) &&
+        initialPrice > 0
+      ) {
+        next = applyPriceUpdate(
+          next,
+          created.id,
+          initialPrice,
+          options?.initialPriceDate ??
+            new Date().toISOString().slice(0, 10),
+          "manual",
+          { clearError: true }
+        );
+      }
       persist(next);
       return created?.id ?? null;
     },
@@ -328,14 +352,19 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const setManualPrice = useCallback(
     (id: string, price: number, priceDate: string) => {
-      if (!storage) return;
-      persist(
-        applyPriceUpdate(storage, id, price, priceDate, "manual", {
+      setStorage((prev) => {
+        if (!prev) return prev;
+        const next = applyPriceUpdate(prev, id, price, priceDate, "manual", {
           clearError: true,
-        })
-      );
+        });
+        savePortfolio(next);
+        if (isAuthenticated) {
+          void pushCloudSync(next);
+        }
+        return next;
+      });
     },
-    [storage, persist]
+    [isAuthenticated, pushCloudSync]
   );
 
   const updateOne = useCallback(
@@ -343,6 +372,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       if (!storage) return false;
       const holding = storage.holdings.find((h) => h.id === id);
       if (!holding) return false;
+      if (!supportsAutoPriceUpdate(holding.assetType)) return false;
 
       const res = await fetchPriceUpdate(holdingToUpdateRequest(holding));
       if (isPriceError(res)) {
@@ -363,6 +393,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const updateAll = useCallback(async () => {
     if (!storage || storage.holdings.length === 0) return;
+
+    const autoPriced = storage.holdings.filter((h) =>
+      supportsAutoPriceUpdate(h.assetType)
+    );
+    if (autoPriced.length === 0) {
+      setBatchStatus("done");
+      setBatchMessage("無可自動更新的持倉（房子需手動估價）");
+      return;
+    }
 
     setBatchStatus("loading");
     setBatchMessage(null);

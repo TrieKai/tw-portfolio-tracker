@@ -3,10 +3,13 @@
 import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
+import { getManualPriceLabel } from "@/lib/portfolio/asset-labels";
+import type { AssetType } from "@/lib/types/holding";
 
 export function ManualPriceModal({
   symbol,
   name,
+  assetType = "stock",
   defaultPrice,
   defaultDate,
   onSave,
@@ -14,6 +17,7 @@ export function ManualPriceModal({
 }: {
   symbol: string;
   name: string;
+  assetType?: AssetType;
   defaultPrice?: number;
   defaultDate?: string;
   onSave: (price: number, date: string) => void;
@@ -50,13 +54,15 @@ export function ManualPriceModal({
         className="glass-card w-full max-w-md space-y-4 rounded-b-none p-4 sm:rounded-2xl sm:p-6"
         style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
       >
-        <h3 className="font-semibold">手動輸入價格</h3>
+        <h3 className="font-semibold">
+          {assetType === "property" ? "更新估價" : "手動輸入價格"}
+        </h3>
         <p className="text-sm text-muted">
           {name}（{symbol}）
         </p>
 
         <label className="block text-sm">
-          <span className="text-muted">最新價格 / 淨值</span>
+          <span className="text-muted">{getManualPriceLabel(assetType)}</span>
           <input
             type="number"
             step="any"

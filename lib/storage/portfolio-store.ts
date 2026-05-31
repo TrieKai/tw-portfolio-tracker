@@ -52,13 +52,11 @@ export function addHolding(
   input: CreateHoldingInput
 ): PortfolioStorage {
   const now = new Date().toISOString();
+  const id = newId();
   const holding: Holding = {
-    id: newId(),
+    id,
     ...input,
-    symbol:
-      input.assetType === "fund"
-        ? input.symbol.replace(/\D/g, "")
-        : normalizeStockSymbol(input.symbol),
+    symbol: normalizeSymbolForAsset(input.assetType, input.symbol, input.name, id),
     market: input.assetType === "stock" ? (input.market ?? "tse") : undefined,
     createdAt: now,
     updatedAt: now,
@@ -72,11 +70,19 @@ export function addHolding(
 
 function normalizeSymbolForAsset(
   assetType: Holding["assetType"],
-  symbol: string
+  symbol: string,
+  name: string,
+  id: string
 ): string {
-  return assetType === "fund"
-    ? symbol.replace(/\D/g, "")
-    : normalizeStockSymbol(symbol);
+  if (assetType === "fund") return symbol.replace(/\D/g, "");
+  if (assetType === "property") {
+    const trimmed = symbol.trim();
+    if (trimmed) return trimmed.slice(0, 32);
+    const fromName = name.trim().slice(0, 20);
+    if (fromName) return fromName;
+    return `P-${id.slice(0, 8)}`;
+  }
+  return normalizeStockSymbol(symbol);
 }
 
 /** 更新持倉基本資料（不刪除 priceHistory / 現價） */
@@ -89,7 +95,12 @@ export function editHolding(
 
   return updateHolding(state, input.id, {
     name: input.name.trim(),
-    symbol: normalizeSymbolForAsset(input.assetType, input.symbol),
+    symbol: normalizeSymbolForAsset(
+      input.assetType,
+      input.symbol,
+      input.name,
+      input.id
+    ),
     market: input.assetType === "stock" ? (input.market ?? "tse") : undefined,
     buyPrice: input.buyPrice,
     quantity: input.quantity,

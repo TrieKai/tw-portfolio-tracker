@@ -7,6 +7,10 @@ import {
   formatQuotePrice,
 } from "@/lib/portfolio/calculations";
 import {
+  getAssetTypeLabel,
+  supportsAutoPriceUpdate,
+} from "@/lib/portfolio/asset-labels";
+import {
   groupHoldingsWithMetrics,
   type HoldingGroupWithMetrics,
 } from "@/lib/portfolio/holding-groups";
@@ -208,6 +212,7 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
         <ManualPriceModal
           symbol={manualHolding.symbol}
           name={manualHolding.name}
+          assetType={manualHolding.assetType}
           defaultPrice={manualHolding.currentPrice}
           defaultDate={manualHolding.priceDate}
           onSave={(price, date) => {
@@ -282,7 +287,7 @@ function GroupRows({
           )}
         </td>
         <td className="px-4 py-3 text-muted">
-          {g.assetType === "stock" ? "台股" : "基金"}
+          {getAssetTypeLabel(g.assetType)}
         </td>
         <td className="px-4 py-3 tabular-nums">
           <div>
@@ -315,14 +320,16 @@ function GroupRows({
         <td className="px-4 py-3">
           {g.isMerged ? (
             <div className="flex flex-wrap gap-1">
-              <button
-                type="button"
-                disabled={groupUpdating}
-                onClick={onRefreshGroup}
-                className="btn-secondary text-xs py-1 px-2"
-              >
-                {groupUpdating ? "…" : "全部更新"}
-              </button>
+              {g.lots.some((l) => supportsAutoPriceUpdate(l.assetType)) && (
+                <button
+                  type="button"
+                  disabled={groupUpdating}
+                  onClick={onRefreshGroup}
+                  className="btn-secondary text-xs py-1 px-2"
+                >
+                  {groupUpdating ? "…" : "全部更新"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onToggle}
@@ -335,6 +342,7 @@ function GroupRows({
             <LotActionButtons
               lotId={lot.id}
               lotName={g.name}
+              assetType={lot.assetType}
               updatingId={updatingId}
               onRefresh={onRefresh}
               onEdit={onEdit}
@@ -372,6 +380,7 @@ function GroupRows({
 function LotActionButtons({
   lotId,
   lotName,
+  assetType,
   updatingId,
   onRefresh,
   onEdit,
@@ -381,6 +390,7 @@ function LotActionButtons({
 }: {
   lotId: string;
   lotName: string;
+  assetType: HoldingWithMetrics["assetType"];
   updatingId: string | null;
   onRefresh: (id: string) => void;
   onEdit: (id: string) => void;
@@ -390,14 +400,16 @@ function LotActionButtons({
 }) {
   return (
     <div className="flex flex-wrap gap-1">
-      <button
-        type="button"
-        disabled={updatingId === lotId}
-        onClick={() => onRefresh(lotId)}
-        className="btn-secondary text-xs py-1 px-2"
-      >
-        {updatingId === lotId ? "…" : "更新"}
-      </button>
+      {supportsAutoPriceUpdate(assetType) && (
+        <button
+          type="button"
+          disabled={updatingId === lotId}
+          onClick={() => onRefresh(lotId)}
+          className="btn-secondary text-xs py-1 px-2"
+        >
+          {updatingId === lotId ? "…" : "更新"}
+        </button>
+      )}
       <button
         type="button"
         onClick={() => onEdit(lotId)}
@@ -417,7 +429,7 @@ function LotActionButtons({
         onClick={() => onManual(lotId)}
         className="btn-secondary text-xs py-1 px-2"
       >
-        手動
+        {assetType === "property" ? "估價" : "手動"}
       </button>
       <button
         type="button"

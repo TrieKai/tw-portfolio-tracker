@@ -5,8 +5,8 @@
  * 價格歷史（PricePoint）以 holdingId 為 key 儲存於本地端。
  */
 
-/** 資產大類：台股 / 境內基金 */
-export type AssetType = "stock" | "fund";
+/** 資產大類：台股 / 境內基金 / 房子 */
+export type AssetType = "stock" | "fund" | "property";
 
 /**
  * 台股上市櫃別
@@ -21,9 +21,9 @@ export type PriceSource = "api" | "manual";
 /**
  * 單筆持倉
  * @property id - 本地唯一識別（UUID）
- * @property symbol - 股票代號（4 碼）或基金代碼（數字）
- * @property buyPrice - 買入均價（股票：元/股；基金：元/單位）
- * @property quantity - 股數或單位數
+ * @property symbol - 股票代號、基金代碼，或房產代號（選填）
+ * @property buyPrice - 買入均價（股票：元/股；基金：元/單位；房子：購入總價）
+ * @property quantity - 股數、單位數，或房產數量（通常為 1）
  */
 export interface Holding {
   id: string;
@@ -135,6 +135,7 @@ export interface PortfolioSummary {
   saleCount: number;
   stockValue: number;
   fundValue: number;
+  propertyValue: number;
   holdingCount: number;
 }
 

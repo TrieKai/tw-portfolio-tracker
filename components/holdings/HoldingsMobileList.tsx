@@ -6,6 +6,7 @@ import {
   formatPercent,
   formatQuotePrice,
 } from "@/lib/portfolio/calculations";
+import { getAssetTypeLabel, supportsAutoPriceUpdate } from "@/lib/portfolio/asset-labels";
 import type { HoldingGroupWithMetrics } from "@/lib/portfolio/holding-groups";
 import { HoldingLotDetailPanel } from "./HoldingLotActions";
 
@@ -58,7 +59,7 @@ export function HoldingsMobileList({
                   {g.market ? ` · ${g.market.toUpperCase()}` : ""}
                 </p>
                 <p className="mt-0.5 text-xs text-muted">
-                  {g.assetType === "stock" ? "台股" : "基金"}
+                  {getAssetTypeLabel(g.assetType)}
                   {g.isMerged
                     ? ` · ${g.lots.length} 筆 · 均價 ${formatQuotePrice(g.avgBuyPrice, g.assetType)}`
                     : ` · 買入 ${g.lots[0].buyDate}`}
@@ -132,14 +133,16 @@ export function HoldingsMobileList({
             <div className="flex flex-wrap gap-2 border-t border-border/60 pt-3">
               {g.isMerged ? (
                 <>
-                  <button
-                    type="button"
-                    disabled={groupUpdating(g)}
-                    onClick={() => onRefreshGroup(g)}
-                    className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
-                  >
-                    {groupUpdating(g) ? "…" : "全部更新"}
-                  </button>
+                  {g.lots.some((l) => supportsAutoPriceUpdate(l.assetType)) && (
+                    <button
+                      type="button"
+                      disabled={groupUpdating(g)}
+                      onClick={() => onRefreshGroup(g)}
+                      className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
+                    >
+                      {groupUpdating(g) ? "…" : "全部更新"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => toggleExpanded(g.groupKey)}
@@ -150,14 +153,16 @@ export function HoldingsMobileList({
                 </>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    disabled={updatingId === g.lots[0].id}
-                    onClick={() => onRefresh(g.lots[0].id)}
-                    className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
-                  >
-                    {updatingId === g.lots[0].id ? "…" : "更新"}
-                  </button>
+                  {supportsAutoPriceUpdate(g.lots[0].assetType) && (
+                    <button
+                      type="button"
+                      disabled={updatingId === g.lots[0].id}
+                      onClick={() => onRefresh(g.lots[0].id)}
+                      className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
+                    >
+                      {updatingId === g.lots[0].id ? "…" : "更新"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => onEdit(g.lots[0].id)}
@@ -177,7 +182,7 @@ export function HoldingsMobileList({
                     onClick={() => onManual(g.lots[0].id)}
                     className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
                   >
-                    手動
+                    {g.lots[0].assetType === "property" ? "估價" : "手動"}
                   </button>
                   <button
                     type="button"

@@ -6,6 +6,7 @@ import {
   formatQuotePrice,
   sortSalesByDateDesc,
 } from "@/lib/portfolio/calculations";
+import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import type { SaleTransaction } from "@/lib/types/holding";
 
 export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
@@ -88,7 +89,7 @@ export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    {s.assetType === "stock" ? "台股" : "基金"}
+                    {getAssetTypeLabel(s.assetType)}
                   </td>
                   <td className="px-4 py-3 tabular-nums">{s.quantity}</td>
                   <td className="px-4 py-3 tabular-nums">

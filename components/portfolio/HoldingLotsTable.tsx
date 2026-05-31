@@ -1,6 +1,7 @@
 "use client";
 
 import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
+import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import type { HoldingLotSummary } from "@/lib/portfolio/portfolio-timeline";
 
 export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
@@ -22,7 +23,7 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
                 <p className="font-mono text-xs text-muted">{lot.symbol}</p>
               </div>
               <span className="shrink-0 text-xs text-muted">
-                {lot.assetType === "stock" ? "台股" : "基金"}
+                {getAssetTypeLabel(lot.assetType)}
               </span>
             </div>
             <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
@@ -72,7 +73,7 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
                   <div className="font-mono text-xs text-muted">{lot.symbol}</div>
                 </td>
                 <td className="px-3 py-2 text-muted">
-                  {lot.assetType === "stock" ? "台股" : "基金"}
+                  {getAssetTypeLabel(lot.assetType)}
                 </td>
                 <td className="px-3 py-2 tabular-nums">{lot.buyDate}</td>
                 <td className="px-3 py-2 tabular-nums">

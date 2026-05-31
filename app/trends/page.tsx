@@ -12,6 +12,7 @@ import type { ChartRange } from "@/lib/portfolio/calculations";
 import { ChartRangePicker } from "@/components/ui/ChartRangePicker";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
+import { canImportHistory } from "@/lib/client/holding-history";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 type TrendTab = "portfolio" | "holding";
@@ -43,11 +44,15 @@ export default function TrendsPage() {
   const activeId = selectedId || holdings[0]?.id || "";
   const active = holdings.find((h) => h.id === activeId);
   const isFund = active?.assetType === "fund";
+  const isProperty = active?.assetType === "property";
   const isOtc = active?.assetType === "stock" && active.market === "otc";
+  const canImport = active ? canImportHistory(active) : false;
 
   const importButtonLabel = isFund
     ? "從集保載入歷史淨值"
     : "從 TWSE 載入歷史股價";
+
+  const priceSeriesLabel = isProperty ? "估價" : isFund ? "淨值" : "股價";
 
   const isPortfolioLoading = batchStatus === "loading";
 
@@ -202,10 +207,14 @@ export default function TrendsPage() {
                 <button
                   type="button"
                   onClick={handleImportHistory}
-                  disabled={loadingHistory || isOtc}
+                  disabled={loadingHistory || !canImport}
                   className="btn-primary w-full sm:w-auto touch-target"
                   title={
-                    isOtc ? "上櫃歷史股價暫不支援自動載入" : undefined
+                    isOtc
+                      ? "上櫃歷史股價暫不支援自動載入"
+                      : isProperty
+                        ? "房子需透過「估價」手動累積歷史"
+                        : undefined
                   }
                 >
                   {loadingHistory ? "載入中…" : importButtonLabel}
@@ -215,6 +224,12 @@ export default function TrendsPage() {
               {isOtc && (
                 <p className="text-sm text-amber-600 dark:text-amber-400">
                   上櫃股票暫無法自動載入歷史股價，請使用「更新」或「手動」累積資料點。
+                </p>
+              )}
+
+              {isProperty && (
+                <p className="text-sm text-amber-600 dark:text-amber-400">
+                  房子無法自動載入歷史估價，請在持倉列表使用「估價」更新，趨勢圖會依每次估價累積資料點。
                 </p>
               )}
 
@@ -233,7 +248,7 @@ export default function TrendsPage() {
                   <PriceTrendChart
                     priceHistory={storage.priceHistory}
                     holdingId={active.id}
-                    title={`${active.name} · ${active.assetType === "stock" ? "股價" : "淨值"}`}
+                    title={`${active.name} · ${priceSeriesLabel}`}
                     range={range}
                     assetType={active.assetType}
                   />

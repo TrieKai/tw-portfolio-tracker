@@ -23,7 +23,7 @@ export default function DashboardPage() {
     <div className="space-y-8">
       <PageHeader
         title="投資總覽"
-        description="台股與境內基金持倉 · 本機儲存"
+        description="台股、境內基金與房子持倉 · 本機儲存"
         action={
           <Link href="/holdings/new" className="btn-primary w-full sm:w-auto touch-target">
             新增持倉
@@ -49,6 +49,10 @@ export default function DashboardPage() {
             <li className="flex justify-between">
               <span className="text-muted">基金市值</span>
               <span>{summary.fundValue.toLocaleString("zh-TW")} 元</span>
+            </li>
+            <li className="flex justify-between">
+              <span className="text-muted">房子市值</span>
+              <span>{summary.propertyValue.toLocaleString("zh-TW")} 元</span>
             </li>
             <li className="flex justify-between border-t border-border/60 pt-2">
               <span className="text-muted">月未實現（{formatCurrentMonthZh()}）</span>
