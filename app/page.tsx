@@ -6,13 +6,14 @@ import { AssetAllocationChart } from "@/components/dashboard/AssetAllocationChar
 import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
+import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatCurrentMonthZh } from "@/lib/date/iso-date";
 import { formatCurrency } from "@/lib/portfolio/calculations";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export default function DashboardPage() {
-  const { ready, holdings, summary, storage } = usePortfolio();
+  const { ready, holdings, summary, storage, sales } = usePortfolio();
 
   if (!ready) {
     return <LoadingSpinner />;
@@ -88,6 +89,15 @@ export default function DashboardPage() {
           </ul>
         </div>
       </div>
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold">月度損益</h2>
+        <MonthlyPnlTable
+          holdings={storage.holdings}
+          priceHistory={storage.priceHistory}
+          sales={sales}
+        />
+      </section>
 
       <section className="glass-card p-4 sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
