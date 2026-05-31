@@ -99,7 +99,7 @@ export type HoldingHistoryImportResult =
   | { holdingId: string; ok: true; points: PricePoint[] }
   | { holdingId: string; ok: false; error: string };
 
-const INTER_GROUP_DELAY_MS = 300;
+const INTER_GROUP_DELAY_MS = 500;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

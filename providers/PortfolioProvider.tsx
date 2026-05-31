@@ -485,6 +485,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: "更新現價失敗" };
       }
 
+      // 現價批次更新與歷史股價皆打 TWSE，稍候再載入歷史以降低限流
+      await new Promise((r) => setTimeout(r, 1500));
+
       setBatchMessage(`正在載入「${rangeLabel}」歷史資料…`);
 
       let historyOk = 0;

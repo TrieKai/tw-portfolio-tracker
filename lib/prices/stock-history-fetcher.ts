@@ -5,7 +5,16 @@
  * 上櫃（OTC）官方 API 目前無穩定公開端點，請改用手動更新或僅支援上市。
  */
 
-import { FetchRetryError, fetchWithRetry } from "@/lib/http/fetch-with-retry";
+import { throttledTwseFetch } from "@/lib/http/twse-throttle";
+import { FetchRetryError } from "@/lib/http/fetch-with-retry";
+import {
+  clearInflightMonthFetch,
+  getCachedMonthPoints,
+  getInflightMonthFetch,
+  monthCacheKey,
+  setCachedMonthPoints,
+  setInflightMonthFetch,
+} from "./stock-history-cache";
 import {
   chartRangeToIsoDates,
   listMonthFirstDaysIso,
@@ -35,10 +44,8 @@ const COL = { DATE: 0, CLOSE: 6 } as const;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** 單次請求最多抓幾個月（一年約 12～13 個月） */
 const MAX_MONTHS_PER_REQUEST = 14;
-/** TWSE 回傳空資料時的重試次數（常見於短時間大量請求） */
-const EMPTY_MONTH_RETRIES = 3;
-/** 連續月份請求間隔（毫秒） */
-const INTER_MONTH_DELAY_MS = 250;
+/** TWSE 回傳空資料時的重試次數 */
+const EMPTY_MONTH_RETRIES = 4;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -79,7 +86,7 @@ function parseClosePrice(raw: string | undefined): number | null {
   return Number.isNaN(n) || n <= 0 ? null : n;
 }
 
-async function fetchOneMonth(
+async function fetchOneMonthRaw(
   stockNo: string,
   monthFirstYmd: string
 ): Promise<StockPriceHistoryPoint[]> {
@@ -87,11 +94,22 @@ async function fetchOneMonth(
 
   for (let attempt = 1; attempt <= EMPTY_MONTH_RETRIES; attempt++) {
     try {
-      const response = await fetchWithRetry(url, {
+      const response = await throttledTwseFetch(url, {
         headers: TWSE_HEADERS,
         timeoutMs: REQUEST_TIMEOUT_MS,
-        maxRetries: 3,
+        maxRetries: 2,
       });
+
+      if (!response.ok) {
+        if (attempt < EMPTY_MONTH_RETRIES) {
+          await sleep(800 * attempt);
+          continue;
+        }
+        throw new StockHistoryFetchError(
+          `TWSE 月報 HTTP ${response.status}`,
+          "UPSTREAM_HTTP_ERROR"
+        );
+      }
 
       const json = (await response.json()) as {
         stat?: string;
@@ -100,7 +118,7 @@ async function fetchOneMonth(
 
       if (json.stat !== "OK" || !Array.isArray(json.data)) {
         if (attempt < EMPTY_MONTH_RETRIES) {
-          await sleep(400 * attempt);
+          await sleep(800 * attempt);
           continue;
         }
         return [];
@@ -119,13 +137,20 @@ async function fetchOneMonth(
       return points;
     } catch (error) {
       if (
-        error instanceof FetchRetryError &&
+        error instanceof StockHistoryFetchError &&
         error.code === "UPSTREAM_HTTP_ERROR"
       ) {
-        throw new StockHistoryFetchError(error.message, "UPSTREAM_HTTP_ERROR");
+        throw error;
+      }
+      if (error instanceof FetchRetryError) {
+        if (attempt < EMPTY_MONTH_RETRIES) {
+          await sleep(800 * attempt);
+          continue;
+        }
+        throw new StockHistoryFetchError(error.message, error.code);
       }
       if (attempt < EMPTY_MONTH_RETRIES) {
-        await sleep(400 * attempt);
+        await sleep(800 * attempt);
         continue;
       }
       throw error;
@@ -133,6 +158,32 @@ async function fetchOneMonth(
   }
 
   return [];
+}
+
+async function fetchOneMonth(
+  stockNo: string,
+  monthFirstYmd: string
+): Promise<StockPriceHistoryPoint[]> {
+  const cacheKey = monthCacheKey(stockNo, monthFirstYmd);
+  const cached = getCachedMonthPoints(cacheKey);
+  if (cached) return cached;
+
+  const pending = getInflightMonthFetch(cacheKey);
+  if (pending) return pending;
+
+  const promise = fetchOneMonthRaw(stockNo, monthFirstYmd)
+    .then((points) => {
+      if (points.length > 0) {
+        setCachedMonthPoints(cacheKey, points);
+      }
+      return points;
+    })
+    .finally(() => {
+      clearInflightMonthFetch(cacheKey);
+    });
+
+  setInflightMonthFetch(cacheKey, promise);
+  return promise;
 }
 
 /**
@@ -170,7 +221,6 @@ export async function fetchStockPriceHistory(
       for (const monthYmd of months) {
         const monthPoints = await fetchOneMonth(stockNo, monthYmd);
         bucket.push(...monthPoints);
-        await sleep(INTER_MONTH_DELAY_MS);
       }
 
       if (bucket.length > 0) {
