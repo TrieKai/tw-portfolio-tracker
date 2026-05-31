@@ -1,6 +1,10 @@
 "use client";
 
-import { formatCurrency, formatPercent } from "@/lib/portfolio/calculations";
+import {
+  formatCurrency,
+  formatPercent,
+  formatQuotePrice,
+} from "@/lib/portfolio/calculations";
 import type { PortfolioTimelinePoint } from "@/lib/portfolio/portfolio-timeline";
 
 export function PortfolioTimelineTooltip({
@@ -54,7 +58,7 @@ export function PortfolioTimelineTooltip({
                 </span>
               </div>
               <div className="text-muted">
-                買入 {h.buyDate} · {formatCurrency(h.buyPrice)} ×{" "}
+                買入 {h.buyDate} · {formatQuotePrice(h.buyPrice, h.assetType)} ×{" "}
                 {h.quantity}
                 {!h.hasMarketPrice && " · 以買入價估算"}
               </div>

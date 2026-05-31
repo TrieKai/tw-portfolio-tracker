@@ -3,7 +3,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
-import { formatCurrency } from "@/lib/portfolio/calculations";
+import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
 import type { HoldingWithMetrics, SellHoldingInput } from "@/lib/types/holding";
 
 export function SellHoldingModal({
@@ -90,7 +90,8 @@ export function SellHoldingModal({
         </h3>
         <p className="text-sm text-muted">
           {holding.name}（{holding.symbol}）· 持有 {holding.quantity}{" "}
-          {unitLabel} · 成本均價 {formatCurrency(holding.buyPrice)}
+          {unitLabel} · 成本均價{" "}
+          {formatQuotePrice(holding.buyPrice, holding.assetType)}
         </p>
 
         <label className="block text-sm">

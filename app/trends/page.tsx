@@ -235,6 +235,7 @@ export default function TrendsPage() {
                     holdingId={active.id}
                     title={`${active.name} · ${active.assetType === "stock" ? "股價" : "淨值"}`}
                     range={range}
+                    assetType={active.assetType}
                   />
                 )}
               </div>

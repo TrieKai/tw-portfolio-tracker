@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   formatCurrency,
   formatPercent,
+  formatQuotePrice,
 } from "@/lib/portfolio/calculations";
 import {
   groupHoldingsWithMetrics,
@@ -286,11 +287,16 @@ function GroupRows({
         <td className="px-4 py-3 tabular-nums">
           <div>
             {g.isMerged ? "均價 " : ""}
-            {formatCurrency(g.isMerged ? g.avgBuyPrice : lot.buyPrice)}
+            {formatQuotePrice(
+              g.isMerged ? g.avgBuyPrice : lot.buyPrice,
+              g.assetType
+            )}
           </div>
           <div className="text-xs text-muted mt-0.5">
             現價{" "}
-            {g.hasLivePrice ? formatCurrency(g.currentPrice!) : "—"}
+            {g.hasLivePrice
+              ? formatQuotePrice(g.currentPrice!, g.assetType)
+              : "—"}
           </div>
           {g.priceDate && (
             <div className="text-xs text-muted">{g.priceDate}</div>

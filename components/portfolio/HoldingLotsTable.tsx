@@ -1,6 +1,6 @@
 "use client";
 
-import { formatCurrency } from "@/lib/portfolio/calculations";
+import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
 import type { HoldingLotSummary } from "@/lib/portfolio/portfolio-timeline";
 
 export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
@@ -30,7 +30,7 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
               <dd className="text-right tabular-nums">{lot.buyDate}</dd>
               <dt className="text-muted">買入價</dt>
               <dd className="text-right tabular-nums">
-                {formatCurrency(lot.buyPrice)}
+                {formatQuotePrice(lot.buyPrice, lot.assetType)}
               </dd>
               <dt className="text-muted">數量</dt>
               <dd className="text-right tabular-nums">{lot.quantity}</dd>
@@ -76,7 +76,7 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
                 </td>
                 <td className="px-3 py-2 tabular-nums">{lot.buyDate}</td>
                 <td className="px-3 py-2 tabular-nums">
-                  {formatCurrency(lot.buyPrice)}
+                  {formatQuotePrice(lot.buyPrice, lot.assetType)}
                 </td>
                 <td className="px-3 py-2 tabular-nums">{lot.quantity}</td>
                 <td className="px-3 py-2 tabular-nums font-medium">

@@ -3,6 +3,7 @@
 import {
   formatCurrency,
   formatPercent,
+  formatQuotePrice,
   sortSalesByDateDesc,
 } from "@/lib/portfolio/calculations";
 import type { SaleTransaction } from "@/lib/types/holding";
@@ -49,7 +50,7 @@ export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
             <div className="grid grid-cols-2 gap-2 text-xs text-muted">
               <span>賣出日 {s.sellDate}</span>
               <span className="text-right">
-                {s.quantity} × {formatCurrency(s.sellPrice)}
+                {s.quantity} × {formatQuotePrice(s.sellPrice, s.assetType)}
               </span>
             </div>
           </li>
@@ -91,7 +92,7 @@ export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
                   </td>
                   <td className="px-4 py-3 tabular-nums">{s.quantity}</td>
                   <td className="px-4 py-3 tabular-nums">
-                    {formatCurrency(s.sellPrice)}
+                    {formatQuotePrice(s.sellPrice, s.assetType)}
                   </td>
                   <td className="px-4 py-3 tabular-nums">
                     {formatCurrency(s.proceeds)}

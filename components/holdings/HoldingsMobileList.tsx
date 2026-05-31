@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   formatCurrency,
   formatPercent,
+  formatQuotePrice,
 } from "@/lib/portfolio/calculations";
 import type { HoldingGroupWithMetrics } from "@/lib/portfolio/holding-groups";
 import { HoldingLotDetailPanel } from "./HoldingLotActions";
@@ -59,12 +60,13 @@ export function HoldingsMobileList({
                 <p className="mt-0.5 text-xs text-muted">
                   {g.assetType === "stock" ? "台股" : "基金"}
                   {g.isMerged
-                    ? ` · ${g.lots.length} 筆 · 均價 ${formatCurrency(g.avgBuyPrice)}`
+                    ? ` · ${g.lots.length} 筆 · 均價 ${formatQuotePrice(g.avgBuyPrice, g.assetType)}`
                     : ` · 買入 ${g.lots[0].buyDate}`}
                 </p>
                 {!g.isMerged && (
                   <p className="text-xs text-muted tabular-nums">
-                    買入價 {formatCurrency(g.lots[0].buyPrice)} · 數量 {g.quantity}
+                    買入價 {formatQuotePrice(g.lots[0].buyPrice, g.assetType)} · 數量{" "}
+                    {g.quantity}
                   </p>
                 )}
               </div>
@@ -80,7 +82,9 @@ export function HoldingsMobileList({
               <div>
                 <p className="text-xs text-muted">現價</p>
                 <p className="tabular-nums">
-                  {g.hasLivePrice ? formatCurrency(g.currentPrice!) : "—"}
+                  {g.hasLivePrice
+                    ? formatQuotePrice(g.currentPrice!, g.assetType)
+                    : "—"}
                 </p>
                 {g.priceDate && (
                   <p className="text-xs text-muted">{g.priceDate}</p>

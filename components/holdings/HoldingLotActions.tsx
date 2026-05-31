@@ -3,6 +3,7 @@
 import {
   formatCurrency,
   formatPercent,
+  formatQuotePrice,
 } from "@/lib/portfolio/calculations";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
 
@@ -50,7 +51,9 @@ export function HoldingLotDetailPanel({
         </div>
         <div>
           <dt className="text-muted">買入價</dt>
-          <dd className="tabular-nums">{formatCurrency(lot.buyPrice)}</dd>
+          <dd className="tabular-nums">
+            {formatQuotePrice(lot.buyPrice, lot.assetType)}
+          </dd>
         </div>
         <div>
           <dt className="text-muted">數量</dt>

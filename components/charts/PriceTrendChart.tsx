@@ -12,10 +12,10 @@ import {
 import type { ChartRange } from "@/lib/portfolio/calculations";
 import {
   filterHistoryByRange,
-  formatCurrency,
+  formatQuotePrice,
   getSortedHistory,
 } from "@/lib/portfolio/calculations";
-import type { PriceHistoryMap } from "@/lib/types/holding";
+import type { AssetType, PriceHistoryMap } from "@/lib/types/holding";
 import { ChartFrame } from "@/components/ui/ChartFrame";
 
 interface PriceTrendChartProps {
@@ -23,6 +23,7 @@ interface PriceTrendChartProps {
   holdingId: string;
   title: string;
   range: ChartRange;
+  assetType?: AssetType;
 }
 
 export function PriceTrendChart({
@@ -30,6 +31,7 @@ export function PriceTrendChart({
   holdingId,
   title,
   range,
+  assetType = "stock",
 }: PriceTrendChartProps) {
   const points = filterHistoryByRange(
     getSortedHistory(priceHistory, holdingId),
@@ -69,7 +71,10 @@ export function PriceTrendChart({
               payload?.[0]?.payload?.fullDate ?? ""
             }
             formatter={(v) =>
-              [formatCurrency(Number(v ?? 0)), "價格"] as [string, string]
+              [
+                formatQuotePrice(Number(v ?? 0), assetType),
+                "價格",
+              ] as [string, string]
             }
             contentStyle={{
               background: "var(--tooltip-bg)",

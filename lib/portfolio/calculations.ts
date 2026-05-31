@@ -5,6 +5,7 @@
 import { currentYearMonthPrefix } from "@/lib/date/iso-date";
 import { computeMonthlyUnrealizedPnlChange } from "@/lib/portfolio/monthly-pnl";
 import type {
+  AssetType,
   Holding,
   HoldingWithMetrics,
   PortfolioSummary,
@@ -144,11 +145,30 @@ export function filterHistoryByRange(
   return points.filter((p) => p.date >= startDate);
 }
 
+/** 金額（市值、損益、總資產等）：整數元 */
 export function formatCurrency(n: number): string {
   return new Intl.NumberFormat("zh-TW", {
     style: "currency",
     currency: "TWD",
+    minimumFractionDigits: 0,
     maximumFractionDigits: 0,
+  }).format(n);
+}
+
+/**
+ * 單位報價（現價、買入價、均價、賣價、淨值）
+ * - 基金淨值最多 4 位小數；台股等最多 2 位
+ */
+export function formatQuotePrice(
+  n: number,
+  assetType: AssetType = "stock"
+): string {
+  const maxFractionDigits = assetType === "fund" ? 4 : 2;
+  return new Intl.NumberFormat("zh-TW", {
+    style: "currency",
+    currency: "TWD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxFractionDigits,
   }).format(n);
 }
 
