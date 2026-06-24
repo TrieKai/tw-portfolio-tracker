@@ -137,6 +137,8 @@ export interface PortfolioSummary {
    * 無法推算時為 null（例如尚無今日行情或僅有一日資料）
    */
   dailyUnrealizedPnl: number | null;
+  /** 日未實現計算時，是否有基金淨值非今日 */
+  hasStaleFundNavOnDaily: boolean;
   saleCount: number;
   stockValue: number;
   fundValue: number;

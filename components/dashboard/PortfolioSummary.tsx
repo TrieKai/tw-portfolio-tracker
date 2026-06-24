@@ -55,7 +55,14 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
         sub={
           summary.dailyUnrealizedPnl !== null
             ? "今日 · 相對前交易日"
-            : "今日 · 請更新行情"
+            : summary.hasStaleFundNavOnDaily
+              ? "今日 · 基金淨值非今日"
+              : "今日 · 請更新行情"
+        }
+        subWarn={
+          summary.dailyUnrealizedPnl !== null && summary.hasStaleFundNavOnDaily
+            ? "基金淨值非今日"
+            : undefined
         }
         highlight={
           summary.dailyUnrealizedPnl !== null
@@ -103,12 +110,14 @@ function StatCard({
   label,
   value,
   sub,
+  subWarn,
   muted,
   highlight,
 }: {
   label: string;
   value: string;
   sub?: string;
+  subWarn?: string;
   muted?: boolean;
   highlight?: "gain" | "loss";
 }) {
@@ -127,6 +136,11 @@ function StatCard({
         {value}
       </p>
       {sub && <p className="mt-1 text-xs text-muted">{sub}</p>}
+      {subWarn && (
+        <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
+          {subWarn}
+        </p>
+      )}
     </div>
   );
 }

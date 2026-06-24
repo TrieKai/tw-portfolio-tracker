@@ -2,7 +2,7 @@
  * 投資組合損益與報酬率計算（純函式，可在 client/server 共用）
  */
 
-import { currentYearMonthPrefix } from "@/lib/date/iso-date";
+import { currentYearMonthPrefix, todayIsoDate } from "@/lib/date/iso-date";
 import {
   computeDailyUnrealizedPnlChange,
   computeMonthlyUnrealizedPnlChange,
@@ -66,6 +66,14 @@ export function countMonthlySales(
   return sales.filter((s) => s.sellDate.startsWith(monthPrefix)).length;
 }
 
+/** 是否有基金持倉的淨值日期早於今日（或尚無淨值日期） */
+export function hasStaleFundNav(holdings: Holding[]): boolean {
+  const today = todayIsoDate();
+  return holdings.some(
+    (h) => h.assetType === "fund" && (!h.priceDate || h.priceDate < today)
+  );
+}
+
 /** 依賣出日期新到舊排序 */
 export function sortSalesByDateDesc(sales: SaleTransaction[]): SaleTransaction[] {
   return [...sales].sort((a, b) => {
@@ -118,6 +126,10 @@ export function computePortfolioSummary(
           options.priceHistory
         )
       : null;
+  const hasStaleFundNavOnDaily =
+    options?.holdingsForTimeline
+      ? hasStaleFundNav(options.holdingsForTimeline)
+      : false;
 
   return {
     totalCost,
@@ -129,6 +141,7 @@ export function computePortfolioSummary(
     monthlySaleCount,
     monthlyUnrealizedPnl,
     dailyUnrealizedPnl,
+    hasStaleFundNavOnDaily,
     saleCount: sales.length,
     stockValue,
     fundValue,

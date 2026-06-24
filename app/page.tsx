@@ -56,19 +56,26 @@ export default function DashboardPage() {
             </li>
             <li className="flex justify-between border-t border-border/60 pt-2">
               <span className="text-muted">日未實現（今日）</span>
-              <span
-                className={
-                  summary.dailyUnrealizedPnl === null
-                    ? "text-muted"
-                    : summary.dailyUnrealizedPnl >= 0
-                      ? "text-gain"
-                      : "text-loss"
-                }
-              >
-                {summary.dailyUnrealizedPnl !== null
-                  ? formatCurrency(summary.dailyUnrealizedPnl)
-                  : "—"}
-              </span>
+              <div className="text-right">
+                <span
+                  className={
+                    summary.dailyUnrealizedPnl === null
+                      ? "text-muted"
+                      : summary.dailyUnrealizedPnl >= 0
+                        ? "text-gain"
+                        : "text-loss"
+                  }
+                >
+                  {summary.dailyUnrealizedPnl !== null
+                    ? formatCurrency(summary.dailyUnrealizedPnl)
+                    : "—"}
+                </span>
+                {summary.hasStaleFundNavOnDaily && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    基金淨值非今日
+                  </p>
+                )}
+              </div>
             </li>
             <li className="flex justify-between">
               <span className="text-muted">月未實現（{formatCurrentMonthZh()}）</span>
