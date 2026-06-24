@@ -18,7 +18,6 @@ import {
 import {
   canImportHistory,
   fetchHistoryForHoldings,
-  fetchHoldingHistoryPoints,
 } from "@/lib/client/holding-history";
 import {
   fetchBatchPriceUpdate,
@@ -32,6 +31,7 @@ import {
 } from "@/lib/client/portfolio-sync-api";
 import type { ChartRange } from "@/lib/portfolio/chart-date-range";
 import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
+import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import { supportsAutoPriceUpdate } from "@/lib/portfolio/asset-labels";
 import {
   enrichHoldings,
@@ -95,11 +95,11 @@ interface PortfolioContextValue {
     error?: string;
   }>;
   importPriceHistory: (
-    holdingId: string,
+    groupKey: string,
     range: ChartRange
   ) => Promise<{ ok: boolean; count?: number; error?: string }>;
   importFundHistory: (
-    holdingId: string,
+    groupKey: string,
     range: ChartRange
   ) => Promise<{ ok: boolean; count?: number; error?: string }>;
   setAutoUpdate: (enabled: boolean) => void;
@@ -461,21 +461,50 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const importPriceHistory = useCallback(
     async (
-      holdingId: string,
+      groupKey: string,
       range: ChartRange
     ): Promise<{ ok: boolean; count?: number; error?: string }> => {
       if (!storage) return { ok: false, error: "尚未載入資料" };
-      const holding = storage.holdings.find((h) => h.id === holdingId);
-      if (!holding) return { ok: false, error: "找不到持倉" };
+      const groupLots = storage.holdings.filter(
+        (h) => holdingGroupKey(h) === groupKey
+      );
+      if (groupLots.length === 0) return { ok: false, error: "找不到持倉" };
 
       try {
-        const points = await fetchHoldingHistoryPoints(holding, range);
-        persist(applyImportedPriceHistory(storage, holdingId, points));
-        return { ok: true, count: points.length };
+        const results = await fetchHistoryForHoldings(groupLots, range);
+        let next = storage;
+        let count = 0;
+        let okAny = false;
+        let lastError: string | undefined;
+
+        for (const result of results) {
+          if (result.ok) {
+            next = applyImportedPriceHistory(
+              next,
+              result.holdingId,
+              result.points
+            );
+            count = result.points.length;
+            okAny = true;
+          } else {
+            next = updateHolding(next, result.holdingId, {
+              lastError: result.error,
+            });
+            lastError = result.error;
+          }
+        }
+
+        persist(next);
+        if (okAny) return { ok: true, count };
+        return { ok: false, error: lastError ?? "載入歷史失敗" };
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "載入歷史失敗";
-        persist(updateHolding(storage, holdingId, { lastError: message }));
+        let next = storage;
+        for (const h of groupLots) {
+          next = updateHolding(next, h.id, { lastError: message });
+        }
+        persist(next);
         return { ok: false, error: message };
       }
     },

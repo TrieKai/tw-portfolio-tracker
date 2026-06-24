@@ -163,6 +163,24 @@ export function getSortedHistory(
   return [...points].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/** 合併多筆持倉的價格歷史（同標的多筆買入；同日取一筆） */
+export function getMergedSortedHistory(
+  priceHistory: PriceHistoryMap,
+  holdingIds: string[]
+): PricePoint[] {
+  const byDate = new Map<string, PricePoint>();
+
+  for (const id of holdingIds) {
+    for (const p of priceHistory[id] ?? []) {
+      if (!byDate.has(p.date)) {
+        byDate.set(p.date, p);
+      }
+    }
+  }
+
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 export function filterHistoryByRange(
   points: PricePoint[],
   range: ChartRange

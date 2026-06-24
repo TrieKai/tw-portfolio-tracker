@@ -13,14 +13,14 @@ import type { ChartRange } from "@/lib/portfolio/calculations";
 import {
   filterHistoryByRange,
   formatQuotePrice,
-  getSortedHistory,
+  getMergedSortedHistory,
 } from "@/lib/portfolio/calculations";
 import type { AssetType, PriceHistoryMap } from "@/lib/types/holding";
 import { ChartFrame } from "@/components/ui/ChartFrame";
 
 interface PriceTrendChartProps {
   priceHistory: PriceHistoryMap;
-  holdingId: string;
+  holdingIds: string[];
   title: string;
   range: ChartRange;
   assetType?: AssetType;
@@ -28,13 +28,13 @@ interface PriceTrendChartProps {
 
 export function PriceTrendChart({
   priceHistory,
-  holdingId,
+  holdingIds,
   title,
   range,
   assetType = "stock",
 }: PriceTrendChartProps) {
   const points = filterHistoryByRange(
-    getSortedHistory(priceHistory, holdingId),
+    getMergedSortedHistory(priceHistory, holdingIds),
     range
   );
 

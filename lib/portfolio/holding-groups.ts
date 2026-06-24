@@ -25,6 +25,51 @@ export function holdingGroupKey(
   return `${h.assetType}:${market}:${symbol}`;
 }
 
+export interface HoldingSymbolGroup {
+  groupKey: string;
+  assetType: AssetType;
+  symbol: string;
+  market?: StockMarket;
+  name: string;
+  lots: Holding[];
+  /** 多筆買入才為 true */
+  isMerged: boolean;
+}
+
+/** 將持倉依標的分組（組內依買入日升冪） */
+export function groupHoldings(holdings: Holding[]): HoldingSymbolGroup[] {
+  const map = new Map<string, Holding[]>();
+
+  for (const h of holdings) {
+    const key = holdingGroupKey(h);
+    const bucket = map.get(key) ?? [];
+    bucket.push(h);
+    map.set(key, bucket);
+  }
+
+  return [...map.entries()]
+    .map(([groupKey, lots]) => {
+      const sorted = [...lots].sort((a, b) =>
+        a.buyDate.localeCompare(b.buyDate)
+      );
+      const first = sorted[0]!;
+      return {
+        groupKey,
+        assetType: first.assetType,
+        symbol: first.symbol,
+        market: first.market,
+        name: first.name,
+        lots: sorted,
+        isMerged: sorted.length > 1,
+      };
+    })
+    .sort((a, b) => {
+      const bySymbol = a.symbol.localeCompare(b.symbol, "zh-TW");
+      if (bySymbol !== 0) return bySymbol;
+      return a.groupKey.localeCompare(b.groupKey);
+    });
+}
+
 export interface HoldingGroupWithMetrics {
   groupKey: string;
   assetType: AssetType;

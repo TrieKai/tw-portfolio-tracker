@@ -13,6 +13,7 @@ import { ChartRangePicker } from "@/components/ui/ChartRangePicker";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
 import { canImportHistory } from "@/lib/client/holding-history";
+import { groupHoldings } from "@/lib/portfolio/holding-groups";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 type TrendTab = "portfolio" | "holding";
@@ -28,7 +29,7 @@ export default function TrendsPage() {
     batchMessage,
   } = usePortfolio();
   const [tab, setTab] = useState<TrendTab>("portfolio");
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedGroupKey, setSelectedGroupKey] = useState<string>("");
   const [range, setRange] = useState<ChartRange>("30d");
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyMessage, setHistoryMessage] = useState<string | null>(null);
@@ -39,10 +40,17 @@ export default function TrendsPage() {
     [storage.holdings]
   );
 
+  const symbolGroups = useMemo(
+    () => groupHoldings(storage.holdings),
+    [storage.holdings]
+  );
+
   if (!ready) return <LoadingSpinner />;
 
-  const activeId = selectedId || holdings[0]?.id || "";
-  const active = holdings.find((h) => h.id === activeId);
+  const activeGroup =
+    symbolGroups.find((g) => g.groupKey === selectedGroupKey) ??
+    symbolGroups[0];
+  const active = activeGroup?.lots[0];
   const isFund = active?.assetType === "fund";
   const isProperty = active?.assetType === "property";
   const isOtc = active?.assetType === "stock" && active.market === "otc";
@@ -76,7 +84,7 @@ export default function TrendsPage() {
     setHistoryError(null);
     setHistoryMessage(null);
 
-    const result = await importPriceHistory(active.id, range);
+    const result = await importPriceHistory(activeGroup!.groupKey, range);
     setLoadingHistory(false);
 
     if (result.ok) {
@@ -188,17 +196,18 @@ export default function TrendsPage() {
                 <label className="block w-full text-sm sm:min-w-[200px] sm:flex-1">
                   <span className="text-muted">選擇標的</span>
                   <select
-                    value={activeId}
+                    value={activeGroup?.groupKey ?? ""}
                     onChange={(e) => {
-                      setSelectedId(e.target.value);
+                      setSelectedGroupKey(e.target.value);
                       setHistoryMessage(null);
                       setHistoryError(null);
                     }}
                     className="input-field mt-1 w-full"
                   >
-                    {holdings.map((h) => (
-                      <option key={h.id} value={h.id}>
-                        {h.name} ({h.symbol})
+                    {symbolGroups.map((g) => (
+                      <option key={g.groupKey} value={g.groupKey}>
+                        {g.name} ({g.symbol})
+                        {g.isMerged ? ` · ${g.lots.length} 筆` : ""}
                       </option>
                     ))}
                   </select>
@@ -244,11 +253,15 @@ export default function TrendsPage() {
               )}
 
               <div className="glass-card p-4 sm:p-5">
-                {active && (
+                {activeGroup && active && (
                   <PriceTrendChart
                     priceHistory={storage.priceHistory}
-                    holdingId={active.id}
-                    title={`${active.name} · ${priceSeriesLabel}`}
+                    holdingIds={activeGroup.lots.map((l) => l.id)}
+                    title={`${active.name} · ${priceSeriesLabel}${
+                      activeGroup.isMerged
+                        ? ` · ${activeGroup.lots.length} 筆持倉`
+                        : ""
+                    }`}
                     range={range}
                     assetType={active.assetType}
                   />
