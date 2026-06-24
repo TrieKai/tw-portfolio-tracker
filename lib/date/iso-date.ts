@@ -24,6 +24,14 @@ export function todayIsoDate(): string {
   return toIsoDate(new Date());
 }
 
+/** ISO 日期往前／往後 N 天（本地時區） */
+export function addDaysToIsoDate(iso: string, days: number): string {
+  const date = parseIsoDate(iso);
+  if (!date) return iso;
+  date.setDate(date.getDate() + days);
+  return toIsoDate(date);
+}
+
 /** 當月第一天 ISO YYYY-MM-DD */
 export function startOfMonthIso(ref: Date = new Date()): string {
   return toIsoDate(new Date(ref.getFullYear(), ref.getMonth(), 1));

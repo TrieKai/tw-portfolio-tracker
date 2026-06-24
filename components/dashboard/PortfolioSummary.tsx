@@ -10,13 +10,15 @@ import type { PortfolioSummary as Summary } from "@/lib/types/holding";
 export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
   const unrealizedPositive = summary.totalPnl >= 0;
   const realizedPositive = summary.totalRealizedPnl >= 0;
+  const dailyUnrealizedPositive =
+    summary.dailyUnrealizedPnl !== null && summary.dailyUnrealizedPnl >= 0;
   const monthlyUnrealizedPositive =
     summary.monthlyUnrealizedPnl !== null && summary.monthlyUnrealizedPnl >= 0;
   const monthlyRealizedPositive = summary.monthlyRealizedPnl >= 0;
   const monthLabel = formatCurrentMonthZh();
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4">
       <StatCard label="總資產" value={formatCurrency(summary.totalValue)} />
       <StatCard
         label="總成本"
@@ -42,6 +44,26 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
         label="未實現報酬率"
         value={formatPercent(summary.totalReturnRate)}
         highlight={unrealizedPositive ? "gain" : "loss"}
+      />
+      <StatCard
+        label="日未實現"
+        value={
+          summary.dailyUnrealizedPnl !== null
+            ? formatCurrency(summary.dailyUnrealizedPnl)
+            : "—"
+        }
+        sub={
+          summary.dailyUnrealizedPnl !== null
+            ? "今日 · 相對前交易日"
+            : "今日 · 請更新行情"
+        }
+        highlight={
+          summary.dailyUnrealizedPnl !== null
+            ? dailyUnrealizedPositive
+              ? "gain"
+              : "loss"
+            : undefined
+        }
       />
       <StatCard
         label="月未實現"

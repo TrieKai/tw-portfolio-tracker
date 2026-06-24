@@ -3,7 +3,10 @@
  */
 
 import { currentYearMonthPrefix } from "@/lib/date/iso-date";
-import { computeMonthlyUnrealizedPnlChange } from "@/lib/portfolio/monthly-pnl";
+import {
+  computeDailyUnrealizedPnlChange,
+  computeMonthlyUnrealizedPnlChange,
+} from "@/lib/portfolio/monthly-pnl";
 import type {
   AssetType,
   Holding,
@@ -108,6 +111,13 @@ export function computePortfolioSummary(
           options.priceHistory
         )
       : null;
+  const dailyUnrealizedPnl =
+    options?.holdingsForTimeline && options?.priceHistory
+      ? computeDailyUnrealizedPnlChange(
+          options.holdingsForTimeline,
+          options.priceHistory
+        )
+      : null;
 
   return {
     totalCost,
@@ -118,6 +128,7 @@ export function computePortfolioSummary(
     monthlyRealizedPnl,
     monthlySaleCount,
     monthlyUnrealizedPnl,
+    dailyUnrealizedPnl,
     saleCount: sales.length,
     stockValue,
     fundValue,

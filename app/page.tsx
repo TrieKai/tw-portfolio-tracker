@@ -55,6 +55,22 @@ export default function DashboardPage() {
               <span>{summary.propertyValue.toLocaleString("zh-TW")} 元</span>
             </li>
             <li className="flex justify-between border-t border-border/60 pt-2">
+              <span className="text-muted">日未實現（今日）</span>
+              <span
+                className={
+                  summary.dailyUnrealizedPnl === null
+                    ? "text-muted"
+                    : summary.dailyUnrealizedPnl >= 0
+                      ? "text-gain"
+                      : "text-loss"
+                }
+              >
+                {summary.dailyUnrealizedPnl !== null
+                  ? formatCurrency(summary.dailyUnrealizedPnl)
+                  : "—"}
+              </span>
+            </li>
+            <li className="flex justify-between">
               <span className="text-muted">月未實現（{formatCurrentMonthZh()}）</span>
               <span
                 className={

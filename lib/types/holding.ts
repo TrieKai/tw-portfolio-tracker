@@ -132,6 +132,11 @@ export interface PortfolioSummary {
    * 無法推算時為 null（例如本月尚無價格歷史）
    */
   monthlyUnrealizedPnl: number | null;
+  /**
+   * 今日未實現損益變化（今日相對前一個有報價的交易日 pnl 差）
+   * 無法推算時為 null（例如尚無今日行情或僅有一日資料）
+   */
+  dailyUnrealizedPnl: number | null;
   saleCount: number;
   stockValue: number;
   fundValue: number;
