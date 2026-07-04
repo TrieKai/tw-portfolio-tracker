@@ -32,6 +32,9 @@ export function EditHoldingModal({
   const [buyPrice, setBuyPrice] = useState(String(holding.buyPrice));
   const [quantity, setQuantity] = useState(String(holding.quantity));
   const [buyDate, setBuyDate] = useState(holding.buyDate);
+  const [mortgageBalance, setMortgageBalance] = useState(
+    holding.mortgageBalance !== undefined ? String(holding.mortgageBalance) : ""
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -44,6 +47,9 @@ export function EditHoldingModal({
 
     const price = Number.parseFloat(buyPrice);
     const qty = Number.parseFloat(quantity);
+    const mortgage = mortgageBalance.trim()
+      ? Number.parseFloat(mortgageBalance)
+      : NaN;
 
     if (isProperty) {
       if (!propertyName.trim()) {
@@ -67,6 +73,14 @@ export function EditHoldingModal({
       setError("數量無效");
       return;
     }
+    if (
+      isProperty &&
+      mortgageBalance.trim() &&
+      (Number.isNaN(mortgage) || mortgage < 0)
+    ) {
+      setError("房貸餘額無效");
+      return;
+    }
 
     if (isProperty) {
       onSave({
@@ -77,6 +91,9 @@ export function EditHoldingModal({
         buyPrice: price,
         quantity: qty,
         buyDate,
+        ...(!Number.isNaN(mortgage) && mortgage > 0
+          ? { mortgageBalance: mortgage }
+          : {}),
       });
       return;
     }
@@ -207,6 +224,20 @@ export function EditHoldingModal({
             />
           </Field>
         </div>
+
+        {isProperty && (
+          <Field label="房貸餘額（選填）">
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={mortgageBalance}
+              onChange={(e) => setMortgageBalance(e.target.value)}
+              placeholder="計算淨資產時扣除"
+              className="input-field"
+            />
+          </Field>
+        )}
 
         <Field label="買入日期" required>
           <DatePicker

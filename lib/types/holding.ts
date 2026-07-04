@@ -51,6 +51,11 @@ export interface Holding {
    * 曝險金額 = 市值 × leverageMultiplier
    */
   leverageMultiplier?: number;
+  /**
+   * 房貸餘額（元；僅 property）
+   * 計算淨資產時自持倉市值扣除，與全站投資負債分開
+   */
+  mortgageBalance?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -112,7 +117,7 @@ export interface PortfolioSettings {
    * 用於曝險比例 = 總曝險 ÷ 淨資產；未設定時以「持倉市值 − liabilities」推算
    */
   netAssets?: number;
-  /** 投資負債（信貸等，元）；淨資產未直接設定時從持倉市值扣除 */
+  /** 投資負債（信貸、質押等，元；不含房貸） */
   liabilities?: number;
 }
 
@@ -167,6 +172,8 @@ export interface CreateHoldingInput {
   buyPrice: number;
   quantity: number;
   buyDate: string;
+  /** 房貸餘額（元；僅 property） */
+  mortgageBalance?: number;
 }
 
 /** 編輯持倉（保留 id、現價與價格歷史） */

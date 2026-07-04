@@ -106,6 +106,14 @@ export function editHolding(
     quantity: input.quantity,
     buyDate: input.buyDate,
     lastError: undefined,
+    ...(input.assetType === "property"
+      ? {
+          mortgageBalance:
+            input.mortgageBalance !== undefined && input.mortgageBalance > 0
+              ? input.mortgageBalance
+              : undefined,
+        }
+      : {}),
   });
 }
 

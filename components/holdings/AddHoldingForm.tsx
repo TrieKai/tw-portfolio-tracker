@@ -30,6 +30,7 @@ export function AddHoldingForm() {
   const [market, setMarket] = useState<StockMarket>("tse");
   const [buyPrice, setBuyPrice] = useState("");
   const [currentEstimate, setCurrentEstimate] = useState("");
+  const [mortgageBalance, setMortgageBalance] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [buyDate, setBuyDate] = useState(todayIsoDate());
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +44,7 @@ export function AddHoldingForm() {
     setPropertyName("");
     setResolvedName("");
     setCurrentEstimate("");
+    setMortgageBalance("");
     setQuantity(t === "property" ? "1" : "");
     setError(null);
   }
@@ -55,6 +57,9 @@ export function AddHoldingForm() {
     const qty = Number.parseFloat(quantity);
     const estimate = currentEstimate.trim()
       ? Number.parseFloat(currentEstimate)
+      : NaN;
+    const mortgage = mortgageBalance.trim()
+      ? Number.parseFloat(mortgageBalance)
       : NaN;
 
     if (isProperty) {
@@ -87,6 +92,14 @@ export function AddHoldingForm() {
       setError("現估總價無效");
       return;
     }
+    if (
+      isProperty &&
+      mortgageBalance.trim() &&
+      (Number.isNaN(mortgage) || mortgage < 0)
+    ) {
+      setError("房貸餘額無效");
+      return;
+    }
 
     setSubmitting(true);
 
@@ -101,6 +114,9 @@ export function AddHoldingForm() {
           buyPrice: price,
           quantity: qty,
           buyDate,
+          ...(!Number.isNaN(mortgage) && mortgage > 0
+            ? { mortgageBalance: mortgage }
+            : {}),
         },
         { initialPrice: value, initialPriceDate: todayIsoDate() }
       );
@@ -239,17 +255,30 @@ export function AddHoldingForm() {
       </div>
 
       {isProperty && (
-        <Field label="現估總價（選填）">
-          <input
-            type="number"
-            step="any"
-            min="0"
-            value={currentEstimate}
-            onChange={(e) => setCurrentEstimate(e.target.value)}
-            placeholder="留空則以購入總價作為初始估價"
-            className="input-field"
-          />
-        </Field>
+        <>
+          <Field label="現估總價（選填）">
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={currentEstimate}
+              onChange={(e) => setCurrentEstimate(e.target.value)}
+              placeholder="留空則以購入總價作為初始估價"
+              className="input-field"
+            />
+          </Field>
+          <Field label="房貸餘額（選填）">
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={mortgageBalance}
+              onChange={(e) => setMortgageBalance(e.target.value)}
+              placeholder="計算淨資產時扣除；請填全價估價"
+              className="input-field"
+            />
+          </Field>
+        </>
       )}
 
       <Field label="買入日期" required>
