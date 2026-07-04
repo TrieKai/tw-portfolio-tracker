@@ -42,6 +42,10 @@ import {
   computePortfolioExposure,
   type PortfolioExposureSummary,
 } from "@/lib/portfolio/exposure";
+import {
+  buildPortfolioPnlBreakdowns,
+  type PortfolioPnlBreakdowns,
+} from "@/lib/portfolio/pnl-breakdown";
 import { applyImportMode } from "@/lib/storage/portfolio-export";
 import type { PortfolioImportMode } from "@/lib/storage/portfolio-export";
 import { hasPortfolioData } from "@/lib/storage/parse-portfolio";
@@ -82,6 +86,7 @@ interface PortfolioContextValue {
   sales: SaleTransaction[];
   summary: PortfolioSummary;
   exposure: PortfolioExposureSummary;
+  pnlBreakdowns: PortfolioPnlBreakdowns;
   storage: PortfolioStorage;
   batchStatus: UpdateStatus;
   batchMessage: string | null;
@@ -307,6 +312,11 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const exposure = useMemo(
     () => computePortfolioExposure(holdings, storage?.settings ?? {}),
     [holdings, storage?.settings]
+  );
+
+  const pnlBreakdowns = useMemo(
+    () => buildPortfolioPnlBreakdowns(holdings, storage?.priceHistory ?? {}),
+    [holdings, storage?.priceHistory]
   );
 
   const add = useCallback(
@@ -699,6 +709,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       sales,
       summary,
       exposure,
+      pnlBreakdowns,
       storage: storage ?? loadPortfolio(),
       batchStatus,
       batchMessage,
@@ -727,6 +738,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       sales,
       summary,
       exposure,
+      pnlBreakdowns,
       batchStatus,
       batchMessage,
       add,

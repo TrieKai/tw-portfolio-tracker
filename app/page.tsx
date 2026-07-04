@@ -11,10 +11,11 @@ import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatCurrentMonthZh } from "@/lib/date/iso-date";
 import { formatCurrency } from "@/lib/portfolio/calculations";
+import { PnlValueWithBreakdown } from "@/components/ui/PnlBreakdownTooltip";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export default function DashboardPage() {
-  const { ready, holdings, summary, exposure, storage, sales, setExposureSettings } = usePortfolio();
+  const { ready, holdings, summary, exposure, pnlBreakdowns, storage, sales, setExposureSettings } = usePortfolio();
 
   if (!ready) {
     return <LoadingSpinner />;
@@ -32,7 +33,7 @@ export default function DashboardPage() {
         }
       />
 
-      <PortfolioSummaryCards summary={summary} />
+      <PortfolioSummaryCards summary={summary} pnlBreakdowns={pnlBreakdowns} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <AssetAllocationChart summary={summary} />
@@ -58,19 +59,22 @@ export default function DashboardPage() {
             <li className="flex justify-between border-t border-border/60 pt-2">
               <span className="text-muted">日未實現（今日）</span>
               <div className="text-right">
-                <span
-                  className={
+                <PnlValueWithBreakdown
+                  title="日未實現"
+                  value={
+                    summary.dailyUnrealizedPnl !== null
+                      ? formatCurrency(summary.dailyUnrealizedPnl)
+                      : "—"
+                  }
+                  valueClassName={
                     summary.dailyUnrealizedPnl === null
                       ? "text-muted"
                       : summary.dailyUnrealizedPnl >= 0
                         ? "text-gain"
                         : "text-loss"
                   }
-                >
-                  {summary.dailyUnrealizedPnl !== null
-                    ? formatCurrency(summary.dailyUnrealizedPnl)
-                    : "—"}
-                </span>
+                  periodBreakdown={pnlBreakdowns.dailyUnrealized}
+                />
                 {summary.hasStaleFundNavOnDaily && (
                   <p className="text-xs text-amber-600 dark:text-amber-400">
                     基金淨值非今日
@@ -80,19 +84,22 @@ export default function DashboardPage() {
             </li>
             <li className="flex justify-between">
               <span className="text-muted">月未實現（{formatCurrentMonthZh()}）</span>
-              <span
-                className={
+              <PnlValueWithBreakdown
+                title="月未實現"
+                value={
+                  summary.monthlyUnrealizedPnl !== null
+                    ? formatCurrency(summary.monthlyUnrealizedPnl)
+                    : "—"
+                }
+                valueClassName={
                   summary.monthlyUnrealizedPnl === null
                     ? "text-muted"
                     : summary.monthlyUnrealizedPnl >= 0
                       ? "text-gain"
                       : "text-loss"
                 }
-              >
-                {summary.monthlyUnrealizedPnl !== null
-                  ? formatCurrency(summary.monthlyUnrealizedPnl)
-                  : "—"}
-              </span>
+                periodBreakdown={pnlBreakdowns.monthlyUnrealized}
+              />
             </li>
             <li className="flex justify-between">
               <span className="text-muted">月已實現（{formatCurrentMonthZh()}）</span>

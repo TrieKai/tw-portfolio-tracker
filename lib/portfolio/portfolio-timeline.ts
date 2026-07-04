@@ -77,7 +77,7 @@ export interface PortfolioPeriodSummary {
   lotsAddedInPeriod: HoldingLotSummary[];
 }
 
-function getEffectiveHistory(
+export function getEffectiveHistory(
   holding: Holding,
   priceHistory: PriceHistoryMap
 ): PricePoint[] {
@@ -104,7 +104,7 @@ function getEffectiveHistory(
  * - 買入日尚無行情：用買入價
  * - 買入後尚無行情：沿用買入價（成本價估算）
  */
-function getUnitPriceOnDate(
+export function getUnitPriceOnDate(
   holding: Holding,
   history: PricePoint[],
   date: string

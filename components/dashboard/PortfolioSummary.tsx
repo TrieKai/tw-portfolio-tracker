@@ -1,13 +1,22 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { formatCurrentMonthZh } from "@/lib/date/iso-date";
 import {
   formatCurrency,
   formatPercent,
 } from "@/lib/portfolio/calculations";
+import type { PortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
+import { PnlValueWithBreakdown } from "@/components/ui/PnlBreakdownTooltip";
 import type { PortfolioSummary as Summary } from "@/lib/types/holding";
 
-export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
+export function PortfolioSummaryCards({
+  summary,
+  pnlBreakdowns,
+}: {
+  summary: Summary;
+  pnlBreakdowns: PortfolioPnlBreakdowns;
+}) {
   const unrealizedPositive = summary.totalPnl >= 0;
   const realizedPositive = summary.totalRealizedPnl >= 0;
   const dailyUnrealizedPositive =
@@ -16,6 +25,20 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
     summary.monthlyUnrealizedPnl !== null && summary.monthlyUnrealizedPnl >= 0;
   const monthlyRealizedPositive = summary.monthlyRealizedPnl >= 0;
   const monthLabel = formatCurrentMonthZh();
+
+  const unrealizedValueClass = unrealizedPositive ? "text-gain" : "text-loss";
+  const dailyValueClass =
+    summary.dailyUnrealizedPnl !== null
+      ? dailyUnrealizedPositive
+        ? "text-gain"
+        : "text-loss"
+      : "text-muted";
+  const monthlyValueClass =
+    summary.monthlyUnrealizedPnl !== null
+      ? monthlyUnrealizedPositive
+        ? "text-gain"
+        : "text-loss"
+      : "text-muted";
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4">
@@ -27,8 +50,16 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
       />
       <StatCard
         label="未實現損益"
-        value={formatCurrency(summary.totalPnl)}
+        value={
+          <PnlValueWithBreakdown
+            title="未實現損益"
+            value={formatCurrency(summary.totalPnl)}
+            valueClassName={`text-xl font-semibold sm:text-2xl ${unrealizedValueClass}`}
+            breakdown={pnlBreakdowns.totalUnrealized}
+          />
+        }
         highlight={unrealizedPositive ? "gain" : "loss"}
+        valueIsNode
       />
       <StatCard
         label="已實現損益"
@@ -48,9 +79,16 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
       <StatCard
         label="日未實現"
         value={
-          summary.dailyUnrealizedPnl !== null
-            ? formatCurrency(summary.dailyUnrealizedPnl)
-            : "—"
+          <PnlValueWithBreakdown
+            title="日未實現"
+            value={
+              summary.dailyUnrealizedPnl !== null
+                ? formatCurrency(summary.dailyUnrealizedPnl)
+                : "—"
+            }
+            valueClassName={`text-xl font-semibold sm:text-2xl ${dailyValueClass}`}
+            periodBreakdown={pnlBreakdowns.dailyUnrealized}
+          />
         }
         sub={
           summary.dailyUnrealizedPnl !== null
@@ -71,13 +109,21 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
               : "loss"
             : undefined
         }
+        valueIsNode
       />
       <StatCard
         label="月未實現"
         value={
-          summary.monthlyUnrealizedPnl !== null
-            ? formatCurrency(summary.monthlyUnrealizedPnl)
-            : "—"
+          <PnlValueWithBreakdown
+            title="月未實現"
+            value={
+              summary.monthlyUnrealizedPnl !== null
+                ? formatCurrency(summary.monthlyUnrealizedPnl)
+                : "—"
+            }
+            valueClassName={`text-xl font-semibold sm:text-2xl ${monthlyValueClass}`}
+            periodBreakdown={pnlBreakdowns.monthlyUnrealized}
+          />
         }
         sub={
           summary.monthlyUnrealizedPnl !== null
@@ -91,6 +137,7 @@ export function PortfolioSummaryCards({ summary }: { summary: Summary }) {
               : "loss"
             : undefined
         }
+        valueIsNode
       />
       <StatCard
         label="月已實現"
@@ -113,13 +160,15 @@ function StatCard({
   subWarn,
   muted,
   highlight,
+  valueIsNode,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   sub?: string;
   subWarn?: string;
   muted?: boolean;
   highlight?: "gain" | "loss";
+  valueIsNode?: boolean;
 }) {
   const valueClass = highlight
     ? highlight === "gain"
@@ -132,9 +181,13 @@ function StatCard({
   return (
     <div className="glass-card p-5">
       <p className="text-sm text-muted">{label}</p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums sm:text-2xl ${valueClass}`}>
-        {value}
-      </p>
+      {valueIsNode ? (
+        <div className="mt-1">{value}</div>
+      ) : (
+        <p className={`mt-1 text-xl font-semibold tabular-nums sm:text-2xl ${valueClass}`}>
+          {value}
+        </p>
+      )}
       {sub && <p className="mt-1 text-xs text-muted">{sub}</p>}
       {subWarn && (
         <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
