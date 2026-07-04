@@ -10,6 +10,7 @@ export interface InstrumentLookupSuccess {
     name: string;
     symbol: string;
     assetType: AssetType;
+    market?: StockMarket;
   };
 }
 

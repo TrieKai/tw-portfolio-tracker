@@ -28,7 +28,6 @@ export function EditHoldingModal({
   const [symbol, setSymbol] = useState(holding.symbol);
   const [propertyName, setPropertyName] = useState(holding.name);
   const [resolvedName, setResolvedName] = useState(holding.name);
-  const [market, setMarket] = useState(holding.market ?? "tse");
   const [buyPrice, setBuyPrice] = useState(String(holding.buyPrice));
   const [quantity, setQuantity] = useState(String(holding.quantity));
   const [buyDate, setBuyDate] = useState(holding.buyDate);
@@ -100,11 +99,7 @@ export function EditHoldingModal({
 
     setSubmitting(true);
 
-    const lookup = await resolveInstrumentName(
-      holding.assetType,
-      symbol,
-      isStock ? market : undefined
-    );
+    const lookup = await resolveInstrumentName(holding.assetType, symbol);
 
     setSubmitting(false);
 
@@ -118,7 +113,7 @@ export function EditHoldingModal({
       assetType: holding.assetType,
       name: lookup.name,
       symbol: lookup.symbol,
-      market: isStock ? market : undefined,
+      market: isStock ? lookup.market : undefined,
       buyPrice: price,
       quantity: qty,
       buyDate,
@@ -180,26 +175,10 @@ export function EditHoldingModal({
             <ResolvedInstrumentName
               assetType={holding.assetType}
               symbol={symbol}
-              market={market}
               initialName={holding.name}
               onResolved={(name) => setResolvedName(name)}
             />
           </>
-        )}
-
-        {isStock && (
-          <Field label="市場">
-            <select
-              value={market}
-              onChange={(e) =>
-                setMarket(e.target.value as "tse" | "otc")
-              }
-              className="input-field"
-            >
-              <option value="tse">上市（TSE）</option>
-              <option value="otc">上櫃（OTC）</option>
-            </select>
-          </Field>
         )}
 
         <div className="grid gap-4 sm:grid-cols-2">

@@ -20,6 +20,7 @@ import type {
   PriceSource,
   SaleTransaction,
   SellHoldingInput,
+  StockMarket,
 } from "@/lib/types/holding";
 
 export function loadPortfolio(): PortfolioStorage {
@@ -241,7 +242,7 @@ export function applyPriceUpdate(
   price: number,
   priceDate: string,
   source: PriceSource,
-  extra?: { name?: string; clearError?: boolean }
+  extra?: { name?: string; market?: StockMarket; clearError?: boolean }
 ): PortfolioStorage {
   const point: PricePoint = { date: priceDate, price, source };
   let next = {
@@ -255,6 +256,7 @@ export function applyPriceUpdate(
     priceSource: source,
     lastUpdatedAt: new Date().toISOString(),
     ...(extra?.name ? { name: extra.name } : {}),
+    ...(extra?.market ? { market: extra.market } : {}),
     ...(extra?.clearError ? { lastError: undefined } : {}),
   };
 

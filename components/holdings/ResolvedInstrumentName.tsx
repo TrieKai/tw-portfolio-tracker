@@ -11,10 +11,17 @@ import { isValidStockSymbolInput } from "@/lib/prices/stock-symbol";
 interface ResolvedInstrumentNameProps {
   assetType: AssetType;
   symbol: string;
-  market?: StockMarket;
   /** 編輯時帶入既有名稱，代號未變前可先顯示 */
   initialName?: string;
-  onResolved?: (name: string, normalizedSymbol: string) => void;
+  onResolved?: (
+    name: string,
+    normalizedSymbol: string,
+    market?: StockMarket
+  ) => void;
+}
+
+function getMarketLabel(market: StockMarket): string {
+  return market === "otc" ? "上櫃" : "上市";
 }
 
 /**
@@ -23,11 +30,11 @@ interface ResolvedInstrumentNameProps {
 export function ResolvedInstrumentName({
   assetType,
   symbol,
-  market = "tse",
   initialName,
   onResolved,
 }: ResolvedInstrumentNameProps) {
   const [name, setName] = useState(initialName ?? "");
+  const [market, setMarket] = useState<StockMarket | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">(
     initialName ? "ok" : "idle"
   );
@@ -39,6 +46,7 @@ export function ResolvedInstrumentName({
     const raw = symbol.trim();
     if (!raw) {
       setName("");
+      setMarket(null);
       setStatus("idle");
       setError(null);
       return;
@@ -46,6 +54,7 @@ export function ResolvedInstrumentName({
 
     if (assetType === "stock" && !isValidStockSymbolInput(raw)) {
       setName("");
+      setMarket(null);
       setStatus("error");
       setError("代號格式無效");
       return;
@@ -53,6 +62,7 @@ export function ResolvedInstrumentName({
 
     if (assetType === "fund" && !/^\d+$/.test(raw.replace(/\D/g, ""))) {
       setName("");
+      setMarket(null);
       setStatus("error");
       setError("基金代碼應為數字");
       return;
@@ -66,28 +76,33 @@ export function ResolvedInstrumentName({
       const res = await lookupInstrument({
         assetType,
         symbol: raw,
-        market: assetType === "stock" ? market : undefined,
       });
 
       if (cancelled) return;
 
       if (isLookupError(res)) {
         setName("");
+        setMarket(null);
         setStatus("error");
         setError(res.error);
         return;
       }
 
       setName(res.data.name);
+      setMarket(res.data.market ?? null);
       setStatus("ok");
-      onResolvedRef.current?.(res.data.name, res.data.symbol);
+      onResolvedRef.current?.(
+        res.data.name,
+        res.data.symbol,
+        res.data.market
+      );
     }, 450);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [assetType, symbol, market]);
+  }, [assetType, symbol]);
 
   if (!symbol.trim()) {
     return (
@@ -107,7 +122,14 @@ export function ResolvedInstrumentName({
     return (
       <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
         <p className="text-xs text-muted">名稱（自動帶入）</p>
-        <p className="mt-0.5 font-medium">{name}</p>
+        <div className="mt-0.5 flex flex-wrap items-center gap-2">
+          <p className="font-medium">{name}</p>
+          {market && (
+            <span className="rounded bg-accent-dim px-1.5 py-0.5 text-xs text-accent">
+              {getMarketLabel(market)}
+            </span>
+          )}
+        </div>
       </div>
     );
   }
@@ -118,13 +140,14 @@ export function ResolvedInstrumentName({
 /** 供表單送出前強制查詢一次 */
 export async function resolveInstrumentName(
   assetType: AssetType,
-  symbol: string,
-  market?: StockMarket
-): Promise<{ ok: true; name: string; symbol: string } | { ok: false; error: string }> {
+  symbol: string
+): Promise<
+  | { ok: true; name: string; symbol: string; market?: StockMarket }
+  | { ok: false; error: string }
+> {
   const res = await lookupInstrument({
     assetType,
     symbol,
-    market,
   });
 
   if (isLookupError(res)) {
@@ -135,5 +158,6 @@ export async function resolveInstrumentName(
     ok: true,
     name: res.data.name,
     symbol: res.data.symbol,
+    market: res.data.market,
   };
 }

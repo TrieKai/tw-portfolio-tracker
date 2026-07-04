@@ -27,6 +27,8 @@ export interface UpdatePriceSuccess {
   currency: string;
   /** 漲跌幅等額外欄位 */
   changePercent?: number;
+  /** 股票自動判斷之上市櫃別 */
+  market?: StockMarket;
   source: "cache" | "twse" | "fundclear";
 }
 

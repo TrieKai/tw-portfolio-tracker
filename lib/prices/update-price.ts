@@ -37,7 +37,7 @@ export class UpdatePriceError extends Error {
 export async function updatePrice(
   params: UpdatePriceParams
 ): Promise<UpdatePriceSuccess> {
-  const { assetType, symbol, market = "tse", name, skipCache = false } = params;
+  const { assetType, symbol, market, name, skipCache = false } = params;
 
   if (assetType === "stock") {
     try {
@@ -51,6 +51,7 @@ export async function updatePrice(
         priceDate: data.priceDate,
         currency: data.currency,
         changePercent: data.changePercent,
+        market: data.market,
         source: "twse",
       };
     } catch (error) {

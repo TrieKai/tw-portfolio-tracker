@@ -397,6 +397,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       persist(
         applyPriceUpdate(storage, id, res.price, res.priceDate, "api", {
           name: res.name,
+          market: res.market,
           clearError: true,
         })
       );
@@ -434,7 +435,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
             item.data.price,
             item.data.priceDate,
             "api",
-            { name: item.data.name, clearError: true }
+            { name: item.data.name, market: item.data.market, clearError: true }
           );
         } else {
           next = updateHolding(next, item.holdingId, {

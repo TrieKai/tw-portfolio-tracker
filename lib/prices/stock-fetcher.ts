@@ -20,6 +20,7 @@ export interface StockPriceData {
   price: number;
   priceDate: string;
   currency: "TWD";
+  market: StockMarket;
   changePercent?: number;
   previousClose?: number;
 }
@@ -189,12 +190,11 @@ async function fetchStockInfoRow(
   return row;
 }
 
-/**
- * 從 TWSE MIS 取得單一股票報價（支援 00631L 等 ETF 槓桿/反向代號）
- */
-export async function fetchStockPrice(
+const STOCK_MARKETS: readonly StockMarket[] = ["tse", "otc"];
+
+async function fetchStockPriceForMarket(
   symbol: string,
-  market: StockMarket = "tse"
+  market: StockMarket
 ): Promise<StockPriceData> {
   const candidates = buildStockSymbolCandidates(symbol);
   let lastInvalid: FetchRetryError | null = null;
@@ -218,6 +218,7 @@ export async function fetchStockPrice(
         price: parsed.price,
         priceDate: parsed.priceDate,
         currency: "TWD",
+        market,
         changePercent,
         previousClose: parsed.yesterday ?? undefined,
       };
@@ -234,7 +235,43 @@ export async function fetchStockPrice(
   throw (
     lastInvalid ??
     new FetchRetryError(
-      `找不到股票代號「${display}」（${market.toUpperCase()}），請確認上市/上櫃市場是否正確`,
+      `找不到股票代號「${display}」（${market.toUpperCase()}）`,
+      "STOCK_NOT_FOUND"
+    )
+  );
+}
+
+/**
+ * 從 TWSE MIS 取得單一股票報價（支援 00631L 等 ETF 槓桿/反向代號）
+ * 未指定 market 時依序嘗試上市、上櫃；指定但查無時亦會 fallback 另一市場
+ */
+export async function fetchStockPrice(
+  symbol: string,
+  market?: StockMarket
+): Promise<StockPriceData> {
+  const marketsToTry = market
+    ? [market, ...STOCK_MARKETS.filter((m) => m !== market)]
+    : STOCK_MARKETS;
+
+  let lastNotFound: FetchRetryError | null = null;
+
+  for (const m of marketsToTry) {
+    try {
+      return await fetchStockPriceForMarket(symbol, m);
+    } catch (error) {
+      if (error instanceof FetchRetryError && error.code === "STOCK_NOT_FOUND") {
+        lastNotFound = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  const display = normalizeStockSymbol(symbol);
+  throw (
+    lastNotFound ??
+    new FetchRetryError(
+      `找不到股票代號「${display}」，請確認代號是否正確`,
       "STOCK_NOT_FOUND"
     )
   );

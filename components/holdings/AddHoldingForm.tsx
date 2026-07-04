@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AssetType, StockMarket } from "@/lib/types/holding";
+import type { AssetType } from "@/lib/types/holding";
 import { isValidStockSymbolInput } from "@/lib/prices/stock-symbol";
 import {
   getAssetTypeLabel,
@@ -27,7 +27,6 @@ export function AddHoldingForm() {
   const [symbol, setSymbol] = useState("");
   const [propertyName, setPropertyName] = useState("");
   const [resolvedName, setResolvedName] = useState("");
-  const [market, setMarket] = useState<StockMarket>("tse");
   const [buyPrice, setBuyPrice] = useState("");
   const [currentEstimate, setCurrentEstimate] = useState("");
   const [mortgageBalance, setMortgageBalance] = useState("");
@@ -126,11 +125,7 @@ export function AddHoldingForm() {
       return;
     }
 
-    const lookup = await resolveInstrumentName(
-      assetType,
-      symbol,
-      assetType === "stock" ? market : undefined
-    );
+    const lookup = await resolveInstrumentName(assetType, symbol);
 
     if (!lookup.ok) {
       setError(lookup.error);
@@ -142,7 +137,7 @@ export function AddHoldingForm() {
       assetType,
       name: lookup.name,
       symbol: lookup.symbol,
-      market: assetType === "stock" ? market : undefined,
+      market: assetType === "stock" ? lookup.market : undefined,
       buyPrice: price,
       quantity: qty,
       buyDate,
@@ -212,23 +207,9 @@ export function AddHoldingForm() {
           <ResolvedInstrumentName
             assetType={assetType}
             symbol={symbol}
-            market={market}
             onResolved={(name) => setResolvedName(name)}
           />
         </>
-      )}
-
-      {assetType === "stock" && (
-        <Field label="市場">
-          <select
-            value={market}
-            onChange={(e) => setMarket(e.target.value as StockMarket)}
-            className="input-field"
-          >
-            <option value="tse">上市（TSE）</option>
-            <option value="otc">上櫃（OTC）</option>
-          </select>
-        </Field>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">

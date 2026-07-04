@@ -19,6 +19,7 @@ export interface LookupInstrumentResult {
   name: string;
   symbol: string;
   assetType: AssetType;
+  market?: StockMarket;
 }
 
 export class LookupInstrumentError extends Error {
@@ -34,7 +35,7 @@ export class LookupInstrumentError extends Error {
 export async function lookupInstrumentName(
   params: LookupInstrumentParams
 ): Promise<LookupInstrumentResult> {
-  const { assetType, market = "tse" } = params;
+  const { assetType, market } = params;
 
   if (assetType === "stock") {
     try {
@@ -43,6 +44,7 @@ export async function lookupInstrumentName(
         name: data.name.trim() || data.symbol,
         symbol: data.symbol,
         assetType: "stock",
+        market: data.market,
       };
     } catch (error) {
       if (error instanceof FetchRetryError) {
