@@ -38,6 +38,10 @@ import {
   computePortfolioSummary,
   sortSalesByDateDesc,
 } from "@/lib/portfolio/calculations";
+import {
+  computePortfolioExposure,
+  type PortfolioExposureSummary,
+} from "@/lib/portfolio/exposure";
 import { applyImportMode } from "@/lib/storage/portfolio-export";
 import type { PortfolioImportMode } from "@/lib/storage/portfolio-export";
 import { hasPortfolioData } from "@/lib/storage/parse-portfolio";
@@ -58,6 +62,7 @@ import type {
   EditHoldingInput,
   Holding,
   HoldingWithMetrics,
+  PortfolioSettings,
   PortfolioStorage,
   PortfolioSummary,
   SaleTransaction,
@@ -76,6 +81,7 @@ interface PortfolioContextValue {
   holdings: HoldingWithMetrics[];
   sales: SaleTransaction[];
   summary: PortfolioSummary;
+  exposure: PortfolioExposureSummary;
   storage: PortfolioStorage;
   batchStatus: UpdateStatus;
   batchMessage: string | null;
@@ -103,6 +109,9 @@ interface PortfolioContextValue {
     range: ChartRange
   ) => Promise<{ ok: boolean; count?: number; error?: string }>;
   setAutoUpdate: (enabled: boolean) => void;
+  setExposureSettings: (
+    patch: Pick<PortfolioSettings, "netAssets" | "liabilities">
+  ) => void;
   /** 從 JSON 備份匯入（取代或合併） */
   importPortfolio: (
     incoming: PortfolioStorage,
@@ -295,6 +304,11 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [holdings, storage?.sales, storage?.holdings, storage?.priceHistory]
   );
 
+  const exposure = useMemo(
+    () => computePortfolioExposure(holdings, storage?.settings ?? {}),
+    [holdings, storage?.settings]
+  );
+
   const add = useCallback(
     (
       input: CreateHoldingInput,
@@ -455,6 +469,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     (enabled: boolean) => {
       if (!storage) return;
       persist(updateSettings(storage, { autoUpdateEnabled: enabled }));
+    },
+    [storage, persist]
+  );
+
+  const setExposureSettings = useCallback(
+    (patch: Pick<PortfolioSettings, "netAssets" | "liabilities">) => {
+      if (!storage) return;
+      persist(updateSettings(storage, patch));
     },
     [storage, persist]
   );
@@ -675,6 +697,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       holdings,
       sales,
       summary,
+      exposure,
       storage: storage ?? loadPortfolio(),
       batchStatus,
       batchMessage,
@@ -689,6 +712,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importPriceHistory,
       importFundHistory,
       setAutoUpdate,
+      setExposureSettings,
       importPortfolio,
       refreshFromCloud,
     }),
@@ -701,6 +725,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       holdings,
       sales,
       summary,
+      exposure,
       batchStatus,
       batchMessage,
       add,
@@ -714,6 +739,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importPriceHistory,
       importFundHistory,
       setAutoUpdate,
+      setExposureSettings,
       importPortfolio,
       refreshFromCloud,
     ]

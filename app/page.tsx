@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AssetAllocationChart } from "@/components/dashboard/AssetAllocationChart";
+import { ExposurePanel } from "@/components/dashboard/ExposurePanel";
 import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
@@ -13,7 +14,7 @@ import { formatCurrency } from "@/lib/portfolio/calculations";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export default function DashboardPage() {
-  const { ready, holdings, summary, storage, sales } = usePortfolio();
+  const { ready, holdings, summary, exposure, storage, sales, setExposureSettings } = usePortfolio();
 
   if (!ready) {
     return <LoadingSpinner />;
@@ -116,6 +117,12 @@ export default function DashboardPage() {
           </ul>
         </div>
       </div>
+
+      <ExposurePanel
+        exposure={exposure}
+        settings={storage.settings}
+        onSaveSettings={setExposureSettings}
+      />
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">月度損益</h2>

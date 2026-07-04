@@ -46,6 +46,11 @@ export interface Holding {
   lastUpdatedAt?: string;
   /** 最近一次更新錯誤訊息（供 UI 提示） */
   lastError?: string;
+  /**
+   * 槓桿倍數（選填；未設定時依代號／名稱推斷）
+   * 曝險金額 = 市值 × leverageMultiplier
+   */
+  leverageMultiplier?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -102,6 +107,13 @@ export interface PortfolioSettings {
   lastBatchUpdateAt?: string;
   /** 偏好主題；null 表示跟隨系統 */
   theme?: "light" | "dark" | "system";
+  /**
+   * 淨資產／自有資金（元）
+   * 用於曝險比例 = 總曝險 ÷ 淨資產；未設定時以「持倉市值 − liabilities」推算
+   */
+  netAssets?: number;
+  /** 投資負債（信貸等，元）；淨資產未直接設定時從持倉市值扣除 */
+  liabilities?: number;
 }
 
 /** 持倉加上計算後的損益欄位（僅前端使用，不寫入 storage） */
