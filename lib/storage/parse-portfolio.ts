@@ -11,6 +11,7 @@ export function defaultPortfolioStorage(): PortfolioStorage {
     holdings: [],
     priceHistory: {},
     sales: [],
+    corporateActions: [],
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -25,10 +26,17 @@ export function normalizePortfolioStorage(raw: unknown): PortfolioStorage | null
     ...defaultPortfolioStorage(),
     ...parsed,
     sales: Array.isArray(parsed.sales) ? parsed.sales : [],
+    corporateActions: Array.isArray(parsed.corporateActions)
+      ? parsed.corporateActions
+      : [],
     settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
   };
 }
 
 export function hasPortfolioData(state: PortfolioStorage): boolean {
-  return state.holdings.length > 0 || state.sales.length > 0;
+  return (
+    state.holdings.length > 0 ||
+    state.sales.length > 0 ||
+    state.corporateActions.length > 0
+  );
 }

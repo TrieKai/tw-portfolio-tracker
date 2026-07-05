@@ -72,6 +72,13 @@ export function mergePortfolioStorage(
     saleMap.set(s.id, s);
   }
 
+  const corporateActionMap = new Map(
+    current.corporateActions.map((action) => [action.id, action])
+  );
+  for (const action of incoming.corporateActions) {
+    corporateActionMap.set(action.id, action);
+  }
+
   let priceHistory = { ...current.priceHistory };
   for (const [holdingId, points] of Object.entries(incoming.priceHistory)) {
     if (!Array.isArray(points) || points.length === 0) continue;
@@ -82,6 +89,7 @@ export function mergePortfolioStorage(
     version: 1,
     holdings: [...holdingMap.values()],
     sales: [...saleMap.values()],
+    corporateActions: [...corporateActionMap.values()],
     priceHistory,
     settings: {
       ...incoming.settings,

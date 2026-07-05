@@ -10,6 +10,7 @@ import {
 } from "@/lib/storage/parse-portfolio";
 import { normalizeStockSymbol } from "@/lib/prices/stock-symbol";
 import type {
+  CorporateActionRecord,
   CreateHoldingInput,
   EditHoldingInput,
   Holding,
@@ -22,6 +23,7 @@ import type {
   SellHoldingInput,
   StockMarket,
 } from "@/lib/types/holding";
+import type { CorporateActionEvent } from "@/lib/corporate-actions/types";
 
 export function loadPortfolio(): PortfolioStorage {
   if (typeof window === "undefined") return defaultPortfolioStorage();
@@ -46,6 +48,16 @@ function newId(): string {
     return crypto.randomUUID();
   }
   return `h-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function hasHandledCorporateAction(
+  state: PortfolioStorage,
+  holdingId: string,
+  sourceEventId: string
+): boolean {
+  return state.corporateActions.some(
+    (a) => a.holdingId === holdingId && a.sourceEventId === sourceEventId
+  );
 }
 
 export function addHolding(
@@ -272,6 +284,64 @@ export function updateSettings(
     ...state,
     settings: { ...state.settings, ...settings },
   };
+}
+
+export function applyCorporateAction(
+  state: PortfolioStorage,
+  event: CorporateActionEvent
+): PortfolioStorage {
+  const holding = state.holdings.find((h) => h.id === event.holdingId);
+  if (!holding || holding.assetType !== "stock") return state;
+  if (event.effectiveDate < holding.buyDate) return state;
+  if (hasHandledCorporateAction(state, holding.id, event.id)) return state;
+
+  const ratio =
+    Number.isFinite(event.stockDividendRatio) && event.stockDividendRatio > 0
+      ? event.stockDividendRatio
+      : 0;
+  const quantityBefore = holding.quantity;
+  const buyPriceBefore = holding.buyPrice;
+  const totalCost = quantityBefore * buyPriceBefore;
+  const quantityAfter = ratio > 0 ? quantityBefore * (1 + ratio) : quantityBefore;
+  const buyPriceAfter =
+    ratio > 0 && quantityAfter > 0 ? totalCost / quantityAfter : buyPriceBefore;
+  const now = new Date().toISOString();
+
+  const record: CorporateActionRecord = {
+    id: newId(),
+    holdingId: holding.id,
+    assetType: holding.assetType,
+    symbol: holding.symbol,
+    market: holding.market,
+    name: holding.name,
+    actionType: event.type,
+    effectiveDate: event.effectiveDate,
+    source: event.source,
+    sourceEventId: event.id,
+    stockDividendRatio: event.stockDividendRatio,
+    subscriptionRatio: event.subscriptionRatio,
+    subscriptionPrice: event.subscriptionPrice,
+    cashDividend: event.cashDividend,
+    quantityBefore,
+    quantityAfter,
+    buyPriceBefore,
+    buyPriceAfter,
+    note: event.note,
+    createdAt: now,
+  };
+
+  const withRecord: PortfolioStorage = {
+    ...state,
+    corporateActions: [...state.corporateActions, record],
+  };
+
+  if (ratio <= 0) return withRecord;
+
+  return updateHolding(withRecord, holding.id, {
+    quantity: quantityAfter,
+    buyPrice: buyPriceAfter,
+    lastError: undefined,
+  });
 }
 
 /** 將匯入的歷史價格寫入 priceHistory，並以最新一筆更新持倉現價 */

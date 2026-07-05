@@ -19,6 +19,8 @@ import {
   canImportHistory,
   fetchHistoryForHoldings,
 } from "@/lib/client/holding-history";
+import { fetchCorporateActions } from "@/lib/client/corporate-actions-api";
+import type { CorporateActionEvent } from "@/lib/corporate-actions/types";
 import {
   fetchBatchPriceUpdate,
   fetchPriceUpdate,
@@ -51,6 +53,7 @@ import type { PortfolioImportMode } from "@/lib/storage/portfolio-export";
 import { hasPortfolioData } from "@/lib/storage/parse-portfolio";
 import {
   addHolding,
+  applyCorporateAction,
   applyImportedPriceHistory,
   applyPriceUpdate,
   editHolding,
@@ -76,6 +79,7 @@ import type {
 type UpdateStatus = "idle" | "loading" | "partial" | "done" | "error";
 export type StorageMode = "anonymous" | "cloud";
 export type SyncStatus = "idle" | "syncing" | "synced" | "error";
+export type CorporateActionStatus = UpdateStatus;
 
 interface PortfolioContextValue {
   ready: boolean;
@@ -90,6 +94,9 @@ interface PortfolioContextValue {
   storage: PortfolioStorage;
   batchStatus: UpdateStatus;
   batchMessage: string | null;
+  corporateActionStatus: CorporateActionStatus;
+  corporateActionMessage: string | null;
+  pendingCorporateActions: CorporateActionEvent[];
   add: (
     input: CreateHoldingInput,
     options?: { initialPrice?: number; initialPriceDate?: string }
@@ -100,6 +107,8 @@ interface PortfolioContextValue {
   setManualPrice: (id: string, price: number, priceDate: string) => void;
   updateOne: (id: string) => Promise<boolean>;
   updateAll: () => Promise<void>;
+  scanCorporateActions: () => Promise<void>;
+  applyDetectedCorporateAction: (event: CorporateActionEvent) => void;
   refreshPortfolioForRange: (range: ChartRange) => Promise<{
     ok: boolean;
     message?: string;
@@ -139,6 +148,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<UpdateStatus>("idle");
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [corporateActionStatus, setCorporateActionStatus] =
+    useState<CorporateActionStatus>("idle");
+  const [corporateActionMessage, setCorporateActionMessage] = useState<
+    string | null
+  >(null);
+  const [detectedCorporateActions, setDetectedCorporateActions] = useState<
+    CorporateActionEvent[]
+  >([]);
   const [uploadPrompt, setUploadPrompt] = useState<PortfolioStorage | null>(
     null
   );
@@ -319,6 +336,17 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [holdings, storage?.priceHistory]
   );
 
+  const pendingCorporateActions = useMemo(() => {
+    const handled = new Set(
+      (storage?.corporateActions ?? []).map(
+        (action) => `${action.holdingId}:${action.sourceEventId}`
+      )
+    );
+    return detectedCorporateActions.filter(
+      (event) => !handled.has(`${event.holdingId}:${event.id}`)
+    );
+  }, [detectedCorporateActions, storage?.corporateActions]);
+
   const add = useCallback(
     (
       input: CreateHoldingInput,
@@ -475,6 +503,56 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       setBatchMessage("網路錯誤，無法連線至更新 API");
     }
   }, [storage, persist]);
+
+  const scanCorporateActions = useCallback(async () => {
+    if (!storage) return;
+    const stockHoldings = storage.holdings.filter((h) => h.assetType === "stock");
+    if (stockHoldings.length === 0) {
+      setDetectedCorporateActions([]);
+      setCorporateActionStatus("done");
+      setCorporateActionMessage("沒有台股持倉可查詢");
+      return;
+    }
+
+    setCorporateActionStatus("loading");
+    setCorporateActionMessage(null);
+
+    try {
+      const res = await fetchCorporateActions(stockHoldings);
+      if (!res.success) {
+        setCorporateActionStatus("error");
+        setCorporateActionMessage(res.error);
+        return;
+      }
+      setDetectedCorporateActions(res.events);
+      const handled = new Set(
+        storage.corporateActions.map(
+          (action) => `${action.holdingId}:${action.sourceEventId}`
+        )
+      );
+      const pendingCount = res.events.filter(
+        (event) => !handled.has(`${event.holdingId}:${event.id}`)
+      ).length;
+      setCorporateActionStatus("done");
+      setCorporateActionMessage(
+        pendingCount > 0
+          ? `找到 ${pendingCount} 筆待處理公司行動`
+          : "目前沒有待處理公司行動"
+      );
+    } catch {
+      setCorporateActionStatus("error");
+      setCorporateActionMessage("公司行動查詢失敗，請稍後重試");
+    }
+  }, [storage]);
+
+  const applyDetectedCorporateAction = useCallback(
+    (event: CorporateActionEvent) => {
+      if (!storage) return;
+      persist(applyCorporateAction(storage, event));
+      setCorporateActionMessage("已處理公司行動");
+    },
+    [storage, persist]
+  );
 
   const setAutoUpdate = useCallback(
     (enabled: boolean) => {
@@ -713,6 +791,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       storage: storage ?? loadPortfolio(),
       batchStatus,
       batchMessage,
+      corporateActionStatus,
+      corporateActionMessage,
+      pendingCorporateActions,
       add,
       edit,
       sell,
@@ -720,6 +801,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       setManualPrice,
       updateOne,
       updateAll,
+      scanCorporateActions,
+      applyDetectedCorporateAction,
       refreshPortfolioForRange,
       importPriceHistory,
       importFundHistory,
@@ -741,6 +824,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       pnlBreakdowns,
       batchStatus,
       batchMessage,
+      corporateActionStatus,
+      corporateActionMessage,
+      pendingCorporateActions,
       add,
       edit,
       sell,
@@ -748,6 +834,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       setManualPrice,
       updateOne,
       updateAll,
+      scanCorporateActions,
+      applyDetectedCorporateAction,
       refreshPortfolioForRange,
       importPriceHistory,
       importFundHistory,

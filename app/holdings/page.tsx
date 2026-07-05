@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CorporateActionsPanel } from "@/components/holdings/CorporateActionsPanel";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { SaleHistoryTable } from "@/components/holdings/SaleHistoryTable";
 import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
@@ -24,6 +25,7 @@ export default function HoldingsPage() {
           </Link>
         }
       />
+      <CorporateActionsPanel />
       <HoldingsTable holdings={holdings} />
 
       <section className="space-y-4">

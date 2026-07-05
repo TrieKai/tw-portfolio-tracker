@@ -95,6 +95,37 @@ export interface SaleTransaction {
   createdAt: string;
 }
 
+export type CorporateActionType =
+  | "stock_dividend"
+  | "cash_dividend"
+  | "rights_issue"
+  | "mixed"
+  | "manual_review";
+
+export interface CorporateActionRecord {
+  id: string;
+  holdingId: string;
+  assetType: AssetType;
+  symbol: string;
+  market?: StockMarket;
+  name: string;
+  actionType: CorporateActionType;
+  /** 除權息或公司行動生效日 ISO YYYY-MM-DD */
+  effectiveDate: string;
+  source: "twse" | "tpex" | "manual";
+  sourceEventId: string;
+  stockDividendRatio?: number;
+  subscriptionRatio?: number;
+  subscriptionPrice?: number;
+  cashDividend?: number;
+  quantityBefore: number;
+  quantityAfter: number;
+  buyPriceBefore: number;
+  buyPriceAfter: number;
+  note?: string;
+  createdAt: string;
+}
+
 /** 本地儲存完整狀態 */
 export interface PortfolioStorage {
   version: 1;
@@ -102,6 +133,8 @@ export interface PortfolioStorage {
   priceHistory: PriceHistoryMap;
   /** 賣出紀錄（依 createdAt 追加；展示時依 sellDate 排序） */
   sales: SaleTransaction[];
+  /** 已處理公司行動，避免同一事件重複套用 */
+  corporateActions: CorporateActionRecord[];
   settings: PortfolioSettings;
 }
 
