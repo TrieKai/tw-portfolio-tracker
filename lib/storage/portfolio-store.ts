@@ -9,11 +9,13 @@ import {
   normalizePortfolioStorage,
 } from "@/lib/storage/parse-portfolio";
 import { normalizeStockSymbol } from "@/lib/prices/stock-symbol";
+import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import type {
   CorporateActionRecord,
   CreateHoldingInput,
   EditHoldingInput,
   Holding,
+  ManualCorporateActionInput,
   PortfolioSettings,
   PortfolioStorage,
   PriceHistoryMap,
@@ -32,7 +34,10 @@ export function loadPortfolio(): PortfolioStorage {
     const raw = localStorage.getItem(PORTFOLIO_STORAGE_KEY);
     if (!raw) return defaultPortfolioStorage();
     const parsed = JSON.parse(raw) as unknown;
-    return normalizePortfolioStorage(parsed) ?? defaultPortfolioStorage();
+    const normalized = normalizePortfolioStorage(parsed) ?? defaultPortfolioStorage();
+    const repaired = repairCorporateActionPriceHistory(normalized);
+    if (repaired !== normalized) savePortfolio(repaired);
+    return repaired;
   } catch {
     return defaultPortfolioStorage();
   }
@@ -248,6 +253,192 @@ export function appendPricePoint(
   return { ...priceHistory, [holdingId]: trimmed };
 }
 
+function rebaseHistoricalPricesBeforeDate(
+  priceHistory: PriceHistoryMap,
+  holdingId: string,
+  effectiveDate: string,
+  adjustmentRatio: number
+): PriceHistoryMap {
+  if (!Number.isFinite(adjustmentRatio) || adjustmentRatio <= 0) {
+    return priceHistory;
+  }
+
+  const points = priceHistory[holdingId];
+  if (!points || points.length === 0) return priceHistory;
+
+  return {
+    ...priceHistory,
+    [holdingId]: points.map((point) =>
+      point.date < effectiveDate
+        ? { ...point, price: point.price / adjustmentRatio }
+        : point
+    ),
+  };
+}
+
+function rebaseCurrentPriceBeforeDate(
+  holding: Holding,
+  effectiveDate: string,
+  adjustmentRatio: number
+): Partial<Holding> {
+  if (
+    !holding.currentPrice ||
+    !holding.priceDate ||
+    holding.priceDate >= effectiveDate ||
+    !Number.isFinite(adjustmentRatio) ||
+    adjustmentRatio <= 0
+  ) {
+    return {};
+  }
+
+  return {
+    currentPrice: holding.currentPrice / adjustmentRatio,
+  };
+}
+
+function corporateActionAdjustmentRatio(action: CorporateActionRecord): number {
+  if (
+    action.adjustmentRatio !== undefined &&
+    Number.isFinite(action.adjustmentRatio) &&
+    action.adjustmentRatio > 0
+  ) {
+    return action.adjustmentRatio;
+  }
+
+  if (
+    action.stockDividendRatio !== undefined &&
+    Number.isFinite(action.stockDividendRatio) &&
+    action.stockDividendRatio > 0
+  ) {
+    return 1 + action.stockDividendRatio;
+  }
+
+  return 1;
+}
+
+function shouldRebaseExistingHistory(
+  points: PricePoint[] | undefined,
+  holding: Holding | undefined,
+  action: CorporateActionRecord,
+  adjustmentRatio: number
+): boolean {
+  if (!points || points.length === 0) return false;
+
+  const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+  const before = [...sorted]
+    .reverse()
+    .find((point) => point.date < action.effectiveDate);
+  if (!before || before.price <= 0) return false;
+
+  const afterFromHistory = sorted.find(
+    (point) => point.date >= action.effectiveDate && point.price > 0
+  );
+  const after =
+    afterFromHistory ??
+    (holding?.priceDate &&
+    holding.priceDate >= action.effectiveDate &&
+    holding.currentPrice &&
+    holding.currentPrice > 0
+      ? {
+          date: holding.priceDate,
+          price: holding.currentPrice,
+          source: holding.priceSource ?? "api",
+        }
+      : undefined);
+
+  if (!after || after.price <= 0) return false;
+
+  const observedRatio = before.price / after.price;
+  if (!Number.isFinite(observedRatio) || observedRatio <= 0) return false;
+
+  const distanceToRaw = Math.abs(Math.log(observedRatio / adjustmentRatio));
+  const distanceToAdjusted = Math.abs(Math.log(observedRatio));
+  return distanceToRaw + 0.08 < distanceToAdjusted;
+}
+
+function markPriceHistoryAdjusted(
+  actions: CorporateActionRecord[],
+  actionId: string,
+  adjustedAt: string
+): CorporateActionRecord[] {
+  return actions.map((action) =>
+    action.id === actionId
+      ? {
+          ...action,
+          priceHistoryAdjustedAt: action.priceHistoryAdjustedAt ?? adjustedAt,
+        }
+      : action
+  );
+}
+
+function adjustPointForCorporateActions(
+  state: PortfolioStorage,
+  holdingId: string,
+  point: PricePoint
+): PricePoint {
+  const ratio = state.corporateActions.reduce((product, action) => {
+    if (action.holdingId !== holdingId || point.date >= action.effectiveDate) {
+      return product;
+    }
+    const actionRatio = corporateActionAdjustmentRatio(action);
+    return actionRatio > 0 ? product * actionRatio : product;
+  }, 1);
+
+  if (ratio === 1) return point;
+  return { ...point, price: point.price / ratio };
+}
+
+export function repairCorporateActionPriceHistory(
+  state: PortfolioStorage
+): PortfolioStorage {
+  let next = state;
+  const adjustedAt = new Date().toISOString();
+
+  for (const action of state.corporateActions) {
+    if (action.priceHistoryAdjustedAt) continue;
+
+    const adjustmentRatio = corporateActionAdjustmentRatio(action);
+    if (!Number.isFinite(adjustmentRatio) || adjustmentRatio <= 0 || adjustmentRatio === 1) {
+      next = {
+        ...next,
+        corporateActions: markPriceHistoryAdjusted(
+          next.corporateActions,
+          action.id,
+          adjustedAt
+        ),
+      };
+      continue;
+    }
+
+    const holding = next.holdings.find((h) => h.id === action.holdingId);
+    const shouldRebase = shouldRebaseExistingHistory(
+      next.priceHistory[action.holdingId],
+      holding,
+      action,
+      adjustmentRatio
+    );
+
+    next = {
+      ...next,
+      priceHistory: shouldRebase
+        ? rebaseHistoricalPricesBeforeDate(
+            next.priceHistory,
+            action.holdingId,
+            action.effectiveDate,
+            adjustmentRatio
+          )
+        : next.priceHistory,
+      corporateActions: markPriceHistoryAdjusted(
+        next.corporateActions,
+        action.id,
+        adjustedAt
+      ),
+    };
+  }
+
+  return next;
+}
+
 export function applyPriceUpdate(
   state: PortfolioStorage,
   holdingId: string,
@@ -256,14 +447,18 @@ export function applyPriceUpdate(
   source: PriceSource,
   extra?: { name?: string; market?: StockMarket; clearError?: boolean }
 ): PortfolioStorage {
-  const point: PricePoint = { date: priceDate, price, source };
+  const point = adjustPointForCorporateActions(state, holdingId, {
+    date: priceDate,
+    price,
+    source,
+  });
   let next = {
     ...state,
     priceHistory: appendPricePoint(state.priceHistory, holdingId, point),
   };
 
   const patch: Partial<Holding> = {
-    currentPrice: price,
+    currentPrice: point.price,
     priceDate,
     priceSource: source,
     lastUpdatedAt: new Date().toISOString(),
@@ -322,10 +517,14 @@ export function applyCorporateAction(
     subscriptionRatio: event.subscriptionRatio,
     subscriptionPrice: event.subscriptionPrice,
     cashDividend: event.cashDividend,
+    adjustmentRatio: ratio > 0 ? 1 + ratio : undefined,
     quantityBefore,
     quantityAfter,
     buyPriceBefore,
     buyPriceAfter,
+    totalCostBefore: totalCost,
+    totalCostAfter: ratio > 0 ? totalCost : undefined,
+    priceHistoryAdjustedAt: ratio > 0 ? now : undefined,
     note: event.note,
     createdAt: now,
   };
@@ -337,11 +536,122 @@ export function applyCorporateAction(
 
   if (ratio <= 0) return withRecord;
 
-  return updateHolding(withRecord, holding.id, {
+  const adjustmentRatio = 1 + ratio;
+  const withAdjustedHistory: PortfolioStorage = {
+    ...withRecord,
+    priceHistory: rebaseHistoricalPricesBeforeDate(
+      withRecord.priceHistory,
+      holding.id,
+      event.effectiveDate,
+      adjustmentRatio
+    ),
+  };
+
+  return updateHolding(withAdjustedHistory, holding.id, {
     quantity: quantityAfter,
     buyPrice: buyPriceAfter,
+    ...rebaseCurrentPriceBeforeDate(holding, event.effectiveDate, adjustmentRatio),
     lastError: undefined,
   });
+}
+
+export function applyManualCorporateAction(
+  state: PortfolioStorage,
+  input: ManualCorporateActionInput
+): PortfolioStorage {
+  const holding = state.holdings.find((h) => h.id === input.holdingId);
+  if (!holding || holding.assetType !== "stock") return state;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveDate)) return state;
+  if (!Number.isFinite(input.adjustmentRatio) || input.adjustmentRatio <= 0) {
+    return state;
+  }
+
+  const cashReturnPerShare =
+    input.cashReturnPerShare !== undefined &&
+    Number.isFinite(input.cashReturnPerShare) &&
+    input.cashReturnPerShare > 0
+      ? input.cashReturnPerShare
+      : 0;
+  const quantityBefore = holding.quantity;
+  const buyPriceBefore = holding.buyPrice;
+  const totalCostBefore = quantityBefore * buyPriceBefore;
+  const cashReturnTotal = cashReturnPerShare * quantityBefore;
+  const totalCostAfter = Math.max(totalCostBefore - cashReturnTotal, 0);
+  const quantityAfter = quantityBefore * input.adjustmentRatio;
+  if (!Number.isFinite(quantityAfter) || quantityAfter <= 0) return state;
+
+  const buyPriceAfter = totalCostAfter / quantityAfter;
+  const now = new Date().toISOString();
+  const sourceEventId = `manual:${holding.id}:${input.effectiveDate}:${input.actionType}:${input.adjustmentRatio}`;
+
+  const record: CorporateActionRecord = {
+    id: newId(),
+    holdingId: holding.id,
+    assetType: holding.assetType,
+    symbol: holding.symbol,
+    market: holding.market,
+    name: holding.name,
+    actionType: input.actionType,
+    effectiveDate: input.effectiveDate,
+    source: "manual",
+    sourceEventId,
+    adjustmentRatio: input.adjustmentRatio,
+    cashReturnPerShare: cashReturnPerShare || undefined,
+    quantityBefore,
+    quantityAfter,
+    buyPriceBefore,
+    buyPriceAfter,
+    totalCostBefore,
+    totalCostAfter,
+    priceHistoryAdjustedAt: now,
+    note: input.note?.trim() || undefined,
+    createdAt: now,
+  };
+
+  const withRecord: PortfolioStorage = {
+    ...state,
+    corporateActions: [...state.corporateActions, record],
+  };
+
+  const withAdjustedHistory: PortfolioStorage = {
+    ...withRecord,
+    priceHistory: rebaseHistoricalPricesBeforeDate(
+      withRecord.priceHistory,
+      holding.id,
+      input.effectiveDate,
+      input.adjustmentRatio
+    ),
+  };
+
+  return updateHolding(withAdjustedHistory, holding.id, {
+    quantity: quantityAfter,
+    buyPrice: buyPriceAfter,
+    ...rebaseCurrentPriceBeforeDate(
+      holding,
+      input.effectiveDate,
+      input.adjustmentRatio
+    ),
+    lastError: undefined,
+  });
+}
+
+export function applyManualCorporateActionToGroup(
+  state: PortfolioStorage,
+  groupKey: string,
+  input: Omit<ManualCorporateActionInput, "holdingId">
+): PortfolioStorage {
+  const lots = state.holdings.filter(
+    (holding) => holding.assetType === "stock" && holdingGroupKey(holding) === groupKey
+  );
+
+  return lots.reduce(
+    (next, holding) =>
+      applyManualCorporateAction(next, {
+        ...input,
+        holdingId: holding.id,
+      }),
+    state
+  );
 }
 
 /** 將匯入的歷史價格寫入 priceHistory，並以最新一筆更新持倉現價 */
@@ -352,7 +662,9 @@ export function applyImportedPriceHistory(
 ): PortfolioStorage {
   if (points.length === 0) return state;
 
-  const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+  const sorted = points
+    .map((point) => adjustPointForCorporateActions(state, holdingId, point))
+    .sort((a, b) => a.date.localeCompare(b.date));
   const latest = sorted[sorted.length - 1];
 
   let next: PortfolioStorage = {

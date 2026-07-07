@@ -100,6 +100,10 @@ export type CorporateActionType =
   | "cash_dividend"
   | "rights_issue"
   | "mixed"
+  | "split"
+  | "reverse_split"
+  | "capital_reduction"
+  | "share_exchange"
   | "manual_review";
 
 export interface CorporateActionRecord {
@@ -118,12 +122,36 @@ export interface CorporateActionRecord {
   subscriptionRatio?: number;
   subscriptionPrice?: number;
   cashDividend?: number;
+  /** 股數調整倍率；例如 1 拆 2 為 2，2 併 1 為 0.5 */
+  adjustmentRatio?: number;
+  /** 每原股退還現金（元）；減資換股時用於降低成本基礎 */
+  cashReturnPerShare?: number;
   quantityBefore: number;
   quantityAfter: number;
   buyPriceBefore: number;
   buyPriceAfter: number;
+  totalCostBefore?: number;
+  totalCostAfter?: number;
+  /** 已將生效日前歷史價按股數倍率調整，避免日/月未實現用錯價格基準 */
+  priceHistoryAdjustedAt?: string;
   note?: string;
   createdAt: string;
+}
+
+export interface ManualCorporateActionInput {
+  holdingId: string;
+  actionType:
+    | "split"
+    | "reverse_split"
+    | "capital_reduction"
+    | "share_exchange";
+  /** 生效日 ISO YYYY-MM-DD */
+  effectiveDate: string;
+  /** 股數調整倍率；例如 1 拆 2 為 2，每 1000 股換 800 股為 0.8 */
+  adjustmentRatio: number;
+  /** 每原股退還現金（元）；選填 */
+  cashReturnPerShare?: number;
+  note?: string;
 }
 
 /** 本地儲存完整狀態 */

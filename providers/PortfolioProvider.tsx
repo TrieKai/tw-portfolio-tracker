@@ -55,10 +55,13 @@ import {
   addHolding,
   applyCorporateAction,
   applyImportedPriceHistory,
+  applyManualCorporateAction,
+  applyManualCorporateActionToGroup,
   applyPriceUpdate,
   editHolding,
   loadPortfolio,
   removeHolding,
+  repairCorporateActionPriceHistory,
   sellHolding,
   savePortfolio,
   updateHolding,
@@ -69,6 +72,7 @@ import type {
   EditHoldingInput,
   Holding,
   HoldingWithMetrics,
+  ManualCorporateActionInput,
   PortfolioSettings,
   PortfolioStorage,
   PortfolioSummary,
@@ -109,6 +113,11 @@ interface PortfolioContextValue {
   updateAll: () => Promise<void>;
   scanCorporateActions: () => Promise<void>;
   applyDetectedCorporateAction: (event: CorporateActionEvent) => void;
+  applyManualAction: (input: ManualCorporateActionInput) => void;
+  applyManualActionToGroup: (
+    groupKey: string,
+    input: Omit<ManualCorporateActionInput, "holdingId">
+  ) => void;
   refreshPortfolioForRange: (range: ChartRange) => Promise<{
     ok: boolean;
     message?: string;
@@ -275,11 +284,13 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     }
 
     setUploadPrompt(null);
-    setStorage(cloud);
-    savePortfolio(cloud);
+    const repairedCloud = repairCorporateActionPriceHistory(cloud);
+    setStorage(repairedCloud);
+    savePortfolio(repairedCloud);
+    if (repairedCloud !== cloud) void pushCloudSync(repairedCloud);
     setSyncStatus("synced");
     setSyncMessage(null);
-  }, [sessionUserId]);
+  }, [pushCloudSync, sessionUserId]);
 
   useEffect(() => {
     if (authStatus === "loading") return;
@@ -547,11 +558,44 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const applyDetectedCorporateAction = useCallback(
     (event: CorporateActionEvent) => {
-      if (!storage) return;
-      persist(applyCorporateAction(storage, event));
+      setStorage((prev) => {
+        if (!prev) return prev;
+        const next = applyCorporateAction(prev, event);
+        savePortfolio(next);
+        if (isAuthenticated) void pushCloudSync(next);
+        return next;
+      });
       setCorporateActionMessage("已處理公司行動");
     },
-    [storage, persist]
+    [isAuthenticated, pushCloudSync]
+  );
+
+  const applyManualAction = useCallback(
+    (input: ManualCorporateActionInput) => {
+      setStorage((prev) => {
+        if (!prev) return prev;
+        const next = applyManualCorporateAction(prev, input);
+        savePortfolio(next);
+        if (isAuthenticated) void pushCloudSync(next);
+        return next;
+      });
+      setCorporateActionMessage("已套用手動公司行動調整");
+    },
+    [isAuthenticated, pushCloudSync]
+  );
+
+  const applyManualActionToGroup = useCallback(
+    (groupKey: string, input: Omit<ManualCorporateActionInput, "holdingId">) => {
+      setStorage((prev) => {
+        if (!prev) return prev;
+        const next = applyManualCorporateActionToGroup(prev, groupKey, input);
+        savePortfolio(next);
+        if (isAuthenticated) void pushCloudSync(next);
+        return next;
+      });
+      setCorporateActionMessage("已套用手動公司行動調整");
+    },
+    [isAuthenticated, pushCloudSync]
   );
 
   const setAutoUpdate = useCallback(
@@ -803,6 +847,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       updateAll,
       scanCorporateActions,
       applyDetectedCorporateAction,
+      applyManualAction,
+      applyManualActionToGroup,
       refreshPortfolioForRange,
       importPriceHistory,
       importFundHistory,
@@ -836,6 +882,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       updateAll,
       scanCorporateActions,
       applyDetectedCorporateAction,
+      applyManualAction,
+      applyManualActionToGroup,
       refreshPortfolioForRange,
       importPriceHistory,
       importFundHistory,
