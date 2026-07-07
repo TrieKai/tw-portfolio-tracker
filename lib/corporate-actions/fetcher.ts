@@ -177,7 +177,7 @@ export async function lookupCorporateActions(
     const market = item.market ?? "tse";
     const events = eventsByKey.get(`${market}:${item.symbol}`) ?? [];
     return events
-      .filter((event) => event.effectiveDate >= item.buyDate)
+      .filter((event) => event.effectiveDate > item.buyDate)
       .map((event) => ({ ...event, holdingId: item.holdingId }));
   });
 }

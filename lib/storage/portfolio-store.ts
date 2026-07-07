@@ -487,7 +487,7 @@ export function applyCorporateAction(
 ): PortfolioStorage {
   const holding = state.holdings.find((h) => h.id === event.holdingId);
   if (!holding || holding.assetType !== "stock") return state;
-  if (event.effectiveDate < holding.buyDate) return state;
+  if (event.effectiveDate <= holding.buyDate) return state;
   if (hasHandledCorporateAction(state, holding.id, event.id)) return state;
 
   const ratio =
@@ -562,6 +562,7 @@ export function applyManualCorporateAction(
   const holding = state.holdings.find((h) => h.id === input.holdingId);
   if (!holding || holding.assetType !== "stock") return state;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveDate)) return state;
+  if (input.effectiveDate <= holding.buyDate) return state;
   if (!Number.isFinite(input.adjustmentRatio) || input.adjustmentRatio <= 0) {
     return state;
   }

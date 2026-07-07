@@ -129,14 +129,29 @@ function buildSuspiciousDrops(
       const current = points[i];
       const dropRate = (previous.price - current.price) / previous.price;
       if (dropRate < threshold) continue;
+
+      const affectedLots = group.lots.filter(
+        (lot) => lot.buyDate < current.date
+      );
+      if (affectedLots.length === 0) continue;
+
+      const affectedQuantity = affectedLots.reduce(
+        (sum, lot) => sum + lot.quantity,
+        0
+      );
+      const affectedCostBasis = affectedLots.reduce(
+        (sum, lot) => sum + lot.costBasis,
+        0
+      );
       const key = `${group.groupKey}:${previous.date}:${current.date}`;
       rowsByEvent.set(key, {
         groupKey: group.groupKey,
         name: group.name,
         symbol: group.symbol,
-        lotCount: group.lots.length,
-        quantity: group.quantity,
-        avgBuyPrice: group.avgBuyPrice,
+        lotCount: affectedLots.length,
+        quantity: affectedQuantity,
+        avgBuyPrice:
+          affectedQuantity > 0 ? affectedCostBasis / affectedQuantity : 0,
         previousDate: previous.date,
         previousPrice: previous.price,
         currentDate: current.date,
