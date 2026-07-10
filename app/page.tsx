@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AssetAllocationChart } from "@/components/dashboard/AssetAllocationChart";
@@ -12,29 +13,23 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatCurrentMonthZh } from "@/lib/date/iso-date";
 import { formatCurrency } from "@/lib/portfolio/calculations";
 import { PnlValueWithBreakdown } from "@/components/ui/PnlBreakdownTooltip";
+import type { DashboardSectionId } from "@/lib/types/ui-preferences";
 import { usePortfolio } from "@/providers/PortfolioProvider";
+import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 
 export default function DashboardPage() {
   const { ready, holdings, summary, exposure, pnlBreakdowns, storage, sales, setExposureSettings } = usePortfolio();
+  const { preferences } = useUiPreferences();
 
   if (!ready) {
     return <LoadingSpinner />;
   }
 
-  return (
-    <div className="space-y-8">
-      <PageHeader
-        title="投資總覽"
-        description="台股、境內基金與房子持倉 · 本機儲存"
-        action={
-          <Link href="/holdings/new" className="btn-primary w-full sm:w-auto touch-target">
-            新增持倉
-          </Link>
-        }
-      />
-
+  const sections: Record<DashboardSectionId, ReactNode> = {
+    summary: (
       <PortfolioSummaryCards summary={summary} pnlBreakdowns={pnlBreakdowns} />
-
+    ),
+    overview: (
       <div className="grid gap-6 lg:grid-cols-2">
         <AssetAllocationChart summary={summary} />
         <div className="glass-card p-5">
@@ -83,7 +78,9 @@ export default function DashboardPage() {
               </div>
             </li>
             <li className="flex justify-between">
-              <span className="text-muted">月未實現（{formatCurrentMonthZh()}）</span>
+              <span className="text-muted">
+                月未實現（{formatCurrentMonthZh()}）
+              </span>
               <PnlValueWithBreakdown
                 title="月未實現"
                 value={
@@ -102,7 +99,9 @@ export default function DashboardPage() {
               />
             </li>
             <li className="flex justify-between">
-              <span className="text-muted">月已實現（{formatCurrentMonthZh()}）</span>
+              <span className="text-muted">
+                月已實現（{formatCurrentMonthZh()}）
+              </span>
               <span
                 className={
                   summary.monthlyRealizedPnl >= 0 ? "text-gain" : "text-loss"
@@ -124,13 +123,15 @@ export default function DashboardPage() {
           </ul>
         </div>
       </div>
-
+    ),
+    exposure: (
       <ExposurePanel
         exposure={exposure}
         settings={storage.settings}
         onSaveSettings={setExposureSettings}
       />
-
+    ),
+    monthlyPnl: (
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">月度損益</h2>
         <MonthlyPnlTable
@@ -139,10 +140,13 @@ export default function DashboardPage() {
           sales={sales}
         />
       </section>
-
+    ),
+    trend: (
       <section className="glass-card p-4 sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-base font-semibold sm:text-lg">資產趨勢（今年度）</h2>
+          <h2 className="text-base font-semibold sm:text-lg">
+            資產趨勢（今年度）
+          </h2>
           <Link href="/trends" className="text-sm text-accent hover:underline">
             查看完整趨勢 →
           </Link>
@@ -153,11 +157,37 @@ export default function DashboardPage() {
           range="ytd"
         />
       </section>
-
+    ),
+    holdings: (
       <section>
         <h2 className="mb-4 text-lg font-semibold">持倉摘要</h2>
         <HoldingsTable holdings={holdings} />
       </section>
+    ),
+  };
+
+  return (
+    <div className="ui-dashboard">
+      <PageHeader
+        title="投資總覽"
+        description="台股、境內基金與房子持倉 · 本機儲存"
+        action={
+          <Link
+            href="/holdings/new"
+            className="btn-primary w-full sm:w-auto touch-target"
+          >
+            新增持倉
+          </Link>
+        }
+      />
+
+      {preferences.dashboardOrder
+        .filter((section) => !preferences.hiddenSections.includes(section))
+        .map((section) => (
+          <div key={section} data-dashboard-section={section}>
+            {sections[section]}
+          </div>
+        ))}
     </div>
   );
 }

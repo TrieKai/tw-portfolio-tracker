@@ -173,6 +173,8 @@ export interface PortfolioSettings {
   lastBatchUpdateAt?: string;
   /** 偏好主題；null 表示跟隨系統 */
   theme?: "light" | "dark" | "system";
+  /** AI 版面助理與手動介面設定共用的安全白名單偏好。 */
+  uiPreferences?: import("@/lib/types/ui-preferences").UiPreferences;
   /**
    * 淨資產／自有資金（元）
    * 用於曝險比例 = 總曝險 ÷ 淨資產；未設定時以「持倉市值 − liabilities」推算

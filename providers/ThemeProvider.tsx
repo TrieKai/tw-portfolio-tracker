@@ -17,6 +17,8 @@ interface ThemeContextValue {
   theme: Theme;
   resolvedTheme: ResolvedTheme;
   setTheme: (t: Theme) => void;
+  previewTheme: (t: Theme) => void;
+  clearThemePreview: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -41,13 +43,23 @@ export function ThemeProvider({
   initialTheme?: PortfolioSettings["theme"];
 }) {
   const [theme, setThemeState] = useState<Theme>(initialTheme ?? "system");
+  const [themePreview, setThemePreview] = useState<Theme | null>(null);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("dark");
 
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t);
+    setThemePreview(null);
     if (typeof window !== "undefined") {
       localStorage.setItem("portfolio-theme", t);
     }
+  }, []);
+
+  const previewTheme = useCallback((t: Theme) => {
+    setThemePreview(t);
+  }, []);
+
+  const clearThemePreview = useCallback(() => {
+    setThemePreview(null);
   }, []);
 
   useEffect(() => {
@@ -58,11 +70,13 @@ export function ThemeProvider({
   }, []);
 
   useEffect(() => {
-    const resolved = theme === "system" ? getSystemTheme() : theme;
+    const effectiveTheme = themePreview ?? theme;
+    const resolved =
+      effectiveTheme === "system" ? getSystemTheme() : effectiveTheme;
     setResolvedTheme(resolved);
     applyDomTheme(resolved);
 
-    if (theme !== "system") return;
+    if (effectiveTheme !== "system") return;
 
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
@@ -72,11 +86,23 @@ export function ThemeProvider({
     };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
-  }, [theme]);
+  }, [theme, themePreview]);
 
   const value = useMemo(
-    () => ({ theme, resolvedTheme, setTheme }),
-    [theme, resolvedTheme, setTheme]
+    () => ({
+      theme,
+      resolvedTheme,
+      setTheme,
+      previewTheme,
+      clearThemePreview,
+    }),
+    [
+      theme,
+      resolvedTheme,
+      setTheme,
+      previewTheme,
+      clearThemePreview,
+    ]
   );
 
   return (

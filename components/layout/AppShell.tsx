@@ -1,8 +1,14 @@
 "use client";
 
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { AiLayoutAssistantModal } from "@/components/appearance/AiLayoutAssistantModal";
 import { usePortfolio } from "@/providers/PortfolioProvider";
+import {
+  UiPreferencesProvider,
+  useUiPreferences,
+} from "@/providers/UiPreferencesProvider";
 import { AuthMenu } from "./AuthMenu";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { ThemeToggle } from "./ThemeToggle";
@@ -15,13 +21,29 @@ const NAV = [
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <UiPreferencesProvider>
+      <AppShellContent>{children}</AppShellContent>
+    </UiPreferencesProvider>
+  );
+}
+
+function AppShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { updateAll, batchStatus, batchMessage, storageMode } = usePortfolio();
+  const { preferences } = useUiPreferences();
+  const [aiLayoutOpen, setAiLayoutOpen] = useState(false);
+  const closeAiLayout = useCallback(() => setAiLayoutOpen(false), []);
 
   const isUpdating = batchStatus === "loading";
 
   return (
-    <div className="min-h-screen bg-page text-foreground">
+    <div
+      className="min-h-screen bg-page text-foreground"
+      data-ui-palette={preferences.palette}
+      data-ui-density={preferences.density}
+      data-ui-card-style={preferences.cardStyle}
+    >
       <header className="sticky top-0 z-40 border-b border-border bg-page/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-4 py-3 sm:gap-3 sm:px-6">
           <Link
@@ -55,6 +77,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={() => setAiLayoutOpen(true)}
+              className="touch-target rounded-lg border border-accent/30 bg-accent-dim px-2.5 py-2 text-xs font-semibold text-accent transition hover:border-accent sm:px-3 sm:text-sm"
+              title="用自然語言調整版面與色調"
+            >
+              <span aria-hidden className="mr-1">✦</span>
+              <span className="hidden sm:inline">AI 版面</span>
+              <span className="sm:hidden">AI</span>
+            </button>
             <button
               type="button"
               onClick={() => updateAll()}
@@ -94,7 +126,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       </header>
 
-      <main className="main-with-bottom-nav mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="app-main main-with-bottom-nav mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
         {children}
       </main>
 
@@ -105,6 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </footer>
 
       <MobileBottomNav />
+      {aiLayoutOpen && <AiLayoutAssistantModal onClose={closeAiLayout} />}
     </div>
   );
 }

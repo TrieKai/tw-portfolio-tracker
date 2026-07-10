@@ -1,6 +1,7 @@
 "use client";
 
 import { useTheme } from "@/providers/ThemeProvider";
+import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 
 const CYCLE: Array<"light" | "dark" | "system"> = ["light", "dark", "system"];
 
@@ -11,11 +12,12 @@ const LABELS: Record<(typeof CYCLE)[number], string> = {
 };
 
 export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
+  const { theme } = useTheme();
+  const { setThemePreference } = useUiPreferences();
 
   function cycle() {
     const i = CYCLE.indexOf(theme);
-    setTheme(CYCLE[(i + 1) % CYCLE.length]);
+    setThemePreference(CYCLE[(i + 1) % CYCLE.length]);
   }
 
   return (

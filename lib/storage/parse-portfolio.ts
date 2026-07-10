@@ -1,4 +1,5 @@
 import type { PortfolioSettings, PortfolioStorage } from "@/lib/types/holding";
+import { normalizeUiPreferences } from "@/lib/ui/preferences";
 
 const DEFAULT_SETTINGS: PortfolioSettings = {
   autoUpdateEnabled: false,
@@ -22,6 +23,11 @@ export function normalizePortfolioStorage(raw: unknown): PortfolioStorage | null
   const parsed = raw as PortfolioStorage;
   if (parsed.version !== 1 || !Array.isArray(parsed.holdings)) return null;
 
+  const rawSettings =
+    parsed.settings && typeof parsed.settings === "object"
+      ? parsed.settings
+      : DEFAULT_SETTINGS;
+
   return {
     ...defaultPortfolioStorage(),
     ...parsed,
@@ -29,7 +35,13 @@ export function normalizePortfolioStorage(raw: unknown): PortfolioStorage | null
     corporateActions: Array.isArray(parsed.corporateActions)
       ? parsed.corporateActions
       : [],
-    settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
+    settings: {
+      ...DEFAULT_SETTINGS,
+      ...rawSettings,
+      ...(rawSettings.uiPreferences
+        ? { uiPreferences: normalizeUiPreferences(rawSettings.uiPreferences) }
+        : {}),
+    },
   };
 }
 

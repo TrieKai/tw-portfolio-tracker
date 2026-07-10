@@ -79,6 +79,10 @@ import type {
   SaleTransaction,
   SellHoldingInput,
 } from "@/lib/types/holding";
+import type {
+  UiPreferences,
+  UiTheme,
+} from "@/lib/types/ui-preferences";
 
 type UpdateStatus = "idle" | "loading" | "partial" | "done" | "error";
 export type StorageMode = "anonymous" | "cloud";
@@ -135,6 +139,8 @@ interface PortfolioContextValue {
   setExposureSettings: (
     patch: Pick<PortfolioSettings, "netAssets" | "liabilities">
   ) => void;
+  setThemePreference: (theme: UiTheme) => void;
+  applyUiPreferences: (theme: UiTheme, preferences: UiPreferences) => void;
   /** 從 JSON 備份匯入（取代或合併） */
   importPortfolio: (
     incoming: PortfolioStorage,
@@ -614,6 +620,30 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [storage, persist]
   );
 
+  const setThemePreference = useCallback(
+    (theme: UiTheme) => {
+      if (!storage) return;
+      persist(updateSettings(storage, { theme }));
+    },
+    [storage, persist]
+  );
+
+  const applyUiPreferences = useCallback(
+    (theme: UiTheme, preferences: UiPreferences) => {
+      if (!storage) return;
+      persist(
+        updateSettings(storage, {
+          theme,
+          uiPreferences: {
+            ...preferences,
+            updatedAt: new Date().toISOString(),
+          },
+        })
+      );
+    },
+    [storage, persist]
+  );
+
   const importPriceHistory = useCallback(
     async (
       groupKey: string,
@@ -854,6 +884,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importFundHistory,
       setAutoUpdate,
       setExposureSettings,
+      setThemePreference,
+      applyUiPreferences,
       importPortfolio,
       refreshFromCloud,
     }),
@@ -889,6 +921,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importFundHistory,
       setAutoUpdate,
       setExposureSettings,
+      setThemePreference,
+      applyUiPreferences,
       importPortfolio,
       refreshFromCloud,
     ]
