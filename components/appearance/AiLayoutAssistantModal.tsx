@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { requestAiLayout } from "@/lib/client/ai-layout-api";
 import type {
+  DashboardGridWidth,
   DashboardSectionId,
   UiCardStyle,
   UiDensity,
@@ -12,18 +13,33 @@ import type {
 import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 
 const EXAMPLES = [
-  "專業深藍色，資訊緊湊，趨勢圖放在摘要後面",
-  "明亮溫暖、留白多一點，先看資產配置與曝險",
+  "專業深藍色，資訊緊湊，趨勢佔三分之二，曝險佔三分之一並排",
+  "明亮溫暖、留白多一點，資產配置與快速統計各半並排",
   "低調深色系，隱藏資產配置與快速統計，持倉放最後",
 ] as const;
 
 const SECTION_LABELS: Record<DashboardSectionId, string> = {
   summary: "資產摘要",
-  overview: "配置與統計",
+  allocation: "資產配置",
+  quickStats: "快速統計",
   exposure: "資產曝險",
   monthlyPnl: "月度損益",
   trend: "資產趨勢",
   holdings: "持倉摘要",
+};
+
+const WIDTH_LABELS: Record<DashboardGridWidth, string> = {
+  full: "全寬",
+  twoThirds: "2/3",
+  half: "1/2",
+  oneThird: "1/3",
+};
+
+const WIDTH_CLASSES: Record<DashboardGridWidth, string> = {
+  full: "col-span-12",
+  twoThirds: "col-span-8",
+  half: "col-span-6",
+  oneThird: "col-span-4",
 };
 
 const THEME_LABELS: Record<UiTheme, string> = {
@@ -124,6 +140,12 @@ export function AiLayoutAssistantModal({
     onClose();
   }
 
+  function showDefaults() {
+    setError(null);
+    setSaved(false);
+    previewDefaults();
+  }
+
   return (
     <div
       className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -152,7 +174,7 @@ export function AiLayoutAssistantModal({
               </h2>
             </div>
             <p className="text-sm text-muted">
-              用自然語言描述喜歡的色調、密度與首頁順序。
+              用自然語言描述色調、密度、區塊順序與網格寬度。
             </p>
           </div>
           <button
@@ -248,24 +270,29 @@ export function AiLayoutAssistantModal({
               </div>
 
               <div>
-                <p className="mb-2 text-xs font-medium text-muted">首頁順序</p>
-                <ol className="grid gap-2 text-sm sm:grid-cols-2">
-                  {preview.dashboardOrder.map((section, index) => {
-                    const hidden = preview.hiddenSections.includes(section);
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-xs font-medium text-muted">桌面網格預覽</p>
+                  <p className="text-[11px] text-muted">手機自動單欄</p>
+                </div>
+                <ol className="grid grid-cols-12 gap-2 rounded-xl border border-dashed border-border bg-surface-raised/50 p-2 text-xs">
+                  {preview.dashboardLayout.map((item, index) => {
+                    const hidden = item.hidden;
                     return (
                       <li
-                        key={section}
-                        className={`flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 ${
+                        key={item.section}
+                        className={`${WIDTH_CLASSES[item.width]} flex min-w-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-2 ${
                           hidden ? "opacity-50" : ""
                         }`}
                       >
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface-raised text-[11px] text-muted">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-raised text-[10px] text-muted">
                           {index + 1}
                         </span>
-                        <span>{SECTION_LABELS[section]}</span>
-                        {hidden && (
-                          <span className="ml-auto text-[11px] text-muted">隱藏</span>
-                        )}
+                        <span className="min-w-0 truncate">
+                          {SECTION_LABELS[item.section]}
+                        </span>
+                        <span className="ml-auto shrink-0 text-[10px] text-muted">
+                          {hidden ? "隱藏" : WIDTH_LABELS[item.width]}
+                        </span>
                       </li>
                     );
                   })}
@@ -277,7 +304,7 @@ export function AiLayoutAssistantModal({
           <div className="flex flex-col-reverse gap-2 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
-              onClick={previewDefaults}
+              onClick={showDefaults}
               disabled={loading}
               className="btn-secondary justify-center"
             >

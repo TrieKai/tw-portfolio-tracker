@@ -1,6 +1,7 @@
 export const DASHBOARD_SECTION_IDS = [
   "summary",
-  "overview",
+  "allocation",
+  "quickStats",
   "exposure",
   "monthlyPnl",
   "trend",
@@ -8,6 +9,21 @@ export const DASHBOARD_SECTION_IDS = [
 ] as const;
 
 export type DashboardSectionId = (typeof DASHBOARD_SECTION_IDS)[number];
+
+export const DASHBOARD_GRID_WIDTHS = [
+  "full",
+  "twoThirds",
+  "half",
+  "oneThird",
+] as const;
+
+export type DashboardGridWidth = (typeof DASHBOARD_GRID_WIDTHS)[number];
+
+export interface DashboardLayoutItem {
+  section: DashboardSectionId;
+  width: DashboardGridWidth;
+  hidden: boolean;
+}
 
 export const UI_PALETTES = [
   "emerald",
@@ -35,8 +51,8 @@ export interface UiPreferences {
   palette: UiPalette;
   density: UiDensity;
   cardStyle: UiCardStyle;
-  dashboardOrder: DashboardSectionId[];
-  hiddenSections: DashboardSectionId[];
+  /** 12 欄桌面網格；手機固定依陣列順序顯示為單欄。 */
+  dashboardLayout: DashboardLayoutItem[];
   /** 有時間戳才代表使用者曾主動套用新版介面設定。 */
   updatedAt?: string;
 }
@@ -45,4 +61,3 @@ export interface UiLayoutSuggestion extends UiPreferences {
   theme: UiTheme;
   rationale: string;
 }
-

@@ -44,8 +44,7 @@ function suggestionToPreferences(
     palette: suggestion.palette,
     density: suggestion.density,
     cardStyle: suggestion.cardStyle,
-    dashboardOrder: suggestion.dashboardOrder,
-    hiddenSections: suggestion.hiddenSections,
+    dashboardLayout: suggestion.dashboardLayout,
   };
 }
 

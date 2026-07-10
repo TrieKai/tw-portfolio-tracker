@@ -188,7 +188,18 @@
     gap: 2rem;
   }
 
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+    align-items: start;
+  }
+
   [data-ui-density="compact"] .ui-dashboard {
+    gap: 1.25rem;
+  }
+
+  [data-ui-density="compact"] .dashboard-grid {
     gap: 1.25rem;
   }
 
@@ -205,6 +216,10 @@
     gap: 2.75rem;
   }
 
+  [data-ui-density="spacious"] .dashboard-grid {
+    gap: 2.75rem;
+  }
+
   [data-ui-density="spacious"] .glass-card-base {
     border-radius: 1.5rem;
   }
@@ -213,6 +228,28 @@
     [data-ui-density="spacious"] .app-main {
       padding-top: 3rem;
       padding-bottom: 3rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .dashboard-grid {
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+    }
+
+    .dashboard-grid > [data-grid-width="full"] {
+      grid-column: span 12 / span 12;
+    }
+
+    .dashboard-grid > [data-grid-width="twoThirds"] {
+      grid-column: span 8 / span 8;
+    }
+
+    .dashboard-grid > [data-grid-width="half"] {
+      grid-column: span 6 / span 6;
+    }
+
+    .dashboard-grid > [data-grid-width="oneThird"] {
+      grid-column: span 4 / span 4;
     }
   }
 

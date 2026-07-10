@@ -1,8 +1,11 @@
 import {
+  DASHBOARD_GRID_WIDTHS,
   DASHBOARD_SECTION_IDS,
   UI_CARD_STYLES,
   UI_DENSITIES,
   UI_PALETTES,
+  type DashboardGridWidth,
+  type DashboardLayoutItem,
   type DashboardSectionId,
   type UiCardStyle,
   type UiDensity,
@@ -16,8 +19,15 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   palette: "emerald",
   density: "comfortable",
   cardStyle: "glass",
-  dashboardOrder: [...DASHBOARD_SECTION_IDS],
-  hiddenSections: [],
+  dashboardLayout: [
+    { section: "summary", width: "full", hidden: false },
+    { section: "allocation", width: "half", hidden: false },
+    { section: "quickStats", width: "half", hidden: false },
+    { section: "exposure", width: "full", hidden: false },
+    { section: "monthlyPnl", width: "full", hidden: false },
+    { section: "trend", width: "full", hidden: false },
+    { section: "holdings", width: "full", hidden: false },
+  ],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -31,32 +41,86 @@ function isAllowed<T extends readonly string[]>(
   return typeof value === "string" && values.includes(value as T[number]);
 }
 
-/** 去除重複與未知區塊，並把缺少的區塊補到最後。 */
-export function normalizeDashboardOrder(raw: unknown): DashboardSectionId[] {
-  const allowed = new Set<string>(DASHBOARD_SECTION_IDS);
-  const result: DashboardSectionId[] = [];
+function defaultLayoutItem(section: DashboardSectionId): DashboardLayoutItem {
+  return (
+    DEFAULT_UI_PREFERENCES.dashboardLayout.find(
+      (item) => item.section === section
+    ) ?? { section, width: "full", hidden: false }
+  );
+}
+
+/** 去除重複與未知區塊，修正寬度，並把缺少的區塊安全補到最後。 */
+export function normalizeDashboardLayout(raw: unknown): DashboardLayoutItem[] {
+  const result: DashboardLayoutItem[] = [];
 
   if (Array.isArray(raw)) {
-    for (const value of raw) {
+    for (const entry of raw) {
+      if (!isRecord(entry)) continue;
+      const section = entry.section;
       if (
-        typeof value === "string" &&
-        allowed.has(value) &&
-        !result.includes(value as DashboardSectionId)
+        !isAllowed(DASHBOARD_SECTION_IDS, section) ||
+        result.some((item) => item.section === section)
       ) {
-        result.push(value as DashboardSectionId);
+        continue;
       }
+      const fallback = defaultLayoutItem(section);
+      const width: DashboardGridWidth = isAllowed(
+        DASHBOARD_GRID_WIDTHS,
+        entry.width
+      )
+        ? entry.width
+        : fallback.width;
+      result.push({
+        section,
+        width,
+        hidden: typeof entry.hidden === "boolean" ? entry.hidden : false,
+      });
     }
   }
 
   for (const section of DASHBOARD_SECTION_IDS) {
-    if (!result.includes(section)) result.push(section);
+    if (!result.some((item) => item.section === section)) {
+      result.push({ ...defaultLayoutItem(section) });
+    }
   }
   return result;
 }
 
-export function normalizeHiddenSections(raw: unknown): DashboardSectionId[] {
-  if (!Array.isArray(raw)) return [];
-  return DASHBOARD_SECTION_IDS.filter((section) => raw.includes(section));
+/** 將舊版六區塊順序升級為七區塊網格，overview 拆為兩張半寬卡片。 */
+function migrateLegacyDashboardLayout(raw: Record<string, unknown>) {
+  const order = Array.isArray(raw.dashboardOrder)
+    ? raw.dashboardOrder
+    : [];
+  const hidden = Array.isArray(raw.hiddenSections)
+    ? raw.hiddenSections
+    : [];
+  const migrated: DashboardLayoutItem[] = [];
+
+  for (const value of order) {
+    if (value === "overview") {
+      migrated.push(
+        {
+          section: "allocation",
+          width: "half",
+          hidden: hidden.includes("overview"),
+        },
+        {
+          section: "quickStats",
+          width: "half",
+          hidden: hidden.includes("overview"),
+        }
+      );
+      continue;
+    }
+    if (isAllowed(DASHBOARD_SECTION_IDS, value)) {
+      migrated.push({
+        ...defaultLayoutItem(value),
+        hidden: hidden.includes(value),
+      });
+    }
+  }
+
+  return normalizeDashboardLayout(migrated);
 }
 
 export function normalizeUiPreferences(raw: unknown): UiPreferences {
@@ -76,8 +140,9 @@ export function normalizeUiPreferences(raw: unknown): UiPreferences {
     palette,
     density,
     cardStyle,
-    dashboardOrder: normalizeDashboardOrder(raw.dashboardOrder),
-    hiddenSections: normalizeHiddenSections(raw.hiddenSections),
+    dashboardLayout: Array.isArray(raw.dashboardLayout)
+      ? normalizeDashboardLayout(raw.dashboardLayout)
+      : migrateLegacyDashboardLayout(raw),
     ...(typeof raw.updatedAt === "string" ? { updatedAt: raw.updatedAt } : {}),
   };
 }
@@ -103,4 +168,3 @@ export function normalizeUiLayoutSuggestion(
         : "已依照你的描述調整版面與色調。",
   };
 }
-

@@ -33,8 +33,7 @@ export async function requestAiLayout(
           palette: current.palette,
           density: current.density,
           cardStyle: current.cardStyle,
-          dashboardOrder: current.dashboardOrder,
-          hiddenSections: current.hiddenSections,
+          dashboardLayout: current.dashboardLayout,
         },
       }),
     });

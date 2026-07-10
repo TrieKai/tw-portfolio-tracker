@@ -29,16 +29,15 @@ export default function DashboardPage() {
     summary: (
       <PortfolioSummaryCards summary={summary} pnlBreakdowns={pnlBreakdowns} />
     ),
-    overview: (
-      <div className="grid gap-6 lg:grid-cols-2">
-        <AssetAllocationChart summary={summary} />
-        <div className="glass-card p-5">
-          <h2 className="mb-3 text-sm font-medium text-muted">快速統計</h2>
-          <ul className="space-y-2 text-sm">
-            <li className="flex justify-between">
+    allocation: <AssetAllocationChart summary={summary} />,
+    quickStats: (
+      <div className="glass-card h-full p-5">
+        <h2 className="mb-3 text-sm font-medium text-muted">快速統計</h2>
+        <ul className="space-y-2 text-sm">
+          <li className="flex justify-between">
               <span className="text-muted">持倉筆數</span>
               <span>{summary.holdingCount}</span>
-            </li>
+          </li>
             <li className="flex justify-between">
               <span className="text-muted">股票市值</span>
               <span>{summary.stockValue.toLocaleString("zh-TW")} 元</span>
@@ -120,8 +119,7 @@ export default function DashboardPage() {
                 {summary.totalRealizedPnl.toLocaleString("zh-TW")} 元
               </span>
             </li>
-          </ul>
-        </div>
+        </ul>
       </div>
     ),
     exposure: (
@@ -181,13 +179,20 @@ export default function DashboardPage() {
         }
       />
 
-      {preferences.dashboardOrder
-        .filter((section) => !preferences.hiddenSections.includes(section))
-        .map((section) => (
-          <div key={section} data-dashboard-section={section}>
-            {sections[section]}
-          </div>
-        ))}
+      <div className="dashboard-grid">
+        {preferences.dashboardLayout
+          .filter((item) => !item.hidden)
+          .map((item) => (
+            <div
+              key={item.section}
+              data-dashboard-section={item.section}
+              data-grid-width={item.width}
+              className="min-w-0"
+            >
+              {sections[item.section]}
+            </div>
+          ))}
+      </div>
     </div>
   );
 }
