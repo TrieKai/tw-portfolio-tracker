@@ -36,14 +36,19 @@ Google OAuth 授權重新導向 URI 需包含 `https://你的網域/api/auth/cal
 
 ### AI 版面助理（選用）
 
-在 [Google AI Studio](https://aistudio.google.com/apikey) 建立 Gemini API Key，並加入 `.env.local`：
+支援 Gemini 與免費的智譜 GLM。兩組都設定時會優先使用 Gemini；遇到配額不足（429）、逾時、網路或上游錯誤，會在同一次請求中自動切換至智譜 GLM：
 
 ```bash
 GEMINI_API_KEY=你的金鑰
 GEMINI_MODEL=gemini-2.5-flash-lite
+
+ZHIPU_API_KEY=你的智譜金鑰
+ZHIPU_MODEL=glm-4.7-flash
 ```
 
-部署至 Vercel 時需在 Project Settings → Environment Variables 加入相同變數。API Key 僅由伺服器端 Route 使用；AI 請求只包含使用者輸入的版面描述與目前介面設定，不包含持倉或損益資料。未設定 Key 時，只有 AI 版面助理會顯示設定提示，其他功能不受影響。
+可在 [Google AI Studio](https://aistudio.google.com/apikey) 建立 Gemini Key；智譜 Key 則在 [BigModel API Keys](https://open.bigmodel.cn/usercenter/apikeys) 建立。也可以只設定 `ZHIPU_API_KEY`，直接使用免費 GLM，不呼叫 Gemini。
+
+部署至 Vercel 時需在 Project Settings → Environment Variables 加入相同變數。API Key 僅由伺服器端 Route 使用；AI 請求只包含使用者輸入的版面描述與目前介面設定，不包含持倉或損益資料。兩個 Key 都未設定時，只有 AI 版面助理會顯示設定提示，其他功能不受影響。
 
 ## 建置
 

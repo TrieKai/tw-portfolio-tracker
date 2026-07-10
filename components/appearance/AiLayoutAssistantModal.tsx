@@ -87,6 +87,7 @@ export function AiLayoutAssistantModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [providerNotice, setProviderNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -114,6 +115,7 @@ export function AiLayoutAssistantModal({
     setLoading(true);
     setError(null);
     setSaved(false);
+    setProviderNotice(null);
     const result = await requestAiLayout(text, theme, preferences);
     setLoading(false);
 
@@ -126,6 +128,13 @@ export function AiLayoutAssistantModal({
       return;
     }
 
+    if (result.provider === "zhipu") {
+      setProviderNotice(
+        result.fallbackUsed
+          ? "Gemini 額度不足，已自動改用免費的智譜 GLM 備援。"
+          : "這次由免費的智譜 GLM 產生版面。"
+      );
+    }
     previewSuggestion(result.data);
   }
 
@@ -143,6 +152,7 @@ export function AiLayoutAssistantModal({
   function showDefaults() {
     setError(null);
     setSaved(false);
+    setProviderNotice(null);
     previewDefaults();
   }
 
@@ -237,6 +247,15 @@ export function AiLayoutAssistantModal({
               className="rounded-xl border border-accent/30 bg-accent-dim px-4 py-3 text-sm text-accent"
             >
               已套用並記住這組版面。
+            </div>
+          )}
+
+          {providerNotice && (
+            <div
+              role="status"
+              className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-700 dark:text-sky-300"
+            >
+              {providerNotice}
             </div>
           )}
 

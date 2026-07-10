@@ -7,6 +7,8 @@ import type {
 interface AiLayoutSuccess {
   success: true;
   data: UiLayoutSuggestion;
+  provider?: "gemini" | "zhipu";
+  fallbackUsed?: boolean;
 }
 
 interface AiLayoutError {
