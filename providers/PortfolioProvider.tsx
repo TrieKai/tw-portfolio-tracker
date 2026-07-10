@@ -50,7 +50,10 @@ import {
 } from "@/lib/portfolio/pnl-breakdown";
 import { applyImportMode } from "@/lib/storage/portfolio-export";
 import type { PortfolioImportMode } from "@/lib/storage/portfolio-export";
-import { hasPortfolioData } from "@/lib/storage/parse-portfolio";
+import {
+  defaultPortfolioStorage,
+  hasPortfolioData,
+} from "@/lib/storage/parse-portfolio";
 import {
   addHolding,
   applyCorporateAction,
@@ -88,6 +91,34 @@ type UpdateStatus = "idle" | "loading" | "partial" | "done" | "error";
 export type StorageMode = "anonymous" | "cloud";
 export type SyncStatus = "idle" | "syncing" | "synced" | "error";
 export type CorporateActionStatus = UpdateStatus;
+
+/**
+ * 雲端持倉仍是資料主體，但介面偏好採最後寫入者優先。
+ * 這可避免使用者套用版面後立刻重新整理，尚未完成的 PUT 被舊雲端設定蓋回。
+ */
+function preserveNewerUiPreferences(
+  base: PortfolioStorage,
+  candidate: PortfolioStorage
+): PortfolioStorage {
+  const baseUpdatedAt = base.settings.uiPreferences?.updatedAt;
+  const candidateUpdatedAt = candidate.settings.uiPreferences?.updatedAt;
+
+  if (
+    !candidateUpdatedAt ||
+    (baseUpdatedAt && candidateUpdatedAt <= baseUpdatedAt)
+  ) {
+    return base;
+  }
+
+  return {
+    ...base,
+    settings: {
+      ...base.settings,
+      theme: candidate.settings.theme,
+      uiPreferences: candidate.settings.uiPreferences,
+    },
+  };
+}
 
 interface PortfolioContextValue {
   ready: boolean;
@@ -192,10 +223,21 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     }
     if (res.status === 409 && res.remote) {
       cloudUpdatedAtRef.current = res.remote.updatedAt;
-      setStorage(res.remote.portfolio);
-      savePortfolio(res.remote.portfolio);
+      const reconciled = preserveNewerUiPreferences(
+        res.remote.portfolio,
+        next
+      );
+      setStorage(reconciled);
+      savePortfolio(reconciled);
+      if (reconciled !== res.remote.portfolio) {
+        cloudSyncPendingRef.current = reconciled;
+      }
       setSyncStatus("synced");
-      setSyncMessage("已套用雲端較新版本");
+      setSyncMessage(
+        reconciled === res.remote.portfolio
+          ? "已套用雲端較新版本"
+          : "已合併新版面設定，正在同步至雲端"
+      );
       return;
     }
     setSyncStatus("error");
@@ -291,9 +333,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
     setUploadPrompt(null);
     const repairedCloud = repairCorporateActionPriceHistory(cloud);
-    setStorage(repairedCloud);
-    savePortfolio(repairedCloud);
-    if (repairedCloud !== cloud) void pushCloudSync(repairedCloud);
+    const reconciled = preserveNewerUiPreferences(repairedCloud, local);
+    setStorage(reconciled);
+    savePortfolio(reconciled);
+    if (repairedCloud !== cloud || reconciled !== repairedCloud) {
+      void pushCloudSync(reconciled);
+    }
     setSyncStatus("synced");
     setSyncMessage(null);
   }, [pushCloudSync, sessionUserId]);
@@ -636,7 +681,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
           theme,
           uiPreferences: {
             ...preferences,
-            updatedAt: new Date().toISOString(),
+            updatedAt: preferences.updatedAt ?? new Date().toISOString(),
           },
         })
       );
@@ -862,7 +907,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       summary,
       exposure,
       pnlBreakdowns,
-      storage: storage ?? loadPortfolio(),
+      // 首次 SSR 與瀏覽器 hydration 必須產生相同內容；本機資料會在上方
+      // 初始化 effect 掛載後載入。若在 render 直接讀 localStorage，React 會
+      // 保留伺服器的舊 data-ui-* 屬性，導致重整後看似沒有套用新版面。
+      storage: storage ?? defaultPortfolioStorage(),
       batchStatus,
       batchMessage,
       corporateActionStatus,

@@ -8,6 +8,11 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  loadStoredUiAppearance,
+  saveStoredUiAppearance,
+  type StoredUiAppearance,
+} from "@/lib/client/ui-preferences-storage";
 import { DEFAULT_UI_PREFERENCES, normalizeUiPreferences } from "@/lib/ui/preferences";
 import type {
   UiLayoutSuggestion,
@@ -49,8 +54,7 @@ export function UiPreferencesProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const { storage, applyUiPreferences, setThemePreference: persistTheme } =
-    usePortfolio();
+  const { storage, applyUiPreferences } = usePortfolio();
   const {
     theme: localTheme,
     setTheme,
@@ -58,16 +62,31 @@ export function UiPreferencesProvider({
     clearThemePreview,
   } = useTheme();
   const [preview, setPreview] = useState<UiLayoutSuggestion | null>(null);
+  const [localAppearance, setLocalAppearance] =
+    useState<StoredUiAppearance | null>(null);
+  const [localAppearanceLoaded, setLocalAppearanceLoaded] = useState(false);
 
   const persistedPreferences = useMemo(
     () => normalizeUiPreferences(storage.settings.uiPreferences),
     [storage.settings.uiPreferences]
   );
 
+  const portfolioAppearance = useMemo<StoredUiAppearance>(
+    () => ({
+      theme: storage.settings.theme ?? localTheme,
+      preferences: persistedPreferences,
+    }),
+    [storage.settings.theme, localTheme, persistedPreferences]
+  );
+
+  // 同一裝置只要曾明確套用過外觀，本機快照就是唯一畫面來源。
+  // 雲端只負責初始化沒有本機快照的新裝置，不能在重新整理時反向覆蓋。
+  const committedAppearance = localAppearance ?? portfolioAppearance;
+
   const preferences = preview
     ? suggestionToPreferences(preview)
-    : persistedPreferences;
-  const effectiveTheme = preview?.theme ?? localTheme;
+    : committedAppearance.preferences;
+  const effectiveTheme = preview?.theme ?? committedAppearance.theme;
 
   const previewSuggestion = useCallback(
     (suggestion: UiLayoutSuggestion) => {
@@ -84,7 +103,16 @@ export function UiPreferencesProvider({
 
   const applyPreview = useCallback(() => {
     if (!preview) return false;
-    const nextPreferences = suggestionToPreferences(preview);
+    const nextPreferences: UiPreferences = {
+      ...suggestionToPreferences(preview),
+      updatedAt: new Date().toISOString(),
+    };
+    const appearance = {
+      theme: preview.theme,
+      preferences: nextPreferences,
+    };
+    saveStoredUiAppearance(appearance);
+    setLocalAppearance(appearance);
     applyUiPreferences(preview.theme, nextPreferences);
     setTheme(preview.theme);
     setPreview(null);
@@ -102,26 +130,72 @@ export function UiPreferencesProvider({
   const setThemePreference = useCallback(
     (theme: UiTheme) => {
       clearPreview();
+      const nextPreferences: UiPreferences = {
+        ...committedAppearance.preferences,
+        updatedAt: new Date().toISOString(),
+      };
+      const appearance = { theme, preferences: nextPreferences };
+      saveStoredUiAppearance(appearance);
+      setLocalAppearance(appearance);
       setTheme(theme);
-      persistTheme(theme);
+      applyUiPreferences(theme, nextPreferences);
     },
-    [clearPreview, persistTheme, setTheme]
+    [
+      clearPreview,
+      committedAppearance.preferences,
+      setTheme,
+      applyUiPreferences,
+    ]
   );
 
-  // 新版介面偏好在其他裝置載入時，同步其已確認的主題；舊資料仍沿用
-  // portfolio-theme，避免升級後突然改變既有使用者的畫面。
   useEffect(() => {
-    const updatedAt = storage.settings.uiPreferences?.updatedAt;
-    const cloudTheme = storage.settings.theme;
-    if (!preview && updatedAt && cloudTheme && cloudTheme !== localTheme) {
-      setTheme(cloudTheme);
+    setLocalAppearance(loadStoredUiAppearance());
+    setLocalAppearanceLoaded(true);
+  }, []);
+
+  // 本機有快照時固定採本機，並補寫到 portfolio 供雲端同步；只有全新裝置
+  // 沒有本機快照時，才用雲端外觀初始化本機。
+  useEffect(() => {
+    // 首次 render 的 localAppearance 必為 null。必須等獨立快照讀取完成後才能
+    // 比較，否則同一輪 Effect 會誤把舊雲端設定覆寫到新的本機快照。
+    if (preview || !localAppearanceLoaded) return;
+
+    const portfolioUpdatedAt = portfolioAppearance.preferences.updatedAt;
+
+    if (localAppearance) {
+      const localUpdatedAt = localAppearance.preferences.updatedAt;
+      if (
+        localUpdatedAt &&
+        (portfolioUpdatedAt !== localUpdatedAt ||
+          portfolioAppearance.theme !== localAppearance.theme)
+      ) {
+        applyUiPreferences(localAppearance.theme, localAppearance.preferences);
+      }
+      if (localAppearance.theme !== localTheme) {
+        setTheme(localAppearance.theme);
+      }
+      return;
+    }
+
+    if (portfolioUpdatedAt) {
+      saveStoredUiAppearance(portfolioAppearance);
+      setLocalAppearance(portfolioAppearance);
+    }
+
+    if (
+      portfolioUpdatedAt &&
+      portfolioAppearance.theme !== localTheme
+    ) {
+      setTheme(portfolioAppearance.theme);
     }
   }, [
-    storage.settings.uiPreferences?.updatedAt,
-    storage.settings.theme,
     preview,
+    localAppearanceLoaded,
+    localAppearance,
+    portfolioAppearance,
     localTheme,
     setTheme,
+    applyUiPreferences,
   ]);
 
   useEffect(
@@ -168,4 +242,3 @@ export function useUiPreferences() {
   }
   return context;
 }
-
