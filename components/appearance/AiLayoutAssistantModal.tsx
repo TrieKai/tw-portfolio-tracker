@@ -1,6 +1,6 @@
 "use client";
 
-import { type DragEvent, useEffect, useState } from "react";
+import { type DragEvent, useEffect, useRef, useState } from "react";
 import { requestAiLayout } from "@/lib/client/ai-layout-api";
 import type {
   DashboardGridWidth,
@@ -9,6 +9,7 @@ import type {
   UiDensity,
   UiPalette,
   UiTheme,
+  UiLayoutSuggestion,
 } from "@/lib/types/ui-preferences";
 import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 
@@ -88,10 +89,22 @@ export function AiLayoutAssistantModal({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [providerNotice, setProviderNotice] = useState<string | null>(null);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const draftInitialized = useRef(false);
   const [draggedSection, setDraggedSection] =
     useState<DashboardSectionId | null>(null);
   const [dragOverSection, setDragOverSection] =
     useState<DashboardSectionId | null>(null);
+
+  useEffect(() => {
+    if (draftInitialized.current) return;
+    draftInitialized.current = true;
+    previewSuggestion({
+      ...preferences,
+      theme,
+      rationale: "這是目前套用的版面，可直接拖曳與調整。",
+    });
+  }, [preferences, previewSuggestion, theme]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -178,6 +191,16 @@ export function AiLayoutAssistantModal({
     });
   }
 
+  function updatePreviewAppearance(
+    update: Partial<
+      Pick<UiLayoutSuggestion, "theme" | "palette" | "density" | "cardStyle">
+    >
+  ) {
+    if (!preview) return;
+    previewSuggestion({ ...preview, ...update });
+    setSaved(false);
+  }
+
   function reorderSection(
     sourceSection: DashboardSectionId,
     targetSection: DashboardSectionId
@@ -259,69 +282,104 @@ export function AiLayoutAssistantModal({
                 className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-accent-dim text-sm text-accent"
                 aria-hidden
               >
-                ✦
+                ▦
               </span>
               <h2 id="ai-layout-title" className="text-lg font-bold">
-                AI 版面助理
+                版面設定
               </h2>
             </div>
             <p className="text-sm text-muted">
-              用自然語言描述色調、密度、區塊順序與網格寬度。
+              直接調整外觀與拖曳版面，也可以選擇讓 AI 協助排版。
             </p>
           </div>
           <button
             type="button"
             onClick={close}
             className="touch-target shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface-raised hover:text-foreground"
-            aria-label="關閉 AI 版面助理"
+            aria-label="關閉版面設定"
           >
             關閉
           </button>
         </header>
 
         <div className="space-y-5 px-5 py-5 sm:px-6 sm:py-6">
-          <div>
-            <label htmlFor="ai-layout-prompt" className="mb-2 block text-sm font-semibold">
-              你希望畫面看起來怎麼樣？
-            </label>
-            <textarea
-              id="ai-layout-prompt"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value.slice(0, 500))}
-              rows={4}
-              className="input-field resize-none"
-              placeholder="例如：我喜歡專業的深藍色，資訊排緊一點，先看損益和趨勢圖…"
-              disabled={loading}
-              autoFocus
-            />
-            <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted">
-              <span>只會傳送這段描述與目前介面設定，不會傳送持倉資料。</span>
-              <span>{prompt.length}/500</span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2" aria-label="描述範例">
-            {EXAMPLES.map((example) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => setPrompt(example)}
-                disabled={loading}
-                className="rounded-full border border-border bg-surface-raised px-3 py-1.5 text-left text-xs text-muted transition hover:border-accent hover:text-foreground disabled:opacity-50"
-              >
-                {example}
-              </button>
-            ))}
-          </div>
-
-          {error && (
-            <div
-              role="alert"
-              className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-600 dark:text-rose-300"
+          <div className="overflow-hidden rounded-2xl border border-border bg-surface-raised/40">
+            <button
+              type="button"
+              onClick={() => setAiPanelOpen((open) => !open)}
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-surface-raised"
+              aria-expanded={aiPanelOpen}
+              aria-controls="ai-layout-panel"
             >
-              {error}
-            </div>
-          )}
+              <span>
+                <span className="block text-sm font-semibold">✦ 交給 AI 排版</span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  選用功能，只有送出描述時才會使用 AI 額度
+                </span>
+              </span>
+              <span className="text-sm text-muted" aria-hidden>
+                {aiPanelOpen ? "收合" : "展開"}
+              </span>
+            </button>
+
+            {aiPanelOpen && (
+              <div id="ai-layout-panel" className="space-y-3 border-t border-border p-4">
+                <div>
+                  <label htmlFor="ai-layout-prompt" className="mb-2 block text-sm font-semibold">
+                    你希望畫面看起來怎麼樣？
+                  </label>
+                  <textarea
+                    id="ai-layout-prompt"
+                    value={prompt}
+                    onChange={(event) => setPrompt(event.target.value.slice(0, 500))}
+                    rows={3}
+                    className="input-field resize-none"
+                    placeholder="例如：專業深藍色，趨勢佔三分之二，曝險放右邊…"
+                    disabled={loading}
+                  />
+                  <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted">
+                    <span>只傳送描述與介面設定，不會傳送持倉資料。</span>
+                    <span>{prompt.length}/500</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2" aria-label="描述範例">
+                  {EXAMPLES.map((example) => (
+                    <button
+                      key={example}
+                      type="button"
+                      onClick={() => setPrompt(example)}
+                      disabled={loading}
+                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-left text-xs text-muted transition hover:border-accent hover:text-foreground disabled:opacity-50"
+                    >
+                      {example}
+                    </button>
+                  ))}
+                </div>
+
+                {error && (
+                  <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-600 dark:text-rose-300">
+                    {error}
+                  </div>
+                )}
+                {providerNotice && (
+                  <div role="status" className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
+                    {providerNotice}
+                  </div>
+                )}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void generate()}
+                    disabled={loading || prompt.trim().length < 3}
+                    className="btn-secondary justify-center"
+                  >
+                    {loading ? "AI 設計中…" : "產生版面草稿"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {saved && (
             <div
@@ -332,20 +390,11 @@ export function AiLayoutAssistantModal({
             </div>
           )}
 
-          {providerNotice && (
-            <div
-              role="status"
-              className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-700 dark:text-sky-300"
-            >
-              {providerNotice}
-            </div>
-          )}
-
           {preview && (
             <div className="space-y-4 rounded-2xl border border-accent/30 bg-accent-dim/40 p-4 sm:p-5">
               <div>
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="font-semibold">正在預覽 AI 建議</h3>
+                  <h3 className="font-semibold">版面草稿</h3>
                   <span className="rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-white">
                     尚未儲存
                   </span>
@@ -355,19 +404,28 @@ export function AiLayoutAssistantModal({
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full border border-border bg-surface px-3 py-1.5">
-                  {THEME_LABELS[preview.theme]}
-                </span>
-                <span className="rounded-full border border-border bg-surface px-3 py-1.5">
-                  {PALETTE_LABELS[preview.palette]}
-                </span>
-                <span className="rounded-full border border-border bg-surface px-3 py-1.5">
-                  {DENSITY_LABELS[preview.density]}
-                </span>
-                <span className="rounded-full border border-border bg-surface px-3 py-1.5">
-                  {CARD_LABELS[preview.cardStyle]}
-                </span>
+              <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                {([
+                  ["主題", "theme", preview.theme, THEME_LABELS],
+                  ["色系", "palette", preview.palette, PALETTE_LABELS],
+                  ["密度", "density", preview.density, DENSITY_LABELS],
+                  ["卡片", "cardStyle", preview.cardStyle, CARD_LABELS],
+                ] as const).map(([label, key, value, labels]) => (
+                  <label key={key} className="space-y-1.5 text-muted">
+                    <span>{label}</span>
+                    <select
+                      value={value}
+                      onChange={(event) =>
+                        updatePreviewAppearance({ [key]: event.target.value })
+                      }
+                      className="w-full rounded-lg border border-border bg-surface px-2 py-2 text-xs text-foreground"
+                    >
+                      {Object.entries(labels).map(([option, optionLabel]) => (
+                        <option key={option} value={option}>{optionLabel}</option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
               </div>
 
               <div>
@@ -482,36 +540,17 @@ export function AiLayoutAssistantModal({
               disabled={loading}
               className="btn-secondary justify-center"
             >
-              預覽預設版面
+              恢復預設版面
             </button>
 
             <div className="flex flex-col-reverse gap-2 sm:flex-row">
-              {preview && (
-                <button
-                  type="button"
-                  onClick={clearPreview}
-                  disabled={loading}
-                  className="btn-secondary justify-center"
-                >
-                  取消預覽
-                </button>
-              )}
               <button
                 type="button"
-                onClick={() => void generate()}
-                disabled={loading || prompt.trim().length < 3}
+                onClick={close}
+                disabled={loading}
                 className="btn-secondary justify-center"
               >
-                {loading ? (
-                  <>
-                    <span className="mr-2 h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted/30 border-t-muted" />
-                    AI 設計中…
-                  </>
-                ) : preview ? (
-                  "重新產生"
-                ) : (
-                  "產生並預覽"
-                )}
+                取消變更
               </button>
               {preview && (
                 <button

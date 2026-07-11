@@ -81,11 +81,11 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => setAiLayoutOpen(true)}
               className="touch-target rounded-lg border border-accent/30 bg-accent-dim px-2.5 py-2 text-xs font-semibold text-accent transition hover:border-accent sm:px-3 sm:text-sm"
-              title="用自然語言調整版面與色調"
+              title="手動調整版面，或使用 AI 協助排版"
             >
-              <span aria-hidden className="mr-1">✦</span>
-              <span className="hidden sm:inline">AI 版面</span>
-              <span className="sm:hidden">AI</span>
+              <span aria-hidden className="mr-1">▦</span>
+              <span className="hidden sm:inline">版面設定</span>
+              <span className="sm:hidden">版面</span>
             </button>
             <button
               type="button"
