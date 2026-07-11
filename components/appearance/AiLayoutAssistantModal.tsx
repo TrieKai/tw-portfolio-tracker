@@ -29,6 +29,16 @@ const SECTION_LABELS: Record<DashboardSectionId, string> = {
   holdings: "持倉摘要",
 };
 
+const SECTION_ICONS: Record<DashboardSectionId, string> = {
+  summary: "◫",
+  allocation: "◔",
+  quickStats: "⚡",
+  exposure: "◎",
+  monthlyPnl: "±",
+  trend: "↗",
+  holdings: "≡",
+};
+
 const WIDTH_LABELS: Record<DashboardGridWidth, string> = {
   full: "全寬",
   twoThirds: "2/3",
@@ -41,6 +51,13 @@ const WIDTH_CLASSES: Record<DashboardGridWidth, string> = {
   twoThirds: "col-span-8",
   half: "col-span-6",
   oneThird: "col-span-4",
+};
+
+const WIDTH_PREVIEW_CLASSES: Record<DashboardGridWidth, string> = {
+  full: "w-full",
+  twoThirds: "w-2/3",
+  half: "w-1/2",
+  oneThird: "w-1/3",
 };
 
 const THEME_LABELS: Record<UiTheme, string> = {
@@ -429,16 +446,11 @@ export function AiLayoutAssistantModal({
               </div>
 
               <div>
-                <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-medium text-muted">
-                      桌面網格預覽
-                    </p>
-                    <p className="mt-1 text-[11px] text-muted">
-                      直接拖曳區塊改變上下／左右位置，並在區塊內調整寬度。
-                    </p>
-                  </div>
-                  <p className="text-[11px] text-muted">手機自動單欄</p>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-muted">桌面版面</p>
+                  <p className="flex items-center gap-1 text-[11px] text-muted">
+                    <span aria-hidden>⠿</span> 拖曳排列
+                  </p>
                 </div>
                 <ol className="grid grid-cols-12 gap-2 rounded-xl border border-dashed border-border bg-surface-raised/50 p-2 text-xs">
                   {preview.dashboardLayout.map((item, index) => {
@@ -466,7 +478,7 @@ export function AiLayoutAssistantModal({
                         }
                         onDrop={(event) => dropSection(event, item.section)}
                         aria-label={`拖曳${SECTION_LABELS[item.section]}調整位置`}
-                        className={`${WIDTH_CLASSES[item.width]} relative flex min-h-20 min-w-0 cursor-grab flex-col justify-between gap-2 rounded-lg border bg-surface p-2.5 transition-all duration-200 ${
+                        className={`${WIDTH_CLASSES[item.width]} group relative flex min-h-24 min-w-0 cursor-grab flex-col justify-between gap-3 overflow-hidden rounded-xl border bg-surface p-2.5 transition-all duration-200 ${
                           dragOverSection === item.section &&
                           draggedSection !== item.section
                             ? "border-accent bg-accent-dim/50 ring-2 ring-accent/25"
@@ -477,15 +489,15 @@ export function AiLayoutAssistantModal({
                             : "shadow-sm hover:-translate-y-0.5 hover:border-accent/60 hover:shadow-lg"
                         } ${hidden && draggedSection !== item.section ? "opacity-50" : ""}`}
                       >
-                        <div className="flex min-w-0 items-center gap-1.5">
+                        <div className="flex min-w-0 items-center gap-2">
                           <span
-                            className="select-none text-sm leading-none text-muted"
+                            className="select-none text-lg leading-none text-muted transition group-hover:text-accent"
                             aria-hidden
                           >
-                            ⋮⋮
+                            ⠿
                           </span>
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-raised text-[10px] text-muted">
-                            {index + 1}
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-dim text-lg font-semibold text-accent" aria-hidden>
+                            {SECTION_ICONS[item.section]}
                           </span>
                           <span className="min-w-0 flex-1 truncate font-medium">
                             {SECTION_LABELS[item.section]}
@@ -494,37 +506,41 @@ export function AiLayoutAssistantModal({
                             type="button"
                             draggable={false}
                             onClick={() => toggleSection(item.section)}
-                            className="shrink-0 rounded-md border border-border px-1.5 py-1 text-[10px] text-muted transition hover:border-accent hover:text-foreground"
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base text-muted transition hover:bg-surface-raised hover:text-foreground"
                             aria-label={`${hidden ? "顯示" : "隱藏"}${SECTION_LABELS[item.section]}`}
                             title={hidden ? "顯示區塊" : "隱藏區塊"}
                           >
-                            {hidden ? "顯示" : "隱藏"}
+                            <span aria-hidden>{hidden ? "◌" : "◉"}</span>
                           </button>
                         </div>
-                        <label className="flex items-center justify-between gap-1.5 text-[10px] text-muted">
-                          <span>寬度</span>
-                          <select
-                            draggable={false}
-                            value={item.width}
-                            onChange={(event) =>
-                              setSectionWidth(
-                                item.section,
-                                event.target.value as DashboardGridWidth
-                              )
-                            }
-                            disabled={hidden}
-                            aria-label={`${SECTION_LABELS[item.section]}寬度`}
-                            className="min-w-0 rounded-md border border-border bg-surface-raised px-1.5 py-1 text-[10px] text-foreground disabled:cursor-not-allowed"
-                          >
-                            {Object.entries(WIDTH_LABELS).map(
-                              ([value, label]) => (
-                                <option key={value} value={value}>
-                                  {label}
-                                </option>
-                              )
-                            )}
-                          </select>
-                        </label>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] tabular-nums text-muted">
+                            {index + 1}
+                          </span>
+                          <div className="flex rounded-lg border border-border bg-surface-raised p-0.5" aria-label={`${SECTION_LABELS[item.section]}寬度`}>
+                            {(Object.keys(WIDTH_LABELS) as DashboardGridWidth[]).map((width) => (
+                              <button
+                                key={width}
+                                type="button"
+                                draggable={false}
+                                onClick={() => setSectionWidth(item.section, width)}
+                                disabled={hidden}
+                                aria-label={`${SECTION_LABELS[item.section]}設為${WIDTH_LABELS[width]}`}
+                                aria-pressed={item.width === width}
+                                title={WIDTH_LABELS[width]}
+                                className={`flex h-7 w-7 items-center justify-center rounded-md transition disabled:cursor-not-allowed ${
+                                  item.width === width
+                                    ? "bg-accent text-white shadow-sm"
+                                    : "text-muted hover:bg-surface hover:text-foreground"
+                                }`}
+                              >
+                                <span className="flex h-3.5 w-4 items-center rounded-[3px] border border-current p-[2px]" aria-hidden>
+                                  <span className={`${WIDTH_PREVIEW_CLASSES[width]} h-full rounded-[1px] bg-current`} />
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </li>
                     );
                   })}
