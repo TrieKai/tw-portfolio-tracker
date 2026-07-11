@@ -11,6 +11,7 @@ import {
 } from "@/lib/portfolio/exposure";
 import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import type { PortfolioSettings } from "@/lib/types/holding";
+import type { DashboardCardView } from "@/lib/types/ui-preferences";
 
 interface ExposurePanelProps {
   exposure: PortfolioExposureSummary;
@@ -18,12 +19,16 @@ interface ExposurePanelProps {
   onSaveSettings: (
     patch: Pick<PortfolioSettings, "netAssets" | "liabilities">
   ) => void;
+  view?: DashboardCardView;
+  readOnly?: boolean;
 }
 
 export function ExposurePanel({
   exposure,
   settings,
   onSaveSettings,
+  view = "standard",
+  readOnly = false,
 }: ExposurePanelProps) {
   const [netAssetsInput, setNetAssetsInput] = useState(
     settings.netAssets !== undefined ? String(settings.netAssets) : ""
@@ -89,13 +94,15 @@ export function ExposurePanel({
             曝險金額 = 市值 × 槓桿倍數；曝險比例 = 總曝險 ÷ 淨資產
           </p>
         </div>
-        <button
-          type="button"
-          className="btn-secondary text-sm"
-          onClick={() => setEditing((v) => !v)}
-        >
-          {editing ? "取消" : "設定淨資產"}
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            onClick={() => setEditing((v) => !v)}
+          >
+            {editing ? "取消" : "設定淨資產"}
+          </button>
+        )}
       </div>
 
       {editing && (
@@ -170,7 +177,7 @@ export function ExposurePanel({
         />
       </div>
 
-      <div className="glass-card overflow-x-auto">
+      {view !== "compact" && <div className="glass-card overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
             <tr className="border-b border-border/60 text-left text-muted">
@@ -222,7 +229,7 @@ export function ExposurePanel({
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </section>
   );
 }

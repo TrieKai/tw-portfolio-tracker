@@ -49,10 +49,12 @@ export function MonthlyPnlTable({
   holdings,
   priceHistory,
   sales,
+  asOfDate,
 }: {
   holdings: Holding[];
   priceHistory: PriceHistoryMap;
   sales: SaleTransaction[];
+  asOfDate?: string;
 }) {
   const [includeBeforeYtd, setIncludeBeforeYtd] = useState(false);
 
@@ -65,8 +67,9 @@ export function MonthlyPnlTable({
     () =>
       buildMonthlyPnlRows(holdings, priceHistory, sales, {
         includeBeforeYtd,
+        asOfDate,
       }),
-    [holdings, priceHistory, sales, includeBeforeYtd]
+    [holdings, priceHistory, sales, includeBeforeYtd, asOfDate]
   );
 
   return (

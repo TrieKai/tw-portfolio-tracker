@@ -9,13 +9,18 @@ import {
 import type { PortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
 import { PnlValueWithBreakdown } from "@/components/ui/PnlBreakdownTooltip";
 import type { PortfolioSummary as Summary } from "@/lib/types/holding";
+import type { DashboardCardView } from "@/lib/types/ui-preferences";
 
 export function PortfolioSummaryCards({
   summary,
   pnlBreakdowns,
+  view = "standard",
+  asOfDate,
 }: {
   summary: Summary;
   pnlBreakdowns: PortfolioPnlBreakdowns;
+  view?: DashboardCardView;
+  asOfDate?: string;
 }) {
   const unrealizedPositive = summary.totalPnl >= 0;
   const realizedPositive = summary.totalRealizedPnl >= 0;
@@ -24,7 +29,9 @@ export function PortfolioSummaryCards({
   const monthlyUnrealizedPositive =
     summary.monthlyUnrealizedPnl !== null && summary.monthlyUnrealizedPnl >= 0;
   const monthlyRealizedPositive = summary.monthlyRealizedPnl >= 0;
-  const monthLabel = formatCurrentMonthZh();
+  const monthLabel = asOfDate
+    ? `${Number(asOfDate.slice(5, 7))} 月`
+    : formatCurrentMonthZh();
 
   const unrealizedValueClass = unrealizedPositive ? "text-gain" : "text-loss";
   const dailyValueClass =
@@ -39,6 +46,39 @@ export function PortfolioSummaryCards({
         ? "text-gain"
         : "text-loss"
       : "text-muted";
+
+  if (view === "compact") {
+    return (
+      <div className="glass-card grid gap-4 p-5 sm:grid-cols-4">
+        <MiniStat label="總資產" value={formatCurrency(summary.totalValue)} />
+        <MiniStat label="總成本" value={formatCurrency(summary.totalCost)} />
+        <MiniStat label="未實現" value={formatCurrency(summary.totalPnl)} highlight={unrealizedPositive ? "gain" : "loss"} />
+        <MiniStat label="報酬率" value={formatPercent(summary.totalReturnRate)} highlight={unrealizedPositive ? "gain" : "loss"} />
+      </div>
+    );
+  }
+
+  if (view === "visual") {
+    const progress = summary.totalCost > 0
+      ? Math.min(100, Math.max(0, (summary.totalValue / summary.totalCost) * 50))
+      : 0;
+    return (
+      <div className="glass-card grid gap-5 p-5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] sm:items-center">
+        <div>
+          <p className="text-sm text-muted">資產淨值</p>
+          <p className="mt-1 text-3xl font-bold tabular-nums sm:text-4xl">{formatCurrency(summary.totalValue)}</p>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-raised">
+            <div className={`h-full rounded-full ${unrealizedPositive ? "bg-gain" : "bg-loss"}`} style={{ width: `${progress}%` }} />
+          </div>
+          <p className="mt-2 text-xs text-muted">相對投入成本的資產進度</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <MiniStat label="未實現" value={formatCurrency(summary.totalPnl)} highlight={unrealizedPositive ? "gain" : "loss"} />
+          <MiniStat label="報酬率" value={formatPercent(summary.totalReturnRate)} highlight={unrealizedPositive ? "gain" : "loss"} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4">
@@ -149,6 +189,15 @@ export function PortfolioSummaryCards({
         }
         highlight={monthlyRealizedPositive ? "gain" : "loss"}
       />
+    </div>
+  );
+}
+
+function MiniStat({ label, value, highlight }: { label: string; value: string; highlight?: "gain" | "loss" }) {
+  return (
+    <div className="min-w-0 rounded-xl bg-surface-raised/70 p-3">
+      <p className="text-xs text-muted">{label}</p>
+      <p className={`mt-1 truncate font-semibold tabular-nums ${highlight === "gain" ? "text-gain" : highlight === "loss" ? "text-loss" : "text-foreground"}`}>{value}</p>
     </div>
   );
 }

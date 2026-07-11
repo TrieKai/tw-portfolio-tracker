@@ -4,6 +4,7 @@ import { type DragEvent, useEffect, useRef, useState } from "react";
 import { requestAiLayout } from "@/lib/client/ai-layout-api";
 import type {
   DashboardGridWidth,
+  DashboardCardView,
   DashboardSectionId,
   UiCardStyle,
   UiDensity,
@@ -59,6 +60,16 @@ const WIDTH_PREVIEW_CLASSES: Record<DashboardGridWidth, string> = {
   half: "w-1/2",
   oneThird: "w-1/3",
 };
+
+const VIEW_OPTIONS: Array<{
+  value: DashboardCardView;
+  icon: string;
+  label: string;
+}> = [
+  { value: "standard", icon: "▤", label: "完整" },
+  { value: "compact", icon: "▬", label: "精簡" },
+  { value: "visual", icon: "◉", label: "圖像" },
+];
 
 const THEME_LABELS: Record<UiTheme, string> = {
   light: "淺色",
@@ -274,6 +285,17 @@ export function AiLayoutAssistantModal({
     updatePreviewLayout((layout) =>
       layout.map((item) =>
         item.section === section ? { ...item, hidden: !item.hidden } : item
+      )
+    );
+  }
+
+  function setSectionView(
+    section: DashboardSectionId,
+    view: DashboardCardView
+  ) {
+    updatePreviewLayout((layout) =>
+      layout.map((item) =>
+        item.section === section ? { ...item, view } : item
       )
     );
   }
@@ -513,10 +535,31 @@ export function AiLayoutAssistantModal({
                             <span aria-hidden>{hidden ? "◌" : "◉"}</span>
                           </button>
                         </div>
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
                           <span className="text-[10px] tabular-nums text-muted">
                             {index + 1}
                           </span>
+                          <div className="flex gap-0.5" aria-label={`${SECTION_LABELS[item.section]}內容形態`}>
+                            {VIEW_OPTIONS.map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                draggable={false}
+                                disabled={hidden}
+                                onClick={() => setSectionView(item.section, option.value)}
+                                aria-label={`${SECTION_LABELS[item.section]}使用${option.label}模式`}
+                                aria-pressed={item.view === option.value}
+                                title={`${option.label}模式`}
+                                className={`flex h-7 w-7 items-center justify-center rounded-md text-sm transition ${
+                                  item.view === option.value
+                                    ? "bg-accent-dim text-accent"
+                                    : "text-muted hover:bg-surface-raised hover:text-foreground"
+                                }`}
+                              >
+                                <span aria-hidden>{option.icon}</span>
+                              </button>
+                            ))}
+                          </div>
                           <div className="flex rounded-lg border border-border bg-surface-raised p-0.5" aria-label={`${SECTION_LABELS[item.section]}寬度`}>
                             {(Object.keys(WIDTH_LABELS) as DashboardGridWidth[]).map((width) => (
                               <button

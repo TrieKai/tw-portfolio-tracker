@@ -67,8 +67,11 @@ export function countMonthlySales(
 }
 
 /** 是否有基金持倉的淨值日期早於今日（或尚無淨值日期） */
-export function hasStaleFundNav(holdings: Holding[]): boolean {
-  const today = todayIsoDate();
+export function hasStaleFundNav(
+  holdings: Holding[],
+  asOfDate: string = todayIsoDate()
+): boolean {
+  const today = asOfDate;
   return holdings.some(
     (h) => h.assetType === "fund" && (!h.priceDate || h.priceDate < today)
   );
@@ -89,6 +92,8 @@ export function computePortfolioSummary(
   options?: {
     holdingsForTimeline?: Holding[];
     priceHistory?: PriceHistoryMap;
+    /** 時間旅行使用；日、月統計以這一天為基準。 */
+    asOfDate?: string;
   }
 ): PortfolioSummary {
   let totalCost = 0;
@@ -110,25 +115,28 @@ export function computePortfolioSummary(
     totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
 
   const totalRealizedPnl = computeTotalRealizedPnl(sales);
-  const monthlyRealizedPnl = computeMonthlyRealizedPnl(sales);
-  const monthlySaleCount = countMonthlySales(sales);
+  const monthPrefix = options?.asOfDate?.slice(0, 7);
+  const monthlyRealizedPnl = computeMonthlyRealizedPnl(sales, monthPrefix);
+  const monthlySaleCount = countMonthlySales(sales, monthPrefix);
   const monthlyUnrealizedPnl =
     options?.holdingsForTimeline && options?.priceHistory
       ? computeMonthlyUnrealizedPnlChange(
           options.holdingsForTimeline,
-          options.priceHistory
+          options.priceHistory,
+          monthPrefix
         )
       : null;
   const dailyUnrealizedPnl =
     options?.holdingsForTimeline && options?.priceHistory
       ? computeDailyUnrealizedPnlChange(
           options.holdingsForTimeline,
-          options.priceHistory
+          options.priceHistory,
+          options.asOfDate
         )
       : null;
   const hasStaleFundNavOnDaily =
     options?.holdingsForTimeline
-      ? hasStaleFundNav(options.holdingsForTimeline)
+      ? hasStaleFundNav(options.holdingsForTimeline, options.asOfDate)
       : false;
 
   return {

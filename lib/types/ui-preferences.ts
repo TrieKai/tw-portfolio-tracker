@@ -19,10 +19,16 @@ export const DASHBOARD_GRID_WIDTHS = [
 
 export type DashboardGridWidth = (typeof DASHBOARD_GRID_WIDTHS)[number];
 
+export const DASHBOARD_CARD_VIEWS = ["standard", "compact", "visual"] as const;
+
+export type DashboardCardView = (typeof DASHBOARD_CARD_VIEWS)[number];
+
 export interface DashboardLayoutItem {
   section: DashboardSectionId;
   width: DashboardGridWidth;
   hidden: boolean;
+  /** 同一區塊可依使用情境切換完整資訊、精簡摘要或圖像優先。 */
+  view: DashboardCardView;
 }
 
 export const UI_PALETTES = [

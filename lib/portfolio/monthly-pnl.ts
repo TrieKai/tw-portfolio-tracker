@@ -59,11 +59,12 @@ export function computeUnrealizedPnlChangeForRange(
 /** 今日未實現損益變化（今日相對前一個有報價的交易日） */
 export function computeDailyUnrealizedPnlChange(
   holdings: Holding[],
-  priceHistory: PriceHistoryMap
+  priceHistory: PriceHistoryMap,
+  asOfDate: string = todayIsoDate()
 ): number | null {
   if (holdings.length === 0) return null;
 
-  const today = todayIsoDate();
+  const today = asOfDate;
   const startDate = addDaysToIsoDate(today, -7);
   const points = buildPortfolioTimelineBetween(
     holdings,
@@ -149,6 +150,7 @@ function buildRow(
 export interface BuildMonthlyPnlRowsOptions {
   /** 含今年 1 月之前的月份（仍僅列有資料的月份） */
   includeBeforeYtd?: boolean;
+  asOfDate?: string;
 }
 
 /**
@@ -161,10 +163,12 @@ export function buildMonthlyPnlRows(
   sales: SaleTransaction[],
   options?: BuildMonthlyPnlRowsOptions
 ): MonthlyPnlRow[] {
-  const current = currentYearMonthPrefix();
+  const current = options?.asOfDate?.slice(0, 7) ?? currentYearMonthPrefix();
   const earliest = earliestMonthPrefix(holdings, priceHistory, sales);
   const months = listMonthPrefixesDescending(earliest, current);
-  const ytdStart = currentYearJanuaryPrefix();
+  const ytdStart = options?.asOfDate
+    ? `${options.asOfDate.slice(0, 4)}-01`
+    : currentYearJanuaryPrefix();
 
   const rows = months
     .map((monthPrefix) => buildRow(holdings, priceHistory, sales, monthPrefix))

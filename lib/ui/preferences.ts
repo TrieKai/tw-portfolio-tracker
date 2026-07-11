@@ -1,5 +1,6 @@
 import {
   DASHBOARD_GRID_WIDTHS,
+  DASHBOARD_CARD_VIEWS,
   DASHBOARD_SECTION_IDS,
   UI_CARD_STYLES,
   UI_DENSITIES,
@@ -20,13 +21,13 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   density: "comfortable",
   cardStyle: "glass",
   dashboardLayout: [
-    { section: "summary", width: "full", hidden: false },
-    { section: "allocation", width: "half", hidden: false },
-    { section: "quickStats", width: "half", hidden: false },
-    { section: "exposure", width: "full", hidden: false },
-    { section: "monthlyPnl", width: "full", hidden: false },
-    { section: "trend", width: "full", hidden: false },
-    { section: "holdings", width: "full", hidden: false },
+    { section: "summary", width: "full", hidden: false, view: "standard" },
+    { section: "allocation", width: "half", hidden: false, view: "visual" },
+    { section: "quickStats", width: "half", hidden: false, view: "compact" },
+    { section: "exposure", width: "full", hidden: false, view: "standard" },
+    { section: "monthlyPnl", width: "full", hidden: false, view: "standard" },
+    { section: "trend", width: "full", hidden: false, view: "visual" },
+    { section: "holdings", width: "full", hidden: false, view: "standard" },
   ],
 };
 
@@ -45,7 +46,7 @@ function defaultLayoutItem(section: DashboardSectionId): DashboardLayoutItem {
   return (
     DEFAULT_UI_PREFERENCES.dashboardLayout.find(
       (item) => item.section === section
-    ) ?? { section, width: "full", hidden: false }
+    ) ?? { section, width: "full", hidden: false, view: "standard" }
   );
 }
 
@@ -74,6 +75,9 @@ export function normalizeDashboardLayout(raw: unknown): DashboardLayoutItem[] {
         section,
         width,
         hidden: typeof entry.hidden === "boolean" ? entry.hidden : false,
+        view: isAllowed(DASHBOARD_CARD_VIEWS, entry.view)
+          ? entry.view
+          : fallback.view,
       });
     }
   }
@@ -103,11 +107,13 @@ function migrateLegacyDashboardLayout(raw: Record<string, unknown>) {
           section: "allocation",
           width: "half",
           hidden: hidden.includes("overview"),
+          view: "visual",
         },
         {
           section: "quickStats",
           width: "half",
           hidden: hidden.includes("overview"),
+          view: "compact",
         }
       );
       continue;
