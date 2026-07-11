@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type DragEvent, useEffect, useState } from "react";
 import { requestAiLayout } from "@/lib/client/ai-layout-api";
 import type {
   DashboardGridWidth,
@@ -88,6 +88,10 @@ export function AiLayoutAssistantModal({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [providerNotice, setProviderNotice] = useState<string | null>(null);
+  const [draggedSection, setDraggedSection] =
+    useState<DashboardSectionId | null>(null);
+  const [dragOverSection, setDragOverSection] =
+    useState<DashboardSectionId | null>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -160,6 +164,78 @@ export function AiLayoutAssistantModal({
     setSaved(false);
     setProviderNotice(null);
     previewDefaults();
+  }
+
+  function updatePreviewLayout(
+    update: (
+      layout: NonNullable<typeof preview>["dashboardLayout"]
+    ) => NonNullable<typeof preview>["dashboardLayout"]
+  ) {
+    if (!preview) return;
+    previewSuggestion({
+      ...preview,
+      dashboardLayout: update(preview.dashboardLayout),
+    });
+  }
+
+  function reorderSection(
+    sourceSection: DashboardSectionId,
+    targetSection: DashboardSectionId
+  ) {
+    updatePreviewLayout((layout) => {
+      const source = layout.findIndex((item) => item.section === sourceSection);
+      const target = layout.findIndex((item) => item.section === targetSection);
+      if (source < 0 || target < 0 || source === target) return layout;
+      const next = [...layout];
+      const [moved] = next.splice(source, 1);
+      next.splice(target, 0, moved);
+      return next;
+    });
+  }
+
+  function startSectionDrag(
+    event: DragEvent<HTMLElement>,
+    section: DashboardSectionId
+  ) {
+    if ((event.target as HTMLElement).closest("button, select")) {
+      event.preventDefault();
+      return;
+    }
+    setDraggedSection(section);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", section);
+  }
+
+  function dropSection(
+    event: DragEvent<HTMLElement>,
+    targetSection: DashboardSectionId
+  ) {
+    event.preventDefault();
+    const source =
+      draggedSection ??
+      (event.dataTransfer.getData("text/plain") as DashboardSectionId);
+    if (source) reorderSection(source, targetSection);
+    setDraggedSection(null);
+    setDragOverSection(null);
+  }
+
+  function setSectionWidth(
+    section: DashboardSectionId,
+    width: DashboardGridWidth
+  ) {
+    updatePreviewLayout((layout) =>
+      layout.map((item) =>
+        item.section === section ? { ...item, width } : item
+      )
+    );
+  }
+
+  function toggleSection(section: DashboardSectionId) {
+    updatePreviewLayout((layout) =>
+      layout.map((item) =>
+        item.section === section ? { ...item, hidden: !item.hidden } : item
+      )
+    );
   }
 
   return (
@@ -295,8 +371,15 @@ export function AiLayoutAssistantModal({
               </div>
 
               <div>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs font-medium text-muted">桌面網格預覽</p>
+                <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium text-muted">
+                      桌面網格預覽
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted">
+                      直接拖曳區塊改變上下／左右位置，並在區塊內調整寬度。
+                    </p>
+                  </div>
                   <p className="text-[11px] text-muted">手機自動單欄</p>
                 </div>
                 <ol className="grid grid-cols-12 gap-2 rounded-xl border border-dashed border-border bg-surface-raised/50 p-2 text-xs">
@@ -305,19 +388,85 @@ export function AiLayoutAssistantModal({
                     return (
                       <li
                         key={item.section}
-                        className={`${WIDTH_CLASSES[item.width]} flex min-w-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-2 ${
-                          hidden ? "opacity-50" : ""
-                        }`}
+                        draggable
+                        onDragStart={(event) =>
+                          startSectionDrag(event, item.section)
+                        }
+                        onDragEnd={() => {
+                          setDraggedSection(null);
+                          setDragOverSection(null);
+                        }}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "move";
+                          setDragOverSection(item.section);
+                        }}
+                        onDragLeave={() =>
+                          setDragOverSection((current) =>
+                            current === item.section ? null : current
+                          )
+                        }
+                        onDrop={(event) => dropSection(event, item.section)}
+                        aria-label={`拖曳${SECTION_LABELS[item.section]}調整位置`}
+                        className={`${WIDTH_CLASSES[item.width]} relative flex min-h-20 min-w-0 cursor-grab flex-col justify-between gap-2 rounded-lg border bg-surface p-2.5 transition-all duration-200 ${
+                          dragOverSection === item.section &&
+                          draggedSection !== item.section
+                            ? "border-accent bg-accent-dim/50 ring-2 ring-accent/25"
+                            : "border-border"
+                        } ${
+                          draggedSection === item.section
+                            ? "z-20 -translate-y-1 scale-[1.03] rotate-[0.5deg] cursor-grabbing border-accent opacity-80 shadow-2xl"
+                            : "shadow-sm hover:-translate-y-0.5 hover:border-accent/60 hover:shadow-lg"
+                        } ${hidden && draggedSection !== item.section ? "opacity-50" : ""}`}
                       >
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-raised text-[10px] text-muted">
-                          {index + 1}
-                        </span>
-                        <span className="min-w-0 truncate">
-                          {SECTION_LABELS[item.section]}
-                        </span>
-                        <span className="ml-auto shrink-0 text-[10px] text-muted">
-                          {hidden ? "隱藏" : WIDTH_LABELS[item.width]}
-                        </span>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span
+                            className="select-none text-sm leading-none text-muted"
+                            aria-hidden
+                          >
+                            ⋮⋮
+                          </span>
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-raised text-[10px] text-muted">
+                            {index + 1}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate font-medium">
+                            {SECTION_LABELS[item.section]}
+                          </span>
+                          <button
+                            type="button"
+                            draggable={false}
+                            onClick={() => toggleSection(item.section)}
+                            className="shrink-0 rounded-md border border-border px-1.5 py-1 text-[10px] text-muted transition hover:border-accent hover:text-foreground"
+                            aria-label={`${hidden ? "顯示" : "隱藏"}${SECTION_LABELS[item.section]}`}
+                            title={hidden ? "顯示區塊" : "隱藏區塊"}
+                          >
+                            {hidden ? "顯示" : "隱藏"}
+                          </button>
+                        </div>
+                        <label className="flex items-center justify-between gap-1.5 text-[10px] text-muted">
+                          <span>寬度</span>
+                          <select
+                            draggable={false}
+                            value={item.width}
+                            onChange={(event) =>
+                              setSectionWidth(
+                                item.section,
+                                event.target.value as DashboardGridWidth
+                              )
+                            }
+                            disabled={hidden}
+                            aria-label={`${SECTION_LABELS[item.section]}寬度`}
+                            className="min-w-0 rounded-md border border-border bg-surface-raised px-1.5 py-1 text-[10px] text-foreground disabled:cursor-not-allowed"
+                          >
+                            {Object.entries(WIDTH_LABELS).map(
+                              ([value, label]) => (
+                                <option key={value} value={value}>
+                                  {label}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </label>
                       </li>
                     );
                   })}
