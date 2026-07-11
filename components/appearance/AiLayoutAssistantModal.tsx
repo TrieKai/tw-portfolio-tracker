@@ -174,11 +174,9 @@ export function AiLayoutAssistantModal({
     }
 
     if (result.provider === "groq") {
-      setProviderNotice(
-        result.fallbackUsed
-          ? "Gemini 額度不足，已自動改用 Groq 免費方案備援。"
-          : "這次由 Groq 免費方案產生版面。"
-      );
+      setProviderNotice("這次由 Groq 免費方案產生版面。");
+    } else if (result.provider === "gemini" && result.fallbackUsed) {
+      setProviderNotice("Groq 暫時無法使用，已自動改用 Gemini 備援。");
     }
     previewSuggestion(result.data);
   }

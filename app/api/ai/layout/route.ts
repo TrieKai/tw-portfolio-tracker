@@ -266,7 +266,7 @@ async function requestGeminiLayout(
           ? "AI_TIMEOUT"
           : "AI_NETWORK_ERROR",
       status: error instanceof Error && error.name === "AbortError" ? 504 : 502,
-      suggestion: "正在嘗試備援服務",
+      suggestion: "請稍後再試",
       retryable: true,
     };
   } finally {
@@ -400,31 +400,6 @@ export async function POST(request: Request) {
   const { updatedAt: _updatedAt, ...currentLayout } = parsed.data.current;
   const failures: Array<Extract<ProviderResult, { ok: false }>> = [];
 
-  if (geminiApiKey) {
-    const result = await requestGeminiLayout(
-      geminiApiKey,
-      parsed.data.prompt,
-      currentLayout
-    );
-    if (result.ok) {
-      return NextResponse.json({
-        success: true,
-        data: result.suggestion,
-        provider: result.provider,
-        fallbackUsed: false,
-      });
-    }
-    if (!result.retryable) {
-      return errorResponse(
-        result.error,
-        result.code,
-        result.status,
-        result.suggestion
-      );
-    }
-    failures.push(result);
-  }
-
   if (groqApiKey) {
     const result = await requestGroqLayout(
       groqApiKey,
@@ -436,8 +411,33 @@ export async function POST(request: Request) {
         success: true,
         data: result.suggestion,
         provider: result.provider,
+        fallbackUsed: false,
+      });
+    }
+    failures.push(result);
+  }
+
+  if (geminiApiKey) {
+    const result = await requestGeminiLayout(
+      geminiApiKey,
+      parsed.data.prompt,
+      currentLayout
+    );
+    if (result.ok) {
+      return NextResponse.json({
+        success: true,
+        data: result.suggestion,
+        provider: result.provider,
         fallbackUsed: failures.length > 0,
       });
+    }
+    if (!result.retryable) {
+      return errorResponse(
+        result.error,
+        result.code,
+        result.status,
+        result.suggestion
+      );
     }
     failures.push(result);
   }

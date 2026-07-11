@@ -36,15 +36,14 @@ Google OAuth 授權重新導向 URI 需包含 `https://你的網域/api/auth/cal
 
 ### AI 版面助理（選用）
 
-支援 Gemini 與 Groq 免費方案。全部設定時依序使用 `Gemini → Groq`；遇到配額不足（429）、逾時、網路或上游錯誤，會在同一次請求中自動切換：
+支援 Groq 與 Gemini 免費方案。全部設定時依序使用 `Groq → Gemini`；遇到配額不足（429）、逾時、網路或上游錯誤，會在同一次請求中自動切換：
 
 ```bash
-GEMINI_API_KEY=你的金鑰
-GEMINI_MODEL=gemini-2.5-flash-lite
-
 GROQ_API_KEY=你的 Groq 金鑰
 GROQ_MODEL=qwen/qwen3.6-27b
 
+GEMINI_API_KEY=你的金鑰
+GEMINI_MODEL=gemini-2.5-flash-lite
 ```
 
 可在 [Google AI Studio](https://aistudio.google.com/apikey) 建立 Gemini Key，或在 [Groq Console](https://console.groq.com/keys) 建立 Groq Key。兩者都可單獨使用，未設定的供應商會自動略過。
