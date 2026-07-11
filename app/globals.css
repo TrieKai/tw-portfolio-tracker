@@ -195,6 +195,38 @@
     align-items: start;
   }
 
+  /* 首頁區塊可被 AI 放進 1/3 或 1/2 網格，因此曝險元件必須依自己的
+     容器寬度重排，不能只看整個瀏覽器的 sm / lg breakpoint。 */
+  .exposure-panel {
+    container-type: inline-size;
+  }
+
+  .exposure-metrics,
+  .exposure-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @container (min-width: 28rem) {
+    .exposure-metrics,
+    .exposure-form-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @container (min-width: 36rem) {
+    .exposure-header {
+      flex-direction: row;
+      align-items: flex-end;
+      justify-content: space-between;
+    }
+  }
+
+  @container (min-width: 58rem) {
+    .exposure-metrics {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
   [data-ui-density="compact"] .ui-dashboard {
     gap: 1.25rem;
   }

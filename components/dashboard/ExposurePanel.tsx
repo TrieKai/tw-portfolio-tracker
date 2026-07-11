@@ -81,8 +81,8 @@ export function ExposurePanel({
   const netAssetsHint = buildNetAssetsHint(exposure);
 
   return (
-    <section className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <section className="exposure-panel min-w-0 space-y-4">
+      <div className="exposure-header flex flex-col gap-2">
         <div>
           <h2 className="text-lg font-semibold">曝險分析</h2>
           <p className="mt-1 text-sm text-muted">
@@ -108,7 +108,7 @@ export function ExposurePanel({
             例：自有 200 萬、投資信貸 100 萬、持倉市值 300 萬 → 可填淨資產
             200 萬，或僅填投資負債 100 萬。
           </p>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="exposure-form-grid grid gap-4">
             <label className="block text-sm">
               <span className="text-muted">淨資產／自有資金（元）</span>
               <input
@@ -138,7 +138,7 @@ export function ExposurePanel({
         </form>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="exposure-metrics grid gap-4">
         <MetricCard
           label="持倉市值"
           value={formatCurrency(exposure.totalMarketValue)}
@@ -253,10 +253,10 @@ function MetricCard({
   highlight?: "warn";
 }) {
   return (
-    <div className="glass-card p-4">
+    <div className="glass-card min-w-0 p-4">
       <p className="text-sm text-muted">{label}</p>
       <p
-        className={`mt-1 text-xl font-semibold tabular-nums ${
+        className={`exposure-metric-value mt-1 whitespace-nowrap text-xl font-semibold tabular-nums ${
           highlight === "warn"
             ? "text-amber-600 dark:text-amber-400"
             : "text-foreground"

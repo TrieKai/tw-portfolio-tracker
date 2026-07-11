@@ -128,10 +128,16 @@ export function AiLayoutAssistantModal({
       return;
     }
 
-    if (result.provider === "zhipu") {
+    if (result.provider === "groq") {
       setProviderNotice(
         result.fallbackUsed
-          ? "Gemini 額度不足，已自動改用免費的智譜 GLM 備援。"
+          ? "Gemini 額度不足，已自動改用 Groq 免費方案備援。"
+          : "這次由 Groq 免費方案產生版面。"
+      );
+    } else if (result.provider === "zhipu") {
+      setProviderNotice(
+        result.fallbackUsed
+          ? "前面的 AI 服務無法使用，已自動改用免費的智譜 GLM 備援。"
           : "這次由免費的智譜 GLM 產生版面。"
       );
     }
