@@ -1,12 +1,15 @@
 import type { PortfolioHealth } from "@/lib/portfolio/health";
 import type { InvestmentWeather } from "@/lib/portfolio/weather";
+import type { DashboardCardView } from "@/lib/types/ui-preferences";
 
 export function PortfolioInsights({
   health,
   weather,
+  view = "standard",
 }: {
   health: PortfolioHealth;
   weather: InvestmentWeather;
+  view?: DashboardCardView;
 }) {
   const scoreTone = health.level === "excellent" || health.level === "good"
     ? "text-gain"
@@ -17,7 +20,7 @@ export function PortfolioInsights({
         : "text-loss";
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+    <section className="portfolio-insights grid gap-4">
       <article className="glass-card overflow-hidden p-5 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -57,7 +60,7 @@ export function PortfolioInsights({
           )}
         </div>
 
-        {health.factors.length > 0 && (
+        {view !== "compact" && health.factors.length > 0 && (
           <div className="mt-5 grid gap-x-6 gap-y-4 sm:grid-cols-2">
             {health.factors.map((factor) => {
               const percent = (factor.score / factor.maxScore) * 100;

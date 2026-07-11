@@ -2,6 +2,7 @@
 
 import { formatCurrency, formatPercent } from "@/lib/portfolio/calculations";
 import type { PortfolioSummary } from "@/lib/types/holding";
+import type { DashboardCardView } from "@/lib/types/ui-preferences";
 
 interface TimeTravelBarProps {
   dates: string[];
@@ -9,6 +10,7 @@ interface TimeTravelBarProps {
   onSelectDate: (date: string | null) => void;
   currentSummary: PortfolioSummary;
   selectedSummary?: PortfolioSummary;
+  view?: DashboardCardView;
 }
 
 function formatDate(date: string) {
@@ -25,6 +27,7 @@ export function TimeTravelBar({
   onSelectDate,
   currentSummary,
   selectedSummary,
+  view = "standard",
 }: TimeTravelBarProps) {
   if (dates.length === 0) return null;
   const activeIndex = selectedDate
@@ -38,7 +41,7 @@ export function TimeTravelBar({
   )];
 
   return (
-    <section className={`mb-6 overflow-hidden rounded-2xl border p-4 transition ${
+    <section className={`overflow-hidden rounded-2xl border p-4 transition ${
       active
         ? "border-accent/50 bg-accent-dim/40 shadow-lg shadow-accent/5"
         : "border-border bg-surface"
@@ -75,7 +78,7 @@ export function TimeTravelBar({
             aria-label="選擇歷史日期"
             aria-valuetext={formatDate(dates[activeIndex])}
           />
-          <div className="relative mt-1 h-8" aria-label="歷史日期刻度">
+          <div className={`relative mt-1 h-8 ${view === "compact" ? "hidden" : ""}`} aria-label="歷史日期刻度">
             {tickIndexes.map((index) => {
               const position = dates.length > 1 ? (index / (dates.length - 1)) * 100 : 0;
               const align = index === 0
@@ -125,7 +128,7 @@ export function TimeTravelBar({
               <TimeMetric label="當時持倉" value={`${selectedSummary.holdingCount} 筆`} sub={`未實現 ${formatPercent(selectedSummary.totalReturnRate)}`} />
             </div>
           )}
-          <p className="mt-3 text-[11px] text-muted">
+          <p className={`mt-3 text-[11px] text-muted ${view === "compact" ? "hidden" : ""}`}>
             以目前仍持有的部位與當日最近價格回看；資產差異也可能包含後續投入與賣出，不等同投資報酬。
           </p>
         </div>

@@ -21,6 +21,10 @@ const EXAMPLES = [
 ] as const;
 
 const SECTION_LABELS: Record<DashboardSectionId, string> = {
+  timeTravel: "投資時光機",
+  insights: "投資天氣與健康",
+  stressTest: "資產壓力測試",
+  rebalance: "再平衡導航",
   summary: "資產摘要",
   allocation: "資產配置",
   quickStats: "快速統計",
@@ -31,6 +35,10 @@ const SECTION_LABELS: Record<DashboardSectionId, string> = {
 };
 
 const SECTION_ICONS: Record<DashboardSectionId, string> = {
+  timeTravel: "◷",
+  insights: "☀",
+  stressTest: "≋",
+  rebalance: "⇄",
   summary: "◫",
   allocation: "◔",
   quickStats: "⚡",
@@ -98,6 +106,16 @@ const CARD_LABELS: Record<UiCardStyle, string> = {
   glass: "玻璃質感",
 };
 
+function layoutFingerprint(layout: UiLayoutSuggestion): string {
+  return JSON.stringify({
+    theme: layout.theme,
+    palette: layout.palette,
+    density: layout.density,
+    cardStyle: layout.cardStyle,
+    dashboardLayout: layout.dashboardLayout,
+  });
+}
+
 export function AiLayoutAssistantModal({
   onClose,
 }: {
@@ -119,6 +137,7 @@ export function AiLayoutAssistantModal({
   const [providerNotice, setProviderNotice] = useState<string | null>(null);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const draftInitialized = useRef(false);
+  const initialLayoutFingerprint = useRef<string | null>(null);
   const [draggedSection, setDraggedSection] =
     useState<DashboardSectionId | null>(null);
   const [dragOverSection, setDragOverSection] =
@@ -127,11 +146,13 @@ export function AiLayoutAssistantModal({
   useEffect(() => {
     if (draftInitialized.current) return;
     draftInitialized.current = true;
-    previewSuggestion({
+    const currentLayout: UiLayoutSuggestion = {
       ...preferences,
       theme,
-      rationale: "這是目前套用的版面，可直接拖曳與調整。",
-    });
+      rationale: "這是目前正在使用的首頁版型，可直接拖曳與調整。",
+    };
+    initialLayoutFingerprint.current = layoutFingerprint(currentLayout);
+    previewSuggestion(currentLayout);
   }, [preferences, previewSuggestion, theme]);
 
   useEffect(() => {
@@ -139,14 +160,16 @@ export function AiLayoutAssistantModal({
     document.body.style.overflow = "hidden";
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        clearPreview();
+        onClose();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
 
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
-      clearPreview();
     };
   }, [clearPreview, onClose]);
 
@@ -292,6 +315,10 @@ export function AiLayoutAssistantModal({
     );
   }
 
+  const previewChanged = preview
+    ? layoutFingerprint(preview) !== initialLayoutFingerprint.current
+    : false;
+
   return (
     <div
       className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -425,14 +452,23 @@ export function AiLayoutAssistantModal({
             <div className="space-y-4 rounded-2xl border border-accent/30 bg-accent-dim/40 p-4 sm:p-5">
               <div>
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="font-semibold">版面草稿</h3>
-                  <span className="rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-white">
-                    尚未儲存
+                  <div>
+                    <h3 className="font-semibold">
+                      {previewChanged ? "自訂版型" : "目前版型"}
+                    </h3>
+                    <p className="mt-1 text-xs text-muted">
+                      下方就是首頁目前的排列，可拖曳區塊或調整寬度與內容形態。
+                    </p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${previewChanged ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-accent text-white"}`}>
+                    {previewChanged ? "尚未套用" : "目前套用"}
                   </span>
                 </div>
-                <p className="mt-2 text-sm leading-6 text-muted">
-                  {preview.rationale}
-                </p>
+                {previewChanged && (
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    {preview.rationale}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
@@ -601,16 +637,20 @@ export function AiLayoutAssistantModal({
                 disabled={loading}
                 className="btn-secondary justify-center"
               >
-                取消變更
+                {previewChanged ? "取消變更" : "關閉"}
               </button>
               {preview && (
                 <button
                   type="button"
                   onClick={savePreview}
-                  disabled={loading || saved}
+                  disabled={loading || saved || !previewChanged}
                   className="btn-primary justify-center"
                 >
-                  套用並記住
+                  {saved
+                    ? "已套用"
+                    : previewChanged
+                      ? "套用自訂版型"
+                      : "目前已套用"}
                 </button>
               )}
             </div>

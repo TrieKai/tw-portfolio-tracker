@@ -17,6 +17,7 @@ import type {
   HoldingWithMetrics,
   PortfolioSummary,
 } from "@/lib/types/holding";
+import type { DashboardCardView } from "@/lib/types/ui-preferences";
 
 const ASSET_TYPES: AssetType[] = ["stock", "fund", "property"];
 
@@ -71,7 +72,7 @@ export function PortfolioPlanningTools({
   );
 }
 
-function StressTestPanel({ holdings }: { holdings: HoldingWithMetrics[] }) {
+export function StressTestPanel({ holdings, view = "standard" }: { holdings: HoldingWithMetrics[]; view?: DashboardCardView }) {
   const [scenarioId, setScenarioId] = useState<StressScenarioId>("correction");
   const [customShocks, setCustomShocks] = useState<AssetShockRates>(STRESS_SCENARIOS.custom.shocks);
   const scenario = STRESS_SCENARIOS[scenarioId];
@@ -82,14 +83,14 @@ function StressTestPanel({ holdings }: { holdings: HoldingWithMetrics[] }) {
   );
 
   return (
-    <article className="glass-card p-5 sm:p-6">
+    <article className="planning-tool glass-card p-5 sm:p-6">
       <div>
         <p className="text-sm font-medium text-muted">情境模擬</p>
         <h2 className="mt-1 text-xl font-semibold">資產壓力測試</h2>
         <p className="mt-1 text-xs text-muted">只做假設試算，不會更動持倉或行情。</p>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="stress-scenario-grid mt-5 grid gap-2">
         {(Object.keys(STRESS_SCENARIOS) as StressScenarioId[]).map((id) => (
           <button
             key={id}
@@ -104,7 +105,7 @@ function StressTestPanel({ holdings }: { holdings: HoldingWithMetrics[] }) {
       </div>
 
       {scenarioId === "custom" && (
-        <div className="mt-4 grid gap-3 rounded-xl bg-surface-raised/70 p-3 sm:grid-cols-3">
+        <div className="stress-custom-grid mt-4 grid gap-3 rounded-xl bg-surface-raised/70 p-3">
           {ASSET_TYPES.map((assetType) => (
             <label key={assetType} className="text-xs">
               <span className="flex justify-between gap-2"><span>{getAssetTypeLabel(assetType)}</span><span className="tabular-nums text-muted">{customShocks[assetType]}%</span></span>
@@ -131,7 +132,7 @@ function StressTestPanel({ holdings }: { holdings: HoldingWithMetrics[] }) {
         {result.shockedHoldingName && <p className="mt-1 text-xs text-muted">假設「{result.shockedHoldingName}」單一標的下跌 30%</p>}
       </div>
 
-      <div className="mt-4 space-y-3">
+      <div className={`mt-4 space-y-3 ${view === "compact" ? "hidden" : ""}`}>
         {result.rows.filter((row) => row.currentValue > 0).map((row) => (
           <div key={row.assetType} className="flex items-center justify-between gap-4 text-sm">
             <div>
@@ -148,16 +149,18 @@ function StressTestPanel({ holdings }: { holdings: HoldingWithMetrics[] }) {
   );
 }
 
-function RebalancePanel({
+export function RebalancePanel({
   summary,
   savedTargets,
   onSaveTargets,
   readOnly,
+  view = "standard",
 }: {
   summary: PortfolioSummary;
   savedTargets?: AssetAllocationTargets;
   onSaveTargets: (targets: AssetAllocationTargets) => void;
   readOnly: boolean;
+  view?: DashboardCardView;
 }) {
   const [targets, setTargets] = useState<AssetAllocationTargets>(savedTargets ?? DEFAULT_ALLOCATION_TARGETS);
   const [cash, setCash] = useState(0);
@@ -175,7 +178,7 @@ function RebalancePanel({
   }
 
   return (
-    <article className="glass-card p-5 sm:p-6">
+    <article className="planning-tool glass-card p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-muted">配置規劃</p>
@@ -187,7 +190,7 @@ function RebalancePanel({
         </span>
       </div>
 
-      <div className="mt-5 grid grid-cols-3 gap-3">
+      <div className="rebalance-target-grid mt-5 grid gap-3">
         {ASSET_TYPES.map((assetType) => (
           <label key={assetType} className="text-xs text-muted">
             {getAssetTypeLabel(assetType)}目標
@@ -237,7 +240,7 @@ function RebalancePanel({
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className="text-sm font-medium">{getAssetTypeLabel(action.assetType)}</p>
-                    <p className="mt-0.5 text-xs text-muted">目前 {action.currentPercent.toFixed(1)}% → 目標 {action.targetPercent.toFixed(0)}%</p>
+                    {view !== "compact" && <p className="mt-0.5 text-xs text-muted">目前 {action.currentPercent.toFixed(1)}% → 目標 {action.targetPercent.toFixed(0)}%</p>}
                   </div>
                   <div className="text-right">
                     <p className={`text-xs ${nearTarget ? "text-muted" : action.adjustment > 0 ? "text-gain" : "text-loss"}`}>{verb}</p>

@@ -8,7 +8,7 @@ import { ExposurePanel } from "@/components/dashboard/ExposurePanel";
 import { TimeTravelBar } from "@/components/dashboard/TimeTravelBar";
 import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
 import { PortfolioInsights } from "@/components/dashboard/PortfolioInsights";
-import { PortfolioPlanningTools } from "@/components/dashboard/PortfolioPlanningTools";
+import { RebalancePanel, StressTestPanel } from "@/components/dashboard/PortfolioPlanningTools";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
@@ -100,6 +100,35 @@ export default function DashboardPage() {
   );
 
   const sections: Record<DashboardSectionId, ReactNode> = {
+    timeTravel: (
+      <TimeTravelBar
+        dates={historyDates}
+        selectedDate={travelDate}
+        onSelectDate={setTravelDate}
+        currentSummary={summary}
+        selectedSummary={travelState?.summary}
+        view={viewFor("timeTravel")}
+      />
+    ),
+    insights: (
+      <PortfolioInsights
+        health={shownHealth}
+        weather={shownWeather}
+        view={viewFor("insights")}
+      />
+    ),
+    stressTest: (
+      <StressTestPanel holdings={shownHoldings} view={viewFor("stressTest")} />
+    ),
+    rebalance: (
+      <RebalancePanel
+        summary={shownSummary}
+        savedTargets={storage.settings.allocationTargets}
+        onSaveTargets={setAllocationTargets}
+        readOnly={travelDate !== null}
+        view={viewFor("rebalance")}
+      />
+    ),
     summary: (
       <PortfolioSummaryCards summary={shownSummary} pnlBreakdowns={shownBreakdowns} view={viewFor("summary")} asOfDate={travelDate ?? undefined} />
     ),
@@ -260,27 +289,13 @@ export default function DashboardPage() {
         }
       />
 
-      <TimeTravelBar
-        dates={historyDates}
-        selectedDate={travelDate}
-        onSelectDate={setTravelDate}
-        currentSummary={summary}
-        selectedSummary={travelState?.summary}
-      />
-
-      <PortfolioInsights health={shownHealth} weather={shownWeather} />
-
-      <PortfolioPlanningTools
-        holdings={shownHoldings}
-        summary={shownSummary}
-        savedTargets={storage.settings.allocationTargets}
-        onSaveTargets={setAllocationTargets}
-        readOnly={travelDate !== null}
-      />
-
       <div className="dashboard-grid">
         {preferences.dashboardLayout
-          .filter((item) => !item.hidden)
+          .filter(
+            (item) =>
+              !item.hidden &&
+              (item.section !== "timeTravel" || historyDates.length > 0)
+          )
           .map((item) => (
             <div
               key={item.section}

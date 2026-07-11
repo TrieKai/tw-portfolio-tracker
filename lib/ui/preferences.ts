@@ -21,6 +21,10 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   density: "comfortable",
   cardStyle: "glass",
   dashboardLayout: [
+    { section: "timeTravel", width: "full", hidden: false, view: "standard" },
+    { section: "insights", width: "full", hidden: false, view: "standard" },
+    { section: "stressTest", width: "half", hidden: false, view: "standard" },
+    { section: "rebalance", width: "half", hidden: false, view: "standard" },
     { section: "summary", width: "full", hidden: false, view: "standard" },
     { section: "allocation", width: "half", hidden: false, view: "visual" },
     { section: "quickStats", width: "half", hidden: false, view: "compact" },
@@ -52,7 +56,7 @@ function defaultLayoutItem(section: DashboardSectionId): DashboardLayoutItem {
 
 /** 去除重複與未知區塊，修正寬度，並把缺少的區塊安全補到最後。 */
 export function normalizeDashboardLayout(raw: unknown): DashboardLayoutItem[] {
-  const result: DashboardLayoutItem[] = [];
+  let result: DashboardLayoutItem[] = [];
 
   if (Array.isArray(raw)) {
     for (const entry of raw) {
@@ -81,6 +85,19 @@ export function normalizeDashboardLayout(raw: unknown): DashboardLayoutItem[] {
       });
     }
   }
+
+  // 新智慧區塊過去固定在可客製網格上方；升級舊設定時補到前方，
+  // 既保留原本七個區塊的相對順序，也避免功能在升級後突然跑到頁尾。
+  const smartSections: DashboardSectionId[] = [
+    "timeTravel",
+    "insights",
+    "stressTest",
+    "rebalance",
+  ];
+  const missingSmartSections = smartSections
+    .filter((section) => !result.some((item) => item.section === section))
+    .map((section) => ({ ...defaultLayoutItem(section) }));
+  result = [...missingSmartSections, ...result];
 
   for (const section of DASHBOARD_SECTION_IDS) {
     if (!result.some((item) => item.section === section)) {
