@@ -7,6 +7,7 @@ import { AssetAllocationChart } from "@/components/dashboard/AssetAllocationChar
 import { ExposurePanel } from "@/components/dashboard/ExposurePanel";
 import { TimeTravelBar } from "@/components/dashboard/TimeTravelBar";
 import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
+import { PortfolioInsights } from "@/components/dashboard/PortfolioInsights";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
@@ -20,6 +21,9 @@ import {
 import { computePortfolioExposure } from "@/lib/portfolio/exposure";
 import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
 import { buildPortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
+import { computePortfolioHealth } from "@/lib/portfolio/health";
+import { computeInvestmentWeather } from "@/lib/portfolio/weather";
+import { todayIsoDate } from "@/lib/date/iso-date";
 import {
   buildHoldingsSnapshot,
   getPortfolioHistoryDates,
@@ -63,7 +67,7 @@ export default function DashboardPage() {
       exposure: computePortfolioExposure(enriched, {
         liabilities: storage.settings.liabilities,
       }),
-      pnlBreakdowns: buildPortfolioPnlBreakdowns(enriched, history),
+      pnlBreakdowns: buildPortfolioPnlBreakdowns(enriched, history, travelDate),
     };
   }, [sales, storage.holdings, storage.priceHistory, storage.settings.liabilities, travelDate]);
 
@@ -84,6 +88,15 @@ export default function DashboardPage() {
   const shownMonthLabel = travelDate
     ? `${Number(travelDate.slice(5, 7))} 月`
     : formatCurrentMonthZh();
+  const shownHealth = computePortfolioHealth(
+    shownHoldings,
+    shownHistory,
+    travelDate ?? todayIsoDate()
+  );
+  const shownWeather = computeInvestmentWeather(
+    shownSummary,
+    shownBreakdowns.dailyUnrealized
+  );
 
   const sections: Record<DashboardSectionId, ReactNode> = {
     summary: (
@@ -251,6 +264,8 @@ export default function DashboardPage() {
         selectedDate={travelDate}
         onSelectDate={setTravelDate}
       />
+
+      <PortfolioInsights health={shownHealth} weather={shownWeather} />
 
       <div className="dashboard-grid">
         {preferences.dashboardLayout

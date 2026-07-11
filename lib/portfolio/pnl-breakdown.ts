@@ -194,11 +194,12 @@ function buildPeriodBreakdown(
 /** 日未實現變化分項 */
 export function buildDailyUnrealizedBreakdown(
   holdings: Holding[],
-  priceHistory: PriceHistoryMap
+  priceHistory: PriceHistoryMap,
+  asOfDate: string = todayIsoDate()
 ): PeriodPnlBreakdown | null {
   if (holdings.length === 0) return null;
 
-  const today = todayIsoDate();
+  const today = asOfDate;
   const points = buildPortfolioTimelineBetween(
     holdings,
     priceHistory,
@@ -247,12 +248,13 @@ export interface PortfolioPnlBreakdowns {
 
 export function buildPortfolioPnlBreakdowns(
   holdings: HoldingWithMetrics[],
-  priceHistory: PriceHistoryMap
+  priceHistory: PriceHistoryMap,
+  asOfDate?: string
 ): PortfolioPnlBreakdowns {
   const rawHoldings = holdings as Holding[];
   return {
     totalUnrealized: buildTotalUnrealizedBreakdown(holdings),
-    dailyUnrealized: buildDailyUnrealizedBreakdown(rawHoldings, priceHistory),
+    dailyUnrealized: buildDailyUnrealizedBreakdown(rawHoldings, priceHistory, asOfDate),
     monthlyUnrealized: buildMonthlyUnrealizedBreakdown(
       rawHoldings,
       priceHistory
