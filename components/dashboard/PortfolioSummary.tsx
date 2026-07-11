@@ -32,6 +32,9 @@ export function PortfolioSummaryCards({
   const monthLabel = asOfDate
     ? `${Number(asOfDate.slice(5, 7))} 月`
     : formatCurrentMonthZh();
+  const dailyPeriod = summary.dailyValuationStartDate && summary.dailyValuationEndDate
+    ? `${shortDate(summary.dailyValuationEndDate)} · 相對 ${shortDate(summary.dailyValuationStartDate)}`
+    : null;
 
   const unrealizedValueClass = unrealizedPositive ? "text-gain" : "text-loss";
   const dailyValueClass =
@@ -132,14 +135,18 @@ export function PortfolioSummaryCards({
         }
         sub={
           summary.dailyUnrealizedPnl !== null
-            ? "今日 · 相對前交易日"
+            ? dailyPeriod ?? "最近兩個估值日"
             : summary.hasStaleFundNavOnDaily
-              ? "今日 · 基金淨值非今日"
-              : "今日 · 請更新行情"
+              ? "請累積價格歷史 · 基金淨值非今日"
+              : "請累積至少兩個估值日"
         }
         subWarn={
-          summary.dailyUnrealizedPnl !== null && summary.hasStaleFundNavOnDaily
-            ? "基金淨值非今日"
+          summary.dailyUnrealizedPnl !== null
+            ? summary.dailyValuationUsesPreviousDate
+              ? "今日可能休市或行情尚未更新"
+              : summary.hasStaleFundNavOnDaily
+                ? "部分基金淨值非今日"
+                : undefined
             : undefined
         }
         highlight={
@@ -191,6 +198,10 @@ export function PortfolioSummaryCards({
       />
     </div>
   );
+}
+
+function shortDate(date: string): string {
+  return date.slice(5).replace("-", "/");
 }
 
 function MiniStat({ label, value, highlight }: { label: string; value: string; highlight?: "gain" | "loss" }) {

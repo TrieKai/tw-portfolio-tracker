@@ -4,9 +4,9 @@
 
 import { currentYearMonthPrefix, todayIsoDate } from "@/lib/date/iso-date";
 import {
-  computeDailyUnrealizedPnlChange,
   computeMonthlyUnrealizedPnlChange,
 } from "@/lib/portfolio/monthly-pnl";
+import { getLatestDailyValuation } from "@/lib/portfolio/daily-valuation";
 import type {
   AssetType,
   Holding,
@@ -126,14 +126,15 @@ export function computePortfolioSummary(
           monthPrefix
         )
       : null;
-  const dailyUnrealizedPnl =
+  const dailyValuation =
     options?.holdingsForTimeline && options?.priceHistory
-      ? computeDailyUnrealizedPnlChange(
+      ? getLatestDailyValuation(
           options.holdingsForTimeline,
           options.priceHistory,
-          options.asOfDate
+          options.asOfDate ?? todayIsoDate()
         )
       : null;
+  const dailyUnrealizedPnl = dailyValuation?.pnlChange ?? null;
   const hasStaleFundNavOnDaily =
     options?.holdingsForTimeline
       ? hasStaleFundNav(options.holdingsForTimeline, options.asOfDate)
@@ -149,6 +150,9 @@ export function computePortfolioSummary(
     monthlySaleCount,
     monthlyUnrealizedPnl,
     dailyUnrealizedPnl,
+    dailyValuationStartDate: dailyValuation?.startDate ?? null,
+    dailyValuationEndDate: dailyValuation?.endDate ?? null,
+    dailyValuationUsesPreviousDate: dailyValuation?.usesPreviousDate ?? false,
     hasStaleFundNavOnDaily,
     saleCount: sales.length,
     stockValue,

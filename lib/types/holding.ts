@@ -217,11 +217,12 @@ export interface PortfolioSummary {
    * 無法推算時為 null（例如本月尚無價格歷史）
    */
   monthlyUnrealizedPnl: number | null;
-  /**
-   * 今日未實現損益變化（今日相對前一個有報價的交易日 pnl 差）
-   * 無法推算時為 null（例如尚無今日行情或僅有一日資料）
-   */
+  /** 最近兩個有效估值日之間的未實現損益變化。 */
   dailyUnrealizedPnl: number | null;
+  dailyValuationStartDate: string | null;
+  dailyValuationEndDate: string | null;
+  /** 最後估值日早於查詢日，可能為休市或行情尚未更新。 */
+  dailyValuationUsesPreviousDate: boolean;
   /** 日未實現計算時，是否有基金淨值非今日 */
   hasStaleFundNavOnDaily: boolean;
   saleCount: number;

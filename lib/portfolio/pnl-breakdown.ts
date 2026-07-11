@@ -3,12 +3,12 @@
  */
 
 import {
-  addDaysToIsoDate,
   currentYearMonthPrefix,
   endDateForMonthPrefix,
   startOfMonthIsoFromPrefix,
   todayIsoDate,
 } from "@/lib/date/iso-date";
+import { getLatestDailyValuation } from "@/lib/portfolio/daily-valuation";
 import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import {
   groupHoldingsWithMetrics,
@@ -197,23 +197,14 @@ export function buildDailyUnrealizedBreakdown(
   priceHistory: PriceHistoryMap,
   asOfDate: string = todayIsoDate()
 ): PeriodPnlBreakdown | null {
-  if (holdings.length === 0) return null;
-
-  const today = asOfDate;
-  const points = buildPortfolioTimelineBetween(
+  const valuation = getLatestDailyValuation(holdings, priceHistory, asOfDate);
+  if (!valuation) return null;
+  return buildPeriodBreakdown(
     holdings,
     priceHistory,
-    addDaysToIsoDate(today, -7),
-    today
+    valuation.startDate,
+    valuation.endDate
   );
-
-  if (points.length < 2) return null;
-
-  const last = points[points.length - 1];
-  if (last.date !== today) return null;
-
-  const prev = points[points.length - 2];
-  return buildPeriodBreakdown(holdings, priceHistory, prev.date, today);
 }
 
 /** 月未實現變化分項 */

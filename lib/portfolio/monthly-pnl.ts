@@ -3,7 +3,6 @@
  */
 
 import {
-  addDaysToIsoDate,
   currentYearMonthPrefix,
   currentYearJanuaryPrefix,
   endDateForMonthPrefix,
@@ -13,6 +12,7 @@ import {
   startOfMonthIsoFromPrefix,
   todayIsoDate,
 } from "@/lib/date/iso-date";
+import { getLatestDailyValuation } from "@/lib/portfolio/daily-valuation";
 import {
   computeMonthlyRealizedPnl,
   countMonthlySales,
@@ -56,30 +56,13 @@ export function computeUnrealizedPnlChangeForRange(
   return last.pnl - first.pnl;
 }
 
-/** 今日未實現損益變化（今日相對前一個有報價的交易日） */
+/** 最近估值日未實現損益變化（相對前一個有效估值日） */
 export function computeDailyUnrealizedPnlChange(
   holdings: Holding[],
   priceHistory: PriceHistoryMap,
   asOfDate: string = todayIsoDate()
 ): number | null {
-  if (holdings.length === 0) return null;
-
-  const today = asOfDate;
-  const startDate = addDaysToIsoDate(today, -7);
-  const points = buildPortfolioTimelineBetween(
-    holdings,
-    priceHistory,
-    startDate,
-    today
-  );
-
-  if (points.length < 2) return null;
-
-  const last = points[points.length - 1];
-  if (last.date !== today) return null;
-
-  const prev = points[points.length - 2];
-  return last.pnl - prev.pnl;
+  return getLatestDailyValuation(holdings, priceHistory, asOfDate)?.pnlChange ?? null;
 }
 
 /** 指定月份未實現損益變化 */

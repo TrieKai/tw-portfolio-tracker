@@ -154,7 +154,7 @@ export default function DashboardPage() {
               <span>{shownSummary.propertyValue.toLocaleString("zh-TW")} 元</span>
             </li>
             <li className="flex justify-between border-t border-border/60 pt-2">
-              <span className="text-muted">日未實現（今日）</span>
+              <span className="text-muted">日未實現（最近估值日）</span>
               <div className="text-right">
                 <PnlValueWithBreakdown
                   title="日未實現"
@@ -172,9 +172,18 @@ export default function DashboardPage() {
                   }
                   periodBreakdown={shownBreakdowns.dailyUnrealized}
                 />
-                {shownSummary.hasStaleFundNavOnDaily && (
+                {shownSummary.dailyValuationStartDate && shownSummary.dailyValuationEndDate && (
+                  <p className="text-xs text-muted">
+                    {shownSummary.dailyValuationEndDate.slice(5).replace("-", "/")} 相對 {shownSummary.dailyValuationStartDate.slice(5).replace("-", "/")}
+                  </p>
+                )}
+                {shownSummary.dailyValuationUsesPreviousDate ? (
                   <p className="text-xs text-amber-600 dark:text-amber-400">
-                    基金淨值非今日
+                    可能休市或行情尚未更新
+                  </p>
+                ) : shownSummary.hasStaleFundNavOnDaily && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    部分基金淨值非今日
                   </p>
                 )}
               </div>

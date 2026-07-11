@@ -39,8 +39,8 @@ export function computeInvestmentWeather(
     return {
       kind: "unknown",
       icon: "🌫️",
-      title: "今日能見度不足",
-      summary: "更新行情並累積至少兩個交易日資料後，就能產生投資天氣。",
+      title: "能見度不足",
+      summary: "更新行情並累積至少兩個有效估值日後，就能產生投資天氣。",
       changeRate: null,
       note: summary.hasStaleFundNavOnDaily ? "部分基金淨值尚未更新" : undefined,
     };
@@ -55,22 +55,28 @@ export function computeInvestmentWeather(
   const driver = dominant
     ? `，主要受${dominant.name || dominant.symbol}影響`
     : "";
-  const summaryText = `今日資產約${direction} ${formatCurrency(Math.abs(summary.dailyUnrealizedPnl))}${driver}。`;
+  const periodLabel = summary.dailyValuationUsesPreviousDate ? "最近估值日" : "今日";
+  const summaryText = `${periodLabel}資產約${direction} ${formatCurrency(Math.abs(summary.dailyUnrealizedPnl))}${driver}。`;
+  const titlePrefix = summary.dailyValuationUsesPreviousDate ? "最近行情" : "今日";
 
   const base = changeRate >= 0.75
-    ? { kind: "sunny" as const, icon: "☀️", title: "今日晴朗" }
+    ? { kind: "sunny" as const, icon: "☀️", title: `${titlePrefix}晴朗` }
     : changeRate >= 0.15
-      ? { kind: "partlyCloudy" as const, icon: "🌤️", title: "陽光露臉" }
+      ? { kind: "partlyCloudy" as const, icon: "🌤️", title: `${titlePrefix}陽光露臉` }
       : changeRate > -0.15
-        ? { kind: "cloudy" as const, icon: "☁️", title: "今日多雲" }
+        ? { kind: "cloudy" as const, icon: "☁️", title: `${titlePrefix}多雲` }
         : changeRate > -0.75
-          ? { kind: "rainy" as const, icon: "🌦️", title: "局部陣雨" }
-          : { kind: "storm" as const, icon: "⛈️", title: "風雨偏強" };
+          ? { kind: "rainy" as const, icon: "🌦️", title: `${titlePrefix}有陣雨` }
+          : { kind: "storm" as const, icon: "⛈️", title: `${titlePrefix}風雨偏強` };
 
   return {
     ...base,
     summary: summaryText,
     changeRate,
-    note: summary.hasStaleFundNavOnDaily ? "基金淨值可能不是今日資料" : "天氣描述當日變動，不代表未來走勢",
+    note: summary.dailyValuationUsesPreviousDate
+      ? "今日可能休市或行情尚未更新"
+      : summary.hasStaleFundNavOnDaily
+        ? "基金淨值可能不是今日資料"
+        : "天氣描述當日變動，不代表未來走勢",
   };
 }
