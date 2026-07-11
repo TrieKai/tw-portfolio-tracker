@@ -1,9 +1,14 @@
 "use client";
 
+import { formatCurrency, formatPercent } from "@/lib/portfolio/calculations";
+import type { PortfolioSummary } from "@/lib/types/holding";
+
 interface TimeTravelBarProps {
   dates: string[];
   selectedDate: string | null;
   onSelectDate: (date: string | null) => void;
+  currentSummary: PortfolioSummary;
+  selectedSummary?: PortfolioSummary;
 }
 
 function formatDate(date: string) {
@@ -18,6 +23,8 @@ export function TimeTravelBar({
   dates,
   selectedDate,
   onSelectDate,
+  currentSummary,
+  selectedSummary,
 }: TimeTravelBarProps) {
   if (dates.length === 0) return null;
   const activeIndex = selectedDate
@@ -105,10 +112,34 @@ export function TimeTravelBar({
         </button>
       </div>
       {active && (
-        <p className="mt-3 text-[11px] text-muted">
-          以目前仍持有的部位與當日最近價格回看；不推測已完全賣出的舊持倉。
-        </p>
+        <div className="mt-3 border-t border-border/70 pt-3">
+          {selectedSummary && (
+            <div className="grid gap-2 sm:grid-cols-3">
+              <TimeMetric label="當時總資產" value={formatCurrency(selectedSummary.totalValue)} />
+              <TimeMetric
+                label="自當時至今"
+                value={formatCurrency(currentSummary.totalValue - selectedSummary.totalValue)}
+                tone={currentSummary.totalValue - selectedSummary.totalValue >= 0 ? "gain" : "loss"}
+                sub={selectedSummary.totalValue > 0 ? formatPercent(((currentSummary.totalValue - selectedSummary.totalValue) / selectedSummary.totalValue) * 100) : undefined}
+              />
+              <TimeMetric label="當時持倉" value={`${selectedSummary.holdingCount} 筆`} sub={`未實現 ${formatPercent(selectedSummary.totalReturnRate)}`} />
+            </div>
+          )}
+          <p className="mt-3 text-[11px] text-muted">
+            以目前仍持有的部位與當日最近價格回看；資產差異也可能包含後續投入與賣出，不等同投資報酬。
+          </p>
+        </div>
       )}
     </section>
+  );
+}
+
+function TimeMetric({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "gain" | "loss" }) {
+  return (
+    <div className="rounded-xl bg-surface-raised/70 px-3 py-2">
+      <p className="text-[10px] text-muted">{label}</p>
+      <p className={`mt-0.5 text-sm font-semibold tabular-nums ${tone === "gain" ? "text-gain" : tone === "loss" ? "text-loss" : ""}`}>{value}</p>
+      {sub && <p className="text-[10px] text-muted">{sub}</p>}
+    </div>
   );
 }

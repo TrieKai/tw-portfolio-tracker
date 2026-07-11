@@ -8,6 +8,9 @@
 /** 資產大類：台股 / 境內基金 / 房子 */
 export type AssetType = "stock" | "fund" | "property";
 
+/** 再平衡目標百分比；三類加總應為 100。 */
+export type AssetAllocationTargets = Record<AssetType, number>;
+
 /**
  * 台股上市櫃別
  * - tse：台灣證券交易所（上市）
@@ -182,6 +185,8 @@ export interface PortfolioSettings {
   netAssets?: number;
   /** 投資負債（信貸、質押等，元；不含房貸） */
   liabilities?: number;
+  /** 再平衡導航使用的資產類型目標百分比。 */
+  allocationTargets?: AssetAllocationTargets;
 }
 
 /** 持倉加上計算後的損益欄位（僅前端使用，不寫入 storage） */

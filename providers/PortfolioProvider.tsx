@@ -72,6 +72,7 @@ import {
 } from "@/lib/storage/portfolio-store";
 import type {
   CreateHoldingInput,
+  AssetAllocationTargets,
   EditHoldingInput,
   Holding,
   HoldingWithMetrics,
@@ -170,6 +171,7 @@ interface PortfolioContextValue {
   setExposureSettings: (
     patch: Pick<PortfolioSettings, "netAssets" | "liabilities">
   ) => void;
+  setAllocationTargets: (targets: AssetAllocationTargets) => void;
   setThemePreference: (theme: UiTheme) => void;
   applyUiPreferences: (theme: UiTheme, preferences: UiPreferences) => void;
   /** 從 JSON 備份匯入（取代或合併） */
@@ -665,6 +667,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [storage, persist]
   );
 
+  const setAllocationTargets = useCallback(
+    (allocationTargets: AssetAllocationTargets) => {
+      if (!storage) return;
+      persist(updateSettings(storage, { allocationTargets }));
+    },
+    [storage, persist]
+  );
+
   const setThemePreference = useCallback(
     (theme: UiTheme) => {
       if (!storage) return;
@@ -932,6 +942,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importFundHistory,
       setAutoUpdate,
       setExposureSettings,
+      setAllocationTargets,
       setThemePreference,
       applyUiPreferences,
       importPortfolio,
@@ -969,6 +980,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       importFundHistory,
       setAutoUpdate,
       setExposureSettings,
+      setAllocationTargets,
       setThemePreference,
       applyUiPreferences,
       importPortfolio,

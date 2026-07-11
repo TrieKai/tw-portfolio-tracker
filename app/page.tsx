@@ -8,6 +8,7 @@ import { ExposurePanel } from "@/components/dashboard/ExposurePanel";
 import { TimeTravelBar } from "@/components/dashboard/TimeTravelBar";
 import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
 import { PortfolioInsights } from "@/components/dashboard/PortfolioInsights";
+import { PortfolioPlanningTools } from "@/components/dashboard/PortfolioPlanningTools";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
@@ -36,7 +37,7 @@ import { usePortfolio } from "@/providers/PortfolioProvider";
 import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 
 export default function DashboardPage() {
-  const { ready, holdings, summary, exposure, pnlBreakdowns, storage, sales, setExposureSettings } = usePortfolio();
+  const { ready, holdings, summary, exposure, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
   const { preferences } = useUiPreferences();
   const [travelDate, setTravelDate] = useState<string | null>(null);
 
@@ -263,9 +264,19 @@ export default function DashboardPage() {
         dates={historyDates}
         selectedDate={travelDate}
         onSelectDate={setTravelDate}
+        currentSummary={summary}
+        selectedSummary={travelState?.summary}
       />
 
       <PortfolioInsights health={shownHealth} weather={shownWeather} />
+
+      <PortfolioPlanningTools
+        holdings={shownHoldings}
+        summary={shownSummary}
+        savedTargets={storage.settings.allocationTargets}
+        onSaveTargets={setAllocationTargets}
+        readOnly={travelDate !== null}
+      />
 
       <div className="dashboard-grid">
         {preferences.dashboardLayout
