@@ -108,7 +108,7 @@ type GeminiResponse = {
   error?: { message?: string };
 };
 
-type ZhipuResponse = {
+type OpenAiChatResponse = {
   choices?: Array<{
     message?: { content?: string };
     finish_reason?: string;
@@ -116,7 +116,7 @@ type ZhipuResponse = {
   error?: { message?: string; code?: string };
 };
 
-type ProviderName = "gemini" | "groq" | "zhipu";
+type ProviderName = "gemini" | "groq";
 
 type ProviderResult =
   | {
@@ -274,93 +274,6 @@ async function requestGeminiLayout(
   }
 }
 
-async function requestZhipuLayout(
-  apiKey: string,
-  prompt: string,
-  currentLayout: Record<string, unknown>
-): Promise<ProviderResult> {
-  const model = process.env.ZHIPU_MODEL?.trim() || "glm-4.7-flash";
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
-
-  try {
-    const response = await fetch(
-      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: "system",
-              content: `${SYSTEM_INSTRUCTION}\n\nReturn only one valid JSON object. Do not use Markdown code fences or include any text outside the JSON object.`,
-            },
-            {
-              role: "user",
-              content: JSON.stringify({ instruction: prompt, currentLayout }),
-            },
-          ],
-          temperature: 0.2,
-          max_tokens: 1000,
-          response_format: { type: "json_object" },
-        }),
-        cache: "no-store",
-        signal: controller.signal,
-      }
-    );
-
-    const data = (await response.json().catch(() => ({}))) as ZhipuResponse;
-    if (!response.ok) {
-      return {
-        ok: false,
-        provider: "zhipu",
-        error:
-          data.error?.message?.slice(0, 240) ||
-          "智譜 GLM 暫時無法產生版面設定",
-        code: response.status === 429 ? "AI_RATE_LIMITED" : "AI_UPSTREAM_ERROR",
-        status: response.status === 429 ? 429 : 502,
-        suggestion: response.status === 401 ? "請檢查 ZHIPU_API_KEY" : undefined,
-        retryable: false,
-      };
-    }
-
-    const text = data.choices?.[0]?.message?.content?.trim();
-    if (!text) {
-      return {
-        ok: false,
-        provider: "zhipu",
-        error: "智譜 GLM 沒有回傳設定",
-        code: "AI_EMPTY_RESPONSE",
-        status: 502,
-        retryable: false,
-      };
-    }
-    return parseSuggestionText(text, "zhipu");
-  } catch (error) {
-    return {
-      ok: false,
-      provider: "zhipu",
-      error:
-        error instanceof Error && error.name === "AbortError"
-          ? "智譜 GLM 回應逾時"
-          : "目前無法連線至智譜 GLM",
-      code:
-        error instanceof Error && error.name === "AbortError"
-          ? "AI_TIMEOUT"
-          : "AI_NETWORK_ERROR",
-      status: error instanceof Error && error.name === "AbortError" ? 504 : 502,
-      suggestion: "請稍後再試",
-      retryable: false,
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function requestGroqLayout(
   apiKey: string,
   prompt: string,
@@ -401,7 +314,7 @@ async function requestGroqLayout(
       }
     );
 
-    const data = (await response.json().catch(() => ({}))) as ZhipuResponse;
+    const data = (await response.json().catch(() => ({}))) as OpenAiChatResponse;
     if (!response.ok) {
       return {
         ok: false,
@@ -452,13 +365,12 @@ async function requestGroqLayout(
 export async function POST(request: Request) {
   const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
   const groqApiKey = process.env.GROQ_API_KEY?.trim();
-  const zhipuApiKey = process.env.ZHIPU_API_KEY?.trim();
-  if (!geminiApiKey && !groqApiKey && !zhipuApiKey) {
+  if (!geminiApiKey && !groqApiKey) {
     return errorResponse(
       "AI 版面助理尚未設定",
       "AI_NOT_CONFIGURED",
       503,
-      "請在環境變數加入 GEMINI_API_KEY、GROQ_API_KEY 或 ZHIPU_API_KEY"
+      "請在環境變數加入 GEMINI_API_KEY 或 GROQ_API_KEY"
     );
   }
 
@@ -530,32 +442,9 @@ export async function POST(request: Request) {
     failures.push(result);
   }
 
-  if (zhipuApiKey) {
-    const result = await requestZhipuLayout(
-      zhipuApiKey,
-      parsed.data.prompt,
-      currentLayout
-    );
-    if (result.ok) {
-      return NextResponse.json({
-        success: true,
-        data: result.suggestion,
-        provider: result.provider,
-        fallbackUsed: failures.length > 0,
-      });
-    }
-    failures.push(result);
-  }
-
   const lastFailure = failures[failures.length - 1];
   const attemptedProviders = failures
-    .map((failure) =>
-      failure.provider === "gemini"
-        ? "Gemini"
-        : failure.provider === "groq"
-          ? "Groq"
-          : "智譜 GLM"
-    )
+    .map((failure) => (failure.provider === "gemini" ? "Gemini" : "Groq"))
     .join("、");
   return errorResponse(
     failures.length > 1

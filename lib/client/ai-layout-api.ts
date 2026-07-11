@@ -7,7 +7,7 @@ import type {
 interface AiLayoutSuccess {
   success: true;
   data: UiLayoutSuggestion;
-  provider?: "gemini" | "groq" | "zhipu";
+  provider?: "gemini" | "groq";
   fallbackUsed?: boolean;
 }
 
