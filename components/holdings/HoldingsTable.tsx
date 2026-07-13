@@ -20,6 +20,7 @@ import { EditHoldingModal } from "./EditHoldingModal";
 import { HoldingsMobileList } from "./HoldingsMobileList";
 import { HoldingLotDetailPanel } from "./HoldingLotActions";
 import { ManualPriceModal } from "./ManualPriceModal";
+import { SellGroupHoldingModal } from "./SellGroupHoldingModal";
 import { SellHoldingModal } from "./SellHoldingModal";
 
 type SortKey = "name" | "value" | "pnl" | "returnRate";
@@ -33,6 +34,7 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
   const [manualId, setManualId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [sellId, setSellId] = useState<string | null>(null);
+  const [sellGroupKey, setSellGroupKey] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const filteredGroups = useMemo(() => {
@@ -109,6 +111,12 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
   const manualHolding = holdings.find((h) => h.id === manualId);
   const editHoldingRow = holdings.find((h) => h.id === editId);
   const sellHoldingRow = holdings.find((h) => h.id === sellId);
+  const sellGroup = useMemo(() => {
+    if (!sellGroupKey) return undefined;
+    return groupHoldingsWithMetrics(holdings).find(
+      (g) => g.groupKey === sellGroupKey
+    );
+  }, [holdings, sellGroupKey]);
 
   const groupUpdating = (g: HoldingGroupWithMetrics) =>
     g.lots.some((l) => updatingId === l.id);
@@ -139,6 +147,7 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
         onRefresh={handleRefresh}
         onEdit={setEditId}
         onSell={setSellId}
+        onSellGroup={setSellGroupKey}
         onManual={setManualId}
         onRemove={handleRemove}
         onRefreshGroup={handleRefreshGroup}
@@ -177,6 +186,7 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
                   onRefresh={handleRefresh}
                   onEdit={setEditId}
                   onSell={setSellId}
+                  onSellGroup={setSellGroupKey}
                   onManual={setManualId}
                   onRemove={handleRemove}
                 />
@@ -205,6 +215,17 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
             setSellId(null);
           }}
           onClose={() => setSellId(null)}
+        />
+      )}
+
+      {sellGroup && (
+        <SellGroupHoldingModal
+          group={sellGroup}
+          onSave={(inputs) => {
+            sell(inputs);
+            setSellGroupKey(null);
+          }}
+          onClose={() => setSellGroupKey(null)}
         />
       )}
 
@@ -237,6 +258,7 @@ function GroupRows({
   onRefresh,
   onEdit,
   onSell,
+  onSellGroup,
   onManual,
   onRemove,
 }: {
@@ -250,6 +272,7 @@ function GroupRows({
   onRefresh: (id: string) => void;
   onEdit: (id: string) => void;
   onSell: (id: string) => void;
+  onSellGroup: (groupKey: string) => void;
   onManual: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
@@ -330,6 +353,13 @@ function GroupRows({
                   {groupUpdating ? "…" : "全部更新"}
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => onSellGroup(g.groupKey)}
+                className="btn-secondary text-xs py-1 px-2"
+              >
+                賣出
+              </button>
               <button
                 type="button"
                 onClick={onToggle}

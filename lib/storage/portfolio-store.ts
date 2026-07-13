@@ -192,6 +192,14 @@ export function sellHolding(
   });
 }
 
+/** 一次套用多筆賣出（例如合併標的 FIFO 分攤），只持久化一次 */
+export function sellHoldings(
+  state: PortfolioStorage,
+  inputs: SellHoldingInput[]
+): PortfolioStorage {
+  return inputs.reduce((next, input) => sellHolding(next, input), state);
+}
+
 export function removeHolding(
   state: PortfolioStorage,
   holdingId: string

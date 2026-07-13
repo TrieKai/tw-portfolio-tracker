@@ -65,7 +65,7 @@ import {
   loadPortfolio,
   removeHolding,
   repairCorporateActionPriceHistory,
-  sellHolding,
+  sellHoldings,
   savePortfolio,
   updateHolding,
   updateSettings,
@@ -142,7 +142,7 @@ interface PortfolioContextValue {
     options?: { initialPrice?: number; initialPriceDate?: string }
   ) => string | null;
   edit: (input: EditHoldingInput) => void;
-  sell: (input: SellHoldingInput) => void;
+  sell: (input: SellHoldingInput | SellHoldingInput[]) => void;
   remove: (id: string) => void;
   setManualPrice: (id: string, price: number, priceDate: string) => void;
   updateOne: (id: string) => Promise<boolean>;
@@ -451,9 +451,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   );
 
   const sell = useCallback(
-    (input: SellHoldingInput) => {
+    (input: SellHoldingInput | SellHoldingInput[]) => {
       if (!storage) return;
-      persist(sellHolding(storage, input));
+      const inputs = Array.isArray(input) ? input : [input];
+      persist(sellHoldings(storage, inputs));
     },
     [storage, persist]
   );

@@ -16,6 +16,7 @@ export function HoldingsMobileList({
   onRefresh,
   onEdit,
   onSell,
+  onSellGroup,
   onManual,
   onRemove,
   onRefreshGroup,
@@ -25,6 +26,7 @@ export function HoldingsMobileList({
   onRefresh: (id: string) => void;
   onEdit: (id: string) => void;
   onSell: (id: string) => void;
+  onSellGroup: (groupKey: string) => void;
   onManual: (id: string) => void;
   onRemove: (id: string) => void;
   onRefreshGroup: (group: HoldingGroupWithMetrics) => void;
@@ -143,6 +145,13 @@ export function HoldingsMobileList({
                       {groupUpdating(g) ? "…" : "全部更新"}
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => onSellGroup(g.groupKey)}
+                    className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
+                  >
+                    賣出
+                  </button>
                   <button
                     type="button"
                     onClick={() => toggleExpanded(g.groupKey)}

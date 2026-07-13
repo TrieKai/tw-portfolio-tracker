@@ -164,3 +164,39 @@ export function groupHoldingsWithMetrics(
 
   return [...map.entries()].map(([key, lots]) => aggregateGroup(key, lots));
 }
+
+/**
+ * 依買入日先進先出，將賣出數量分攤到各筆買入。
+ * 回傳各 lot 應賣數量；若總量不足則只分攤到可用上限。
+ */
+export function allocateFifoSell(
+  lots: Pick<Holding, "id" | "quantity" | "buyDate" | "buyPrice">[],
+  sellQuantity: number
+): { id: string; quantity: number; buyPrice: number; buyDate: string }[] {
+  if (!Number.isFinite(sellQuantity) || sellQuantity <= 0) return [];
+
+  const sorted = [...lots].sort((a, b) => a.buyDate.localeCompare(b.buyDate));
+  let remaining = sellQuantity;
+  const result: {
+    id: string;
+    quantity: number;
+    buyPrice: number;
+    buyDate: string;
+  }[] = [];
+
+  for (const lot of sorted) {
+    if (remaining <= 0) break;
+    const qty = Math.min(lot.quantity, remaining);
+    if (qty > 0) {
+      result.push({
+        id: lot.id,
+        quantity: qty,
+        buyPrice: lot.buyPrice,
+        buyDate: lot.buyDate,
+      });
+      remaining -= qty;
+    }
+  }
+
+  return result;
+}
