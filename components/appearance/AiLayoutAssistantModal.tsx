@@ -23,8 +23,10 @@ const EXAMPLES = [
 const SECTION_LABELS: Record<DashboardSectionId, string> = {
   timeTravel: "投資時光機",
   insights: "投資天氣與健康",
+  weeklyReport: "每週投資週報",
   stressTest: "資產壓力測試",
   rebalance: "再平衡導航",
+  parallelUniverse: "定期定額平行宇宙",
   summary: "資產摘要",
   allocation: "資產配置",
   quickStats: "快速統計",
@@ -37,8 +39,10 @@ const SECTION_LABELS: Record<DashboardSectionId, string> = {
 const SECTION_ICONS: Record<DashboardSectionId, string> = {
   timeTravel: "◷",
   insights: "☀",
+  weeklyReport: "▥",
   stressTest: "≋",
   rebalance: "⇄",
+  parallelUniverse: "∞",
   summary: "◫",
   allocation: "◔",
   quickStats: "⚡",

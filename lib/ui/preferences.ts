@@ -23,8 +23,10 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   dashboardLayout: [
     { section: "timeTravel", width: "full", hidden: false, view: "standard" },
     { section: "insights", width: "full", hidden: false, view: "standard" },
+    { section: "weeklyReport", width: "full", hidden: false, view: "standard" },
     { section: "stressTest", width: "half", hidden: false, view: "standard" },
     { section: "rebalance", width: "half", hidden: false, view: "standard" },
+    { section: "parallelUniverse", width: "full", hidden: false, view: "standard" },
     { section: "summary", width: "full", hidden: false, view: "standard" },
     { section: "allocation", width: "half", hidden: false, view: "visual" },
     { section: "quickStats", width: "half", hidden: false, view: "compact" },
@@ -91,8 +93,10 @@ export function normalizeDashboardLayout(raw: unknown): DashboardLayoutItem[] {
   const smartSections: DashboardSectionId[] = [
     "timeTravel",
     "insights",
+    "weeklyReport",
     "stressTest",
     "rebalance",
+    "parallelUniverse",
   ];
   const missingSmartSections = smartSections
     .filter((section) => !result.some((item) => item.section === section))

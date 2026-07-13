@@ -1,8 +1,10 @@
 export const DASHBOARD_SECTION_IDS = [
   "timeTravel",
   "insights",
+  "weeklyReport",
   "stressTest",
   "rebalance",
+  "parallelUniverse",
   "summary",
   "allocation",
   "quickStats",

@@ -9,6 +9,8 @@ import { TimeTravelBar } from "@/components/dashboard/TimeTravelBar";
 import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
 import { PortfolioInsights } from "@/components/dashboard/PortfolioInsights";
 import { RebalancePanel, StressTestPanel } from "@/components/dashboard/PortfolioPlanningTools";
+import { ParallelUniversePanel } from "@/components/dashboard/ParallelUniversePanel";
+import { WeeklyPortfolioReport } from "@/components/dashboard/WeeklyPortfolioReport";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
@@ -117,6 +119,16 @@ export default function DashboardPage() {
         view={viewFor("insights")}
       />
     ),
+    weeklyReport: (
+      <WeeklyPortfolioReport
+        holdings={shownRawHoldings}
+        priceHistory={shownHistory}
+        sales={shownSales}
+        asOfDate={travelDate ?? todayIsoDate()}
+        targets={storage.settings.allocationTargets}
+        view={viewFor("weeklyReport")}
+      />
+    ),
     stressTest: (
       <StressTestPanel holdings={shownHoldings} view={viewFor("stressTest")} />
     ),
@@ -127,6 +139,13 @@ export default function DashboardPage() {
         onSaveTargets={setAllocationTargets}
         readOnly={travelDate !== null}
         view={viewFor("rebalance")}
+      />
+    ),
+    parallelUniverse: (
+      <ParallelUniversePanel
+        holdings={shownRawHoldings}
+        priceHistory={shownHistory}
+        view={viewFor("parallelUniverse")}
       />
     ),
     summary: (

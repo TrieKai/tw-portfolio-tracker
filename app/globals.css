@@ -202,7 +202,9 @@
   }
 
   [data-dashboard-section="insights"],
-  .planning-tool {
+  .planning-tool,
+  .universe-tool,
+  .weekly-report {
     container-type: inline-size;
   }
 
@@ -211,14 +213,23 @@
   }
 
   .stress-custom-grid,
-  .rebalance-target-grid {
+  .rebalance-target-grid,
+  .universe-controls,
+  .universe-results,
+  .weekly-metrics {
     grid-template-columns: minmax(0, 1fr);
   }
 
   @container (min-width: 30rem) {
     .stress-custom-grid,
-    .rebalance-target-grid {
+    .rebalance-target-grid,
+    .universe-controls,
+    .universe-results {
       grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .weekly-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
@@ -228,6 +239,10 @@
     }
 
     .stress-scenario-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .weekly-metrics {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
