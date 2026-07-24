@@ -1,3 +1,4 @@
+import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import type { ChartRange } from "@/lib/portfolio/chart-date-range";
 import { chartRangeToIsoDates } from "@/lib/portfolio/chart-date-range";
 
@@ -9,9 +10,9 @@ export function toFundclearDate(isoDate: string): string {
   return `${y}/${m}/${d}`;
 }
 
-/** 集保 YYYY/MM/DD → ISO YYYY-MM-DD */
+/** 集保 YYYY/MM/DD（或 YYYYMMDD）→ ISO YYYY-MM-DD */
 export function fromFundclearDate(fundclearDate: string): string {
-  return fundclearDate.replace(/\//g, "-");
+  return normalizeToIsoDate(fundclearDate) ?? fundclearDate.replace(/\//g, "-");
 }
 
 function isoToFundclear(iso: string): string {

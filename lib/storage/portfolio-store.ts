@@ -4,6 +4,7 @@
  */
 
 import { PORTFOLIO_STORAGE_KEY, MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import {
   defaultPortfolioStorage,
   normalizePortfolioStorage,
@@ -455,8 +456,9 @@ export function applyPriceUpdate(
   source: PriceSource,
   extra?: { name?: string; market?: StockMarket; clearError?: boolean }
 ): PortfolioStorage {
+  const isoDate = normalizeToIsoDate(priceDate) ?? priceDate;
   const point = adjustPointForCorporateActions(state, holdingId, {
-    date: priceDate,
+    date: isoDate,
     price,
     source,
   });
@@ -467,7 +469,7 @@ export function applyPriceUpdate(
 
   const patch: Partial<Holding> = {
     currentPrice: point.price,
-    priceDate,
+    priceDate: isoDate,
     priceSource: source,
     lastUpdatedAt: new Date().toISOString(),
     ...(extra?.name ? { name: extra.name } : {}),

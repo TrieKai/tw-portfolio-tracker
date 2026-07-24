@@ -1,5 +1,6 @@
 "use client";
 
+import { formatIsoDateZh, normalizeToIsoDate } from "@/lib/date/iso-date";
 import { formatCurrency, formatPercent } from "@/lib/portfolio/calculations";
 import type { PortfolioSummary } from "@/lib/types/holding";
 import type { DashboardCardView } from "@/lib/types/ui-preferences";
@@ -14,11 +15,7 @@ interface TimeTravelBarProps {
 }
 
 function formatDate(date: string) {
-  return new Intl.DateTimeFormat("zh-TW", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(`${date}T00:00:00`));
+  return formatIsoDateZh(normalizeToIsoDate(date) ?? date);
 }
 
 export function TimeTravelBar({

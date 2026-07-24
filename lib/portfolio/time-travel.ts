@@ -1,3 +1,4 @@
+import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
 
 /** 只提供真正存在價格快照的日期，避免時間軸顯示無法重建的空白日期。 */
@@ -9,7 +10,11 @@ export function getPortfolioHistoryDates(
   const dates = new Set<string>();
   for (const [holdingId, points] of Object.entries(priceHistory)) {
     if (!holdingIds.has(holdingId)) continue;
-    for (const point of points) dates.add(point.date);
+    for (const point of points) {
+      const normalized =
+        typeof point?.date === "string" ? normalizeToIsoDate(point.date) : undefined;
+      if (normalized) dates.add(normalized);
+    }
   }
   return [...dates].sort();
 }

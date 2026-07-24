@@ -1,3 +1,4 @@
+import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import type { FundClearRawResponse, FundNavData } from "./types";
 
 const FUNDCLEAR_API_URL =
@@ -74,8 +75,9 @@ export function parseFundClearResponse(
     );
   }
 
-  // 統一日期格式為 ISO 風格 YYYY-MM-DD
-  const navDate = raw.navTxnDate.replace(/\//g, "-");
+  // 統一日期格式為 ISO 風格 YYYY-MM-DD（相容 YYYY/MM/DD、YYYYMMDD）
+  const navDate =
+    normalizeToIsoDate(raw.navTxnDate) ?? raw.navTxnDate.replace(/\//g, "-");
 
   const previousNav = raw.perviousNav
     ? Number.parseFloat(raw.perviousNav)

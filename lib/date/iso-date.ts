@@ -13,6 +13,29 @@ export function parseIsoDate(iso: string): Date | undefined {
   return date;
 }
 
+/**
+ * 將常見日期字串正規化為 YYYY-MM-DD。
+ * 支援 YYYY-MM-DD、YYYY/MM/DD、YYYYMMDD；無法辨識則回傳 undefined。
+ */
+export function normalizeToIsoDate(raw: string): string | undefined {
+  const s = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return parseIsoDate(s) ? s : undefined;
+  }
+  if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(s)) {
+    const [y, m, d] = s.split("/");
+    return normalizeToIsoDate(
+      `${y}-${m!.padStart(2, "0")}-${d!.padStart(2, "0")}`
+    );
+  }
+  if (/^\d{8}$/.test(s)) {
+    return normalizeToIsoDate(
+      `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+    );
+  }
+  return undefined;
+}
+
 export function toIsoDate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
