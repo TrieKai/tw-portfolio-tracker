@@ -1,13 +1,27 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { endDateForMonthPrefix, todayIsoDate } from "@/lib/date/iso-date";
 import { formatCurrency } from "@/lib/portfolio/calculations";
+import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import {
   buildMonthlyPnlRows,
   hasMonthlyPnlBeforeYtd,
   type MonthlyPnlRow,
 } from "@/lib/portfolio/monthly-pnl";
-import type { Holding, PriceHistoryMap, SaleTransaction } from "@/lib/types/holding";
+import type {
+  Holding,
+  PortfolioStorage,
+  PriceHistoryMap,
+  SaleTransaction,
+} from "@/lib/types/holding";
+
+interface CalendarMonthlyPnlRow extends MonthlyPnlRow {
+  investmentPnl: number;
+  returnRate: number;
+  dataDayCount: number;
+  completeDayCount: number;
+}
 
 function PnlCell({ value }: { value: number | null }) {
   if (value === null) {
@@ -24,23 +38,29 @@ function PnlCell({ value }: { value: number | null }) {
   );
 }
 
-function MonthlyPnlRowMobile({ row }: { row: MonthlyPnlRow }) {
+function MonthlyPnlRowMobile({ row }: { row: CalendarMonthlyPnlRow }) {
   return (
     <li className="glass-card space-y-2 p-4 text-sm">
-      <p className="font-medium">{row.monthLabel}</p>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs text-muted">未實現變化</p>
-          <PnlCell value={row.unrealizedChange} />
+          <p className="font-medium">{row.monthLabel}</p>
+          <p className="mt-1 text-xs text-muted">
+            {row.dataDayCount} 個資料日 · 完整 {row.completeDayCount}/
+            {row.dataDayCount}
+          </p>
         </div>
         <div className="text-right">
-          <p className="text-xs text-muted">已實現</p>
-          <PnlCell value={row.realizedPnl} />
+          <PnlCell value={row.investmentPnl} />
+          <p
+            className={`text-xs tabular-nums ${
+              row.returnRate >= 0 ? "text-gain" : "text-loss"
+            }`}
+          >
+            {row.returnRate > 0 ? "+" : ""}
+            {row.returnRate.toFixed(2)}%
+          </p>
         </div>
       </div>
-      {row.saleCount > 0 && (
-        <p className="text-xs text-muted">{row.saleCount} 筆賣出</p>
-      )}
     </li>
   );
 }
@@ -49,33 +69,59 @@ export function MonthlyPnlTable({
   holdings,
   priceHistory,
   sales,
+  storage,
   asOfDate,
 }: {
   holdings: Holding[];
   priceHistory: PriceHistoryMap;
   sales: SaleTransaction[];
+  storage: PortfolioStorage;
   asOfDate?: string;
 }) {
   const [includeBeforeYtd, setIncludeBeforeYtd] = useState(false);
+  const effectiveAsOfDate = asOfDate ?? todayIsoDate();
 
   const canExpandEarlier = useMemo(
     () => hasMonthlyPnlBeforeYtd(holdings, priceHistory, sales),
     [holdings, priceHistory, sales]
   );
 
-  const rows = useMemo(
-    () =>
-      buildMonthlyPnlRows(holdings, priceHistory, sales, {
+  const rows = useMemo(() => {
+    const baseRows = buildMonthlyPnlRows(holdings, priceHistory, sales, {
         includeBeforeYtd,
-        asOfDate,
-      }),
-    [holdings, priceHistory, sales, includeBeforeYtd, asOfDate]
-  );
+        asOfDate: effectiveAsOfDate,
+      });
+
+    return baseRows.map((row): CalendarMonthlyPnlRow => {
+      const calendar = buildPnlCalendar(storage, {
+        month: row.monthPrefix,
+        asOfDate:
+          row.monthPrefix === effectiveAsOfDate.slice(0, 7)
+            ? effectiveAsOfDate
+            : endDateForMonthPrefix(row.monthPrefix),
+        filter: { kind: "investment" },
+      });
+      return {
+        ...row,
+        investmentPnl: calendar.summary.pnl,
+        returnRate: calendar.summary.returnRate,
+        dataDayCount: calendar.summary.dataDayCount,
+        completeDayCount: calendar.summary.completeDayCount,
+      };
+    });
+  }, [
+    holdings,
+    priceHistory,
+    sales,
+    storage,
+    includeBeforeYtd,
+    effectiveAsOfDate,
+  ]);
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
-        未實現變化為當月持倉相對月初的損益增減；需有價格歷史方可推算。已實現依賣出日歸屬各月。
+        依每日估值變動、買賣價差、股利及費稅彙總；買賣本金與減資退現金不列為投資損益。
       </p>
 
       {rows.length === 0 ? (
@@ -99,9 +145,9 @@ export function MonthlyPnlTable({
               <thead>
                 <tr className="border-b border-border text-muted">
                   <th className="px-4 py-3">月份</th>
-                  <th className="px-4 py-3">未實現變化</th>
-                  <th className="px-4 py-3">已實現</th>
-                  <th className="px-4 py-3">賣出</th>
+                  <th className="px-4 py-3">投資損益</th>
+                  <th className="px-4 py-3">報酬率</th>
+                  <th className="px-4 py-3">資料品質</th>
                 </tr>
               </thead>
               <tbody>
@@ -112,13 +158,22 @@ export function MonthlyPnlTable({
                   >
                     <td className="px-4 py-3 font-medium">{row.monthLabel}</td>
                     <td className="px-4 py-3">
-                      <PnlCell value={row.unrealizedChange} />
+                      <PnlCell value={row.investmentPnl} />
                     </td>
                     <td className="px-4 py-3">
-                      <PnlCell value={row.realizedPnl} />
+                      <span
+                        className={`tabular-nums ${
+                          row.returnRate >= 0 ? "text-gain" : "text-loss"
+                        }`}
+                      >
+                        {row.returnRate > 0 ? "+" : ""}
+                        {row.returnRate.toFixed(2)}%
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-muted tabular-nums">
-                      {row.saleCount > 0 ? `${row.saleCount} 筆` : "—"}
+                      {row.dataDayCount > 0
+                        ? `完整 ${row.completeDayCount}/${row.dataDayCount}`
+                        : "尚無每日資料"}
                     </td>
                   </tr>
                 ))}

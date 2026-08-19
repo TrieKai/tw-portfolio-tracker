@@ -259,7 +259,7 @@ export function RebalancePanel({
           type="button"
           disabled={!plan.valid || readOnly}
           onClick={() => { onSaveTargets(targets); setSaved(true); }}
-          className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded-lg bg-accent-button px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
           title={readOnly ? "時間旅行模式下不可修改設定" : undefined}
         >
           {saved ? "已儲存" : "儲存目標"}

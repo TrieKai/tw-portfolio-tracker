@@ -15,7 +15,10 @@ import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTren
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { formatCurrentMonthZh } from "@/lib/date/iso-date";
+import {
+  currentYearMonthPrefix,
+  formatCurrentMonthZh,
+} from "@/lib/date/iso-date";
 import {
   computePortfolioSummary,
   enrichHoldings,
@@ -24,6 +27,7 @@ import {
 import { computePortfolioExposure } from "@/lib/portfolio/exposure";
 import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
 import { buildPortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
+import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { computePortfolioHealth } from "@/lib/portfolio/health";
 import { computeInvestmentWeather } from "@/lib/portfolio/weather";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -42,6 +46,15 @@ export default function DashboardPage() {
   const { ready, holdings, summary, exposure, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
   const { preferences } = useUiPreferences();
   const [travelDate, setTravelDate] = useState<string | null>(null);
+  const currentPnlCalendar = useMemo(
+    () =>
+      buildPnlCalendar(storage, {
+        month: currentYearMonthPrefix(),
+        asOfDate: todayIsoDate(),
+        filter: { kind: "investment" },
+      }),
+    [storage]
+  );
 
   const historyDates = useMemo(
     () => getPortfolioHistoryDates(storage.holdings, storage.priceHistory),
@@ -264,11 +277,29 @@ export default function DashboardPage() {
     ),
     monthlyPnl: (
       <section className="space-y-4">
-        <h2 className="text-lg font-semibold">月度損益</h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">月度損益</h2>
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <span className={`text-2xl font-semibold tabular-nums ${currentPnlCalendar.summary.pnl >= 0 ? "text-gain" : "text-loss"}`}>
+                {currentPnlCalendar.summary.pnl > 0 ? "+" : ""}
+                {formatCurrency(currentPnlCalendar.summary.pnl)}
+              </span>
+              <span className={`text-sm tabular-nums ${currentPnlCalendar.summary.returnRate >= 0 ? "text-gain" : "text-loss"}`}>
+                本月複利 {currentPnlCalendar.summary.returnRate > 0 ? "+" : ""}
+                {currentPnlCalendar.summary.returnRate.toFixed(2)}%
+              </span>
+            </div>
+          </div>
+          <Link href="/calendar" className="text-sm font-medium text-accent hover:underline">
+            查看損益日曆 →
+          </Link>
+        </div>
         <MonthlyPnlTable
           holdings={shownRawHoldings}
           priceHistory={shownHistory}
           sales={shownSales}
+          storage={storage}
           asOfDate={travelDate ?? undefined}
         />
       </section>
@@ -375,7 +406,7 @@ function HoldingSnapshotCards({ holdings, compact }: { holdings: HoldingWithMetr
             </div>
           </dl>
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-raised">
-            <div className={`h-full rounded-full ${holding.pnl >= 0 ? "bg-emerald-500" : "bg-rose-500"}`} style={{ width: `${Math.min(100, Math.max(8, Math.abs(holding.returnRate)))}%` }} />
+            <div className={`h-full rounded-full ${holding.pnl >= 0 ? "bg-gain" : "bg-loss"}`} style={{ width: `${Math.min(100, Math.max(8, Math.abs(holding.returnRate)))}%` }} />
           </div>
         </article>
       ))}

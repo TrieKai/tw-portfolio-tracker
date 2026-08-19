@@ -28,6 +28,7 @@ export function AddHoldingForm() {
   const [propertyName, setPropertyName] = useState("");
   const [resolvedName, setResolvedName] = useState("");
   const [buyPrice, setBuyPrice] = useState("");
+  const [buyFee, setBuyFee] = useState("");
   const [currentEstimate, setCurrentEstimate] = useState("");
   const [mortgageBalance, setMortgageBalance] = useState("");
   const [quantity, setQuantity] = useState("1");
@@ -43,6 +44,7 @@ export function AddHoldingForm() {
     setPropertyName("");
     setResolvedName("");
     setCurrentEstimate("");
+    setBuyFee("");
     setMortgageBalance("");
     setQuantity(t === "property" ? "1" : "");
     setError(null);
@@ -54,6 +56,7 @@ export function AddHoldingForm() {
 
     const price = Number.parseFloat(buyPrice);
     const qty = Number.parseFloat(quantity);
+    const fee = buyFee.trim() ? Number.parseFloat(buyFee) : 0;
     const estimate = currentEstimate.trim()
       ? Number.parseFloat(currentEstimate)
       : NaN;
@@ -81,6 +84,10 @@ export function AddHoldingForm() {
     }
     if (Number.isNaN(qty) || qty <= 0) {
       setError("數量無效");
+      return;
+    }
+    if (!isProperty && (!Number.isFinite(fee) || fee < 0)) {
+      setError("買入手續費無效");
       return;
     }
     if (
@@ -141,6 +148,7 @@ export function AddHoldingForm() {
       buyPrice: price,
       quantity: qty,
       buyDate,
+      fee,
     });
 
     if (newId) {
@@ -269,6 +277,20 @@ export function AddHoldingForm() {
           max={todayIsoDate()}
         />
       </Field>
+
+      {!isProperty && (
+        <Field label="買入手續費（選填）">
+          <input
+            type="number"
+            step="any"
+            min="0"
+            value={buyFee}
+            onChange={(e) => setBuyFee(e.target.value)}
+            placeholder="留空視為 0"
+            className="input-field"
+          />
+        </Field>
+      )}
 
       {error && <p className="text-sm text-rose-500">{error}</p>}
 

@@ -27,6 +27,8 @@ export function SellGroupHoldingModal({
     group.currentPrice !== undefined ? String(group.currentPrice) : ""
   );
   const [sellDate, setSellDate] = useState(todayIsoDate());
+  const [fee, setFee] = useState("");
+  const [tax, setTax] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const allocation = useMemo(() => {
@@ -38,21 +40,25 @@ export function SellGroupHoldingModal({
   const preview = useMemo(() => {
     const qty = Number.parseFloat(quantity);
     const price = Number.parseFloat(sellPrice);
+    const feeAmount = fee.trim() ? Number.parseFloat(fee) : 0;
+    const taxAmount = tax.trim() ? Number.parseFloat(tax) : 0;
     if (
       Number.isNaN(qty) ||
       qty <= 0 ||
       Number.isNaN(price) ||
       price <= 0 ||
-      allocation.length === 0
+      allocation.length === 0 ||
+      !Number.isFinite(feeAmount) ||
+      !Number.isFinite(taxAmount)
     ) {
       return null;
     }
     const proceeds = price * qty;
     const cost = allocation.reduce((s, a) => s + a.buyPrice * a.quantity, 0);
-    const realizedPnl = proceeds - cost;
+    const realizedPnl = proceeds - cost - feeAmount - taxAmount;
     const isFullSell = qty >= totalQty;
     return { proceeds, realizedPnl, isFullSell, cost };
-  }, [quantity, sellPrice, allocation, totalQty]);
+  }, [quantity, sellPrice, fee, tax, allocation, totalQty]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -60,6 +66,8 @@ export function SellGroupHoldingModal({
 
     const qty = Number.parseFloat(quantity);
     const price = Number.parseFloat(sellPrice);
+    const feeAmount = fee.trim() ? Number.parseFloat(fee) : 0;
+    const taxAmount = tax.trim() ? Number.parseFloat(tax) : 0;
 
     if (Number.isNaN(qty) || qty <= 0) {
       setError("請輸入有效賣出數量");
@@ -77,6 +85,14 @@ export function SellGroupHoldingModal({
       setError("日期格式應為 YYYY-MM-DD");
       return;
     }
+    if (!Number.isFinite(feeAmount) || feeAmount < 0) {
+      setError("請輸入有效手續費");
+      return;
+    }
+    if (!Number.isFinite(taxAmount) || taxAmount < 0) {
+      setError("請輸入有效交易稅");
+      return;
+    }
 
     const allocated = allocateFifoSell(group.lots, qty);
     const allocatedQty = allocated.reduce((s, a) => s + a.quantity, 0);
@@ -85,13 +101,28 @@ export function SellGroupHoldingModal({
       return;
     }
 
+    let distributedFee = 0;
+    let distributedTax = 0;
     onSave(
-      allocated.map((a) => ({
-        id: a.id,
-        quantity: a.quantity,
-        sellPrice: price,
-        sellDate,
-      }))
+      allocated.map((a, index) => {
+        const isLast = index === allocated.length - 1;
+        const lotFee = isLast
+          ? feeAmount - distributedFee
+          : feeAmount * (a.quantity / qty);
+        const lotTax = isLast
+          ? taxAmount - distributedTax
+          : taxAmount * (a.quantity / qty);
+        distributedFee += lotFee;
+        distributedTax += lotTax;
+        return {
+          id: a.id,
+          quantity: a.quantity,
+          sellPrice: price,
+          sellDate,
+          fee: lotFee,
+          tax: lotTax,
+        };
+      })
     );
   }
 
@@ -186,6 +217,33 @@ export function SellGroupHoldingModal({
                 max={todayIsoDate()}
               />
             </div>
+          </label>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="text-muted">手續費（整筆，選填）</span>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={fee}
+              onChange={(event) => setFee(event.target.value)}
+              placeholder="依各批數量分攤"
+              className="input-field mt-1"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-muted">交易稅（整筆，選填）</span>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={tax}
+              onChange={(event) => setTax(event.target.value)}
+              placeholder="依各批數量分攤"
+              className="input-field mt-1"
+            />
           </label>
         </div>
 

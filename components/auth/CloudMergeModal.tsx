@@ -45,7 +45,7 @@ export function CloudMergeModal({
           <button
             type="button"
             onClick={onChooseLocal}
-            className="touch-target rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-accent-muted"
+            className="touch-target rounded-lg bg-accent-button px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110"
           >
             使用本機並上傳雲端
           </button>

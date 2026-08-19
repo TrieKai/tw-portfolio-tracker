@@ -22,11 +22,15 @@ export function SellHoldingModal({
     holding.currentPrice !== undefined ? String(holding.currentPrice) : ""
   );
   const [sellDate, setSellDate] = useState(todayIsoDate());
+  const [fee, setFee] = useState("");
+  const [tax, setTax] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const preview = useMemo(() => {
     const qty = Number.parseFloat(quantity);
     const price = Number.parseFloat(sellPrice);
+    const feeAmount = fee.trim() ? Number.parseFloat(fee) : 0;
+    const taxAmount = tax.trim() ? Number.parseFloat(tax) : 0;
     if (
       Number.isNaN(qty) ||
       qty <= 0 ||
@@ -37,10 +41,11 @@ export function SellHoldingModal({
     }
     const proceeds = price * qty;
     const cost = holding.buyPrice * qty;
-    const realizedPnl = proceeds - cost;
+    if (!Number.isFinite(feeAmount) || !Number.isFinite(taxAmount)) return null;
+    const realizedPnl = proceeds - cost - feeAmount - taxAmount;
     const isFullSell = qty >= holding.quantity;
     return { proceeds, realizedPnl, isFullSell };
-  }, [quantity, sellPrice, holding.buyPrice, holding.quantity]);
+  }, [quantity, sellPrice, fee, tax, holding.buyPrice, holding.quantity]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -48,6 +53,8 @@ export function SellHoldingModal({
 
     const qty = Number.parseFloat(quantity);
     const price = Number.parseFloat(sellPrice);
+    const feeAmount = fee.trim() ? Number.parseFloat(fee) : 0;
+    const taxAmount = tax.trim() ? Number.parseFloat(tax) : 0;
 
     if (Number.isNaN(qty) || qty <= 0) {
       setError("請輸入有效賣出數量");
@@ -65,12 +72,22 @@ export function SellHoldingModal({
       setError("日期格式應為 YYYY-MM-DD");
       return;
     }
+    if (!Number.isFinite(feeAmount) || feeAmount < 0) {
+      setError("請輸入有效手續費");
+      return;
+    }
+    if (!Number.isFinite(taxAmount) || taxAmount < 0) {
+      setError("請輸入有效交易稅");
+      return;
+    }
 
     onSave({
       id: holding.id,
       quantity: qty,
       sellPrice: price,
       sellDate,
+      fee: feeAmount,
+      tax: taxAmount,
     });
   }
 
@@ -146,6 +163,33 @@ export function SellHoldingModal({
                 max={todayIsoDate()}
               />
             </div>
+          </label>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="text-muted">手續費（選填）</span>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={fee}
+              onChange={(e) => setFee(e.target.value)}
+              placeholder="留空視為 0"
+              className="input-field mt-1"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-muted">交易稅（選填）</span>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={tax}
+              onChange={(e) => setTax(e.target.value)}
+              placeholder="留空視為 0"
+              className="input-field mt-1"
+            />
           </label>
         </div>
 

@@ -17,6 +17,7 @@ const NAV = [
   { href: "/", label: "總覽" },
   { href: "/holdings", label: "持倉" },
   { href: "/holdings/new", label: "新增" },
+  { href: "/calendar", label: "日曆" },
   { href: "/trends", label: "趨勢" },
 ] as const;
 
@@ -91,7 +92,7 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => updateAll()}
               disabled={isUpdating}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-2 text-xs font-semibold text-white transition hover:bg-accent-muted disabled:opacity-60 sm:gap-2 sm:px-3 sm:text-sm touch-target"
+              className="flex items-center gap-1.5 rounded-lg bg-accent-button px-2.5 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-60 sm:gap-2 sm:px-3 sm:text-sm touch-target"
             >
               {isUpdating ? (
                 <>

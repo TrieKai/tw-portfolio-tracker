@@ -559,7 +559,9 @@ export function CorporateActionsPanel() {
             const lot = lotsById.get(event.holdingId);
             const groupKey = lot ? holdingGroupKey(lot) : event.holdingId;
             const group = stockGroups.find((item) => item.groupKey === groupKey);
-            const canApply = event.stockDividendRatio > 0;
+            const canApply =
+              event.stockDividendRatio > 0 ||
+              (event.cashDividend !== undefined && event.cashDividend > 0);
 
             return (
               <li
@@ -589,7 +591,9 @@ export function CorporateActionsPanel() {
                     )}
                     {!canApply && (
                       <p className="mt-1 text-xs text-muted">
-                        此事件目前僅記錄處理，不會改變股數與成本。
+                        {event.subscriptionRatio > 0
+                          ? "是否認購無法自動判斷；實際認購後請新增一筆持倉，認購本金會自動排除於損益。此處只標記已處理。"
+                          : "此事件目前只標記已處理，不會改變股數與成本。"}
                       </p>
                     )}
                   </div>

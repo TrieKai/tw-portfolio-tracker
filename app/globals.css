@@ -16,9 +16,10 @@
     --border: #e2e8f0;
     --accent: #059669;
     --accent-muted: #047857;
+    --accent-button: #047857;
     --accent-dim: rgba(5, 150, 105, 0.12);
-    --gain: #059669;
-    --loss: #dc2626;
+    --gain: #dc2626;
+    --loss: #059669;
     --tooltip-bg: #ffffff;
     --chart-grid: #e2e8f0;
   }
@@ -32,9 +33,10 @@
     --border: #2a3544;
     --accent: #10b981;
     --accent-muted: #059669;
+    --accent-button: #047857;
     --accent-dim: rgba(16, 185, 129, 0.12);
-    --gain: #34d399;
-    --loss: #f87171;
+    --gain: #f87171;
+    --loss: #34d399;
     --tooltip-bg: #1a222d;
     --chart-grid: #2a3544;
   }
@@ -46,6 +48,7 @@
     --border: #d6e4f5;
     --accent: #2563eb;
     --accent-muted: #1d4ed8;
+    --accent-button: #1d4ed8;
     --accent-dim: rgba(37, 99, 235, 0.12);
   }
 
@@ -56,6 +59,7 @@
     --border: #dedcf5;
     --accent: #6366f1;
     --accent-muted: #4f46e5;
+    --accent-button: #4f46e5;
     --accent-dim: rgba(99, 102, 241, 0.13);
   }
 
@@ -66,6 +70,7 @@
     --border: #f3d8e0;
     --accent: #db2777;
     --accent-muted: #be185d;
+    --accent-button: #be185d;
     --accent-dim: rgba(219, 39, 119, 0.12);
   }
 
@@ -76,6 +81,7 @@
     --border: #eedfbd;
     --accent: #d97706;
     --accent-muted: #b45309;
+    --accent-button: #b45309;
     --accent-dim: rgba(217, 119, 6, 0.13);
   }
 
@@ -86,6 +92,7 @@
     --border: #d6dde5;
     --accent: #475569;
     --accent-muted: #334155;
+    --accent-button: #334155;
     --accent-dim: rgba(71, 85, 105, 0.13);
   }
 
@@ -96,6 +103,7 @@
     --border: #23405f;
     --accent: #60a5fa;
     --accent-muted: #3b82f6;
+    --accent-button: #1d4ed8;
     --accent-dim: rgba(96, 165, 250, 0.14);
   }
 
@@ -106,6 +114,7 @@
     --border: #36345c;
     --accent: #a5b4fc;
     --accent-muted: #818cf8;
+    --accent-button: #4f46e5;
     --accent-dim: rgba(165, 180, 252, 0.14);
   }
 
@@ -116,6 +125,7 @@
     --border: #583044;
     --accent: #f472b6;
     --accent-muted: #ec4899;
+    --accent-button: #be185d;
     --accent-dim: rgba(244, 114, 182, 0.14);
   }
 
@@ -126,6 +136,7 @@
     --border: #55401f;
     --accent: #fbbf24;
     --accent-muted: #f59e0b;
+    --accent-button: #b45309;
     --accent-dim: rgba(251, 191, 36, 0.14);
   }
 
@@ -136,6 +147,7 @@
     --border: #344252;
     --accent: #cbd5e1;
     --accent-muted: #94a3b8;
+    --accent-button: #475569;
     --accent-dim: rgba(203, 213, 225, 0.12);
   }
 
@@ -363,7 +375,7 @@
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-accent-muted disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center rounded-lg bg-accent-button px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .btn-secondary {
@@ -433,6 +445,9 @@
   }
   .bg-accent-muted {
     background-color: var(--accent-muted);
+  }
+  .bg-accent-button {
+    background-color: var(--accent-button);
   }
   .bg-accent-dim {
     background-color: var(--accent-dim);

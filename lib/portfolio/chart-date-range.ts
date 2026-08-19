@@ -1,4 +1,6 @@
 /** 趨勢圖時間區間 */
+import { MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+
 export type ChartRange =
   | "7d"
   | "30d"
@@ -49,7 +51,7 @@ export function chartRangeToIsoDates(
 ): { startDate: string; endDate: string } {
   const end = new Date();
   const endDate = toIsoDate(end);
-  const maxAll = options?.maxAllDays ?? 365;
+  const maxAll = options?.maxAllDays ?? MAX_PRICE_HISTORY_DAYS;
 
   if (range === "all") {
     const start = options?.buyDate

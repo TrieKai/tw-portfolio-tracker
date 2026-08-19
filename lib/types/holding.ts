@@ -93,8 +93,12 @@ export interface SaleTransaction {
   costBasis: number;
   /** 成交金額 = sellPrice × quantity */
   proceeds: number;
-  /** 已實現損益 = proceeds − costBasis */
+  /** 已實現損益 = proceeds − costBasis − fee − tax */
   realizedPnl: number;
+  /** 實際手續費；舊紀錄可能未保存。 */
+  fee?: number;
+  /** 實際交易稅；舊紀錄可能未保存。 */
+  tax?: number;
   createdAt: string;
 }
 
@@ -157,15 +161,86 @@ export interface ManualCorporateActionInput {
   note?: string;
 }
 
+/** 影響每日損益與持倉數量的不可變交易事件。 */
+export type PortfolioTransactionType =
+  | "opening_balance"
+  | "buy"
+  | "sell"
+  | "cash_dividend"
+  | "capital_return";
+
+export interface PortfolioTransaction {
+  id: string;
+  type: PortfolioTransactionType;
+  holdingId: string;
+  assetType: Exclude<AssetType, "property">;
+  name: string;
+  symbol: string;
+  market?: StockMarket;
+  /** 事件發生日 ISO YYYY-MM-DD。 */
+  date: string;
+  quantity?: number;
+  price?: number;
+  /** 現金股利或本金返還總額。 */
+  amount?: number;
+  fee: number;
+  tax: number;
+  settlementDate?: string;
+  quality: "complete" | "estimated" | "legacy";
+  source: "user" | "migration" | "corporate_action";
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PortfolioTransactionRevision {
+  id: string;
+  transactionId: string;
+  previous: PortfolioTransaction;
+  correctedAt: string;
+  reason?: string;
+}
+
+export interface PersistedPnlDaySummary {
+  date: string;
+  pnl: number;
+  returnRate: number;
+  quality: "complete" | "partial" | "estimated" | "provisional";
+  computedAt: string;
+}
+
+export interface PnlTrackingState {
+  /** 自此日期起，交易事件足以支援完整的每日歸因。 */
+  startedAt: string;
+  /** 永久保存的日總額；逐資產明細由最近三年價格與交易即時計算。 */
+  dailySummaries: Record<string, PersistedPnlDaySummary>;
+}
+
+export interface CashDividendInput {
+  holdingId: string;
+  /** 除息日；投資收益歸屬此日。 */
+  effectiveDate: string;
+  /** 實際入帳日，僅供明細呈現。 */
+  settlementDate?: string;
+  /** 本次收到的現金總額。 */
+  amount: number;
+  note?: string;
+}
+
 /** 本地儲存完整狀態 */
 export interface PortfolioStorage {
-  version: 1;
+  version: 2;
   holdings: Holding[];
   priceHistory: PriceHistoryMap;
   /** 賣出紀錄（依 createdAt 追加；展示時依 sellDate 排序） */
   sales: SaleTransaction[];
   /** 已處理公司行動，避免同一事件重複套用 */
   corporateActions: CorporateActionRecord[];
+  /** 損益日曆使用的不可變交易事件。 */
+  transactions: PortfolioTransaction[];
+  /** 更正交易時保存原值，避免歷史被無聲改寫。 */
+  transactionRevisions: PortfolioTransactionRevision[];
+  pnlTracking: PnlTrackingState;
   settings: PortfolioSettings;
 }
 
@@ -241,6 +316,8 @@ export interface CreateHoldingInput {
   buyPrice: number;
   quantity: number;
   buyDate: string;
+  /** 買入手續費；未填視為 0。 */
+  fee?: number;
   /** 房貸餘額（元；僅 property） */
   mortgageBalance?: number;
 }
@@ -259,4 +336,8 @@ export interface SellHoldingInput {
   sellPrice: number;
   /** 賣出日期 ISO YYYY-MM-DD */
   sellDate: string;
+  /** 實際手續費；未填視為 0。 */
+  fee?: number;
+  /** 實際交易稅；未填視為 0。 */
+  tax?: number;
 }

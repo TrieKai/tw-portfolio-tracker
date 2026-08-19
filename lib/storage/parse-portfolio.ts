@@ -7,6 +7,7 @@ import type {
   PricePoint,
 } from "@/lib/types/holding";
 import { normalizeUiPreferences } from "@/lib/ui/preferences";
+import { migratePortfolioStorage } from "@/lib/storage/portfolio-migration";
 
 const DEFAULT_SETTINGS: PortfolioSettings = {
   autoUpdateEnabled: false,
@@ -15,11 +16,14 @@ const DEFAULT_SETTINGS: PortfolioSettings = {
 
 export function defaultPortfolioStorage(): PortfolioStorage {
   return {
-    version: 1,
+    version: 2,
     holdings: [],
     priceHistory: {},
     sales: [],
     corporateActions: [],
+    transactions: [],
+    transactionRevisions: [],
+    pnlTracking: { startedAt: "", dailySummaries: {} },
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -58,8 +62,19 @@ function normalizePriceHistoryMap(priceHistory: PriceHistoryMap): PriceHistoryMa
 /** 驗證並正規化未知 JSON 為 PortfolioStorage */
 export function normalizePortfolioStorage(raw: unknown): PortfolioStorage | null {
   if (!raw || typeof raw !== "object") return null;
-  const parsed = raw as PortfolioStorage;
-  if (parsed.version !== 1 || !Array.isArray(parsed.holdings)) return null;
+  const version = (raw as { version?: unknown }).version;
+  let migrated: unknown = raw;
+  if (version === 1) {
+    try {
+      migrated = migratePortfolioStorage(raw, {
+        migratedAt: new Date().toISOString(),
+      });
+    } catch {
+      return null;
+    }
+  }
+  const parsed = migrated as PortfolioStorage;
+  if (parsed.version !== 2 || !Array.isArray(parsed.holdings)) return null;
 
   const rawSettings =
     parsed.settings && typeof parsed.settings === "object"
@@ -79,6 +94,24 @@ export function normalizePortfolioStorage(raw: unknown): PortfolioStorage | null
     corporateActions: Array.isArray(parsed.corporateActions)
       ? parsed.corporateActions
       : [],
+    transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
+    transactionRevisions: Array.isArray(parsed.transactionRevisions)
+      ? parsed.transactionRevisions
+      : [],
+    pnlTracking:
+      parsed.pnlTracking && typeof parsed.pnlTracking === "object"
+        ? {
+            startedAt:
+              typeof parsed.pnlTracking.startedAt === "string"
+                ? parsed.pnlTracking.startedAt
+                : "",
+            dailySummaries:
+              parsed.pnlTracking.dailySummaries &&
+              typeof parsed.pnlTracking.dailySummaries === "object"
+                ? parsed.pnlTracking.dailySummaries
+                : {},
+          }
+        : { startedAt: "", dailySummaries: {} },
     settings: {
       ...DEFAULT_SETTINGS,
       ...rawSettings,

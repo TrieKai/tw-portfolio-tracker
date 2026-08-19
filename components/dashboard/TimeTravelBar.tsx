@@ -45,7 +45,7 @@ export function TimeTravelBar({
     }`} aria-label="資產時間旅行">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className={`flex h-10 w-10 items-center justify-center rounded-xl text-xl ${active ? "bg-accent text-white" : "bg-surface-raised text-muted"}`} aria-hidden>
+          <span className={`flex h-10 w-10 items-center justify-center rounded-xl text-xl ${active ? "bg-accent-button text-white" : "bg-surface-raised text-muted"}`} aria-hidden>
             ◷
           </span>
           <div>
@@ -56,7 +56,7 @@ export function TimeTravelBar({
           </div>
         </div>
         {active && (
-          <button type="button" onClick={() => onSelectDate(null)} className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white">
+          <button type="button" onClick={() => onSelectDate(null)} className="rounded-lg bg-accent-button px-3 py-2 text-xs font-semibold text-white">
             回到現在
           </button>
         )}

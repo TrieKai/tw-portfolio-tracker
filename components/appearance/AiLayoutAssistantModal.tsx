@@ -464,7 +464,7 @@ export function AiLayoutAssistantModal({
                       下方就是首頁目前的排列，可拖曳區塊或調整寬度與內容形態。
                     </p>
                   </div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${previewChanged ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-accent text-white"}`}>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${previewChanged ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-accent-button text-white"}`}>
                     {previewChanged ? "尚未套用" : "目前套用"}
                   </span>
                 </div>
@@ -605,7 +605,7 @@ export function AiLayoutAssistantModal({
                                 title={WIDTH_LABELS[width]}
                                 className={`flex h-7 w-7 items-center justify-center rounded-md transition disabled:cursor-not-allowed ${
                                   item.width === width
-                                    ? "bg-accent text-white shadow-sm"
+                                    ? "bg-accent-button text-white shadow-sm"
                                     : "text-muted hover:bg-surface hover:text-foreground"
                                 }`}
                               >

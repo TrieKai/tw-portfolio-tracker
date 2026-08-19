@@ -14,8 +14,8 @@ function formatNav(value: number): string {
 
 function changeColor(percent?: number): string {
   if (percent === undefined) return "text-slate-400";
-  if (percent > 0) return "text-emerald-400";
-  if (percent < 0) return "text-rose-400";
+  if (percent > 0) return "text-gain";
+  if (percent < 0) return "text-loss";
   return "text-slate-400";
 }
 

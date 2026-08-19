@@ -55,6 +55,7 @@ import {
   hasPortfolioData,
 } from "@/lib/storage/parse-portfolio";
 import {
+  addCashDividend,
   addHolding,
   applyCorporateAction,
   applyImportedPriceHistory,
@@ -73,6 +74,7 @@ import {
 import type {
   CreateHoldingInput,
   AssetAllocationTargets,
+  CashDividendInput,
   EditHoldingInput,
   Holding,
   HoldingWithMetrics,
@@ -143,6 +145,7 @@ interface PortfolioContextValue {
   ) => string | null;
   edit: (input: EditHoldingInput) => void;
   sell: (input: SellHoldingInput | SellHoldingInput[]) => void;
+  addDividend: (input: CashDividendInput) => void;
   remove: (id: string) => void;
   setManualPrice: (id: string, price: number, priceDate: string) => void;
   updateOne: (id: string) => Promise<boolean>;
@@ -455,6 +458,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       if (!storage) return;
       const inputs = Array.isArray(input) ? input : [input];
       persist(sellHoldings(storage, inputs));
+    },
+    [storage, persist]
+  );
+
+  const addDividend = useCallback(
+    (input: CashDividendInput) => {
+      if (!storage) return;
+      persist(addCashDividend(storage, input));
     },
     [storage, persist]
   );
@@ -930,6 +941,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       add,
       edit,
       sell,
+      addDividend,
       remove,
       setManualPrice,
       updateOne,
@@ -968,6 +980,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       add,
       edit,
       sell,
+      addDividend,
       remove,
       setManualPrice,
       updateOne,

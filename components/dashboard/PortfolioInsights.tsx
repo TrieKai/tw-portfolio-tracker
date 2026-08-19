@@ -34,7 +34,7 @@ export function PortfolioInsights({
         <p className="mt-5 text-sm leading-6">{weather.summary}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {weather.changeRate !== null && (
-            <span className={`rounded-full px-2.5 py-1 text-sm font-semibold tabular-nums ${weather.changeRate >= 0 ? "bg-emerald-500/10 text-gain" : "bg-rose-500/10 text-loss"}`}>
+            <span className={`rounded-full px-2.5 py-1 text-sm font-semibold tabular-nums ${weather.changeRate >= 0 ? "bg-gain/10 text-gain" : "bg-loss/10 text-loss"}`}>
               {weather.changeRate > 0 ? "+" : ""}{weather.changeRate.toFixed(2)}%
             </span>
           )}

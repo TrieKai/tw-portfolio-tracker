@@ -34,6 +34,7 @@ export default function HoldingsPage() {
           holdings={storage.holdings}
           priceHistory={storage.priceHistory}
           sales={sales}
+          storage={storage}
         />
       </section>
 

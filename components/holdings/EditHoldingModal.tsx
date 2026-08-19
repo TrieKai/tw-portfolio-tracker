@@ -139,6 +139,11 @@ export function EditHoldingModal({
           {getAssetTypeLabel(holding.assetType)} · 類型不可變更
           {isProperty ? " · 名稱自行填寫" : " · 名稱由代號自動查詢"}
         </p>
+        {!isProperty && (
+          <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+            修改買入價格、數量或日期會被視為更正原始交易，並自更正日期起重新計算損益日曆。
+          </p>
+        )}
 
         {isProperty ? (
           <>

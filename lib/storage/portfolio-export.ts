@@ -53,7 +53,7 @@ export function parseImportPayload(
 
   return {
     ok: false,
-    error: "無法辨識的備份格式（需為本 App 匯出的 JSON 或 version:1 的持倉資料）",
+    error: "無法辨識的備份格式（需為本 App 匯出的 JSON 或 version:1／2 的持倉資料）",
   };
 }
 
@@ -79,6 +79,20 @@ export function mergePortfolioStorage(
     corporateActionMap.set(action.id, action);
   }
 
+  const transactionMap = new Map(
+    current.transactions.map((transaction) => [transaction.id, transaction])
+  );
+  for (const transaction of incoming.transactions) {
+    transactionMap.set(transaction.id, transaction);
+  }
+
+  const revisionMap = new Map(
+    current.transactionRevisions.map((revision) => [revision.id, revision])
+  );
+  for (const revision of incoming.transactionRevisions) {
+    revisionMap.set(revision.id, revision);
+  }
+
   let priceHistory = { ...current.priceHistory };
   for (const [holdingId, points] of Object.entries(incoming.priceHistory)) {
     if (!Array.isArray(points) || points.length === 0) continue;
@@ -86,10 +100,24 @@ export function mergePortfolioStorage(
   }
 
   return {
-    version: 1,
+    version: 2,
     holdings: [...holdingMap.values()],
     sales: [...saleMap.values()],
     corporateActions: [...corporateActionMap.values()],
+    transactions: [...transactionMap.values()],
+    transactionRevisions: [...revisionMap.values()],
+    pnlTracking: {
+      startedAt:
+        !current.pnlTracking.startedAt ||
+        (incoming.pnlTracking.startedAt &&
+          incoming.pnlTracking.startedAt < current.pnlTracking.startedAt)
+          ? incoming.pnlTracking.startedAt
+          : current.pnlTracking.startedAt,
+      dailySummaries: {
+        ...current.pnlTracking.dailySummaries,
+        ...incoming.pnlTracking.dailySummaries,
+      },
+    },
     priceHistory,
     settings: {
       ...incoming.settings,

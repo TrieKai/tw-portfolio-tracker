@@ -34,7 +34,7 @@ export function CloudUploadPromptModal({
           <button
             type="button"
             onClick={onUpload}
-            className="touch-target rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-accent-muted"
+            className="touch-target rounded-lg bg-accent-button px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110"
           >
             上傳至雲端
           </button>

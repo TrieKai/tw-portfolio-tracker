@@ -22,6 +22,7 @@ const config: Config = {
           DEFAULT: "var(--accent)",
           muted: "var(--accent-muted)",
           dim: "var(--accent-dim)",
+          button: "var(--accent-button)",
         },
         gain: "var(--gain)",
         loss: "var(--loss)",
