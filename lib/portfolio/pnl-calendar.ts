@@ -1,4 +1,8 @@
-import type { AssetType, PortfolioStorage } from "@/lib/types/holding";
+import type {
+  AssetType,
+  PortfolioStorage,
+  StockMarket,
+} from "@/lib/types/holding";
 import { addDaysToIsoDate, parseIsoDate, toIsoDate } from "@/lib/date/iso-date";
 
 export type PnlCalendarFilter =
@@ -28,10 +32,14 @@ export interface PnlCalendarDay {
 }
 
 export interface PnlCalendarContribution {
+  /** 相容既有呼叫端；合併後代表第一筆持倉。 */
   holdingId: string;
+  /** 同資產分批建倉時，包含所有被合併的持倉 id。 */
+  holdingIds: string[];
   name: string;
   symbol: string;
   assetType: Exclude<AssetType, "property">;
+  market?: StockMarket;
   pnl: number;
   marketPnl: number;
   tradePnl: number;
@@ -72,8 +80,15 @@ interface CalendarInstrument {
   assetType: Exclude<AssetType, "property">;
   name: string;
   symbol: string;
+  market?: StockMarket;
   buyDate: string;
   fallbackQuantity: number;
+}
+
+interface ContributionAccumulator extends PnlCalendarContribution {
+  previousPriceTotal: number;
+  currentPriceTotal: number;
+  priceQuantity: number;
 }
 
 interface DayAccumulator {
@@ -81,7 +96,7 @@ interface DayAccumulator {
   baseValue: number;
   pricedHoldingIds: Set<string>;
   totalHoldingIds: Set<string>;
-  contributions: Map<string, PnlCalendarContribution>;
+  contributions: Map<string, ContributionAccumulator>;
 }
 
 function matchesFilter(
@@ -154,30 +169,65 @@ function emptyDayAccumulator(): DayAccumulator {
     baseValue: 0,
     pricedHoldingIds: new Set<string>(),
     totalHoldingIds: new Set<string>(),
-    contributions: new Map<string, PnlCalendarContribution>(),
+    contributions: new Map<string, ContributionAccumulator>(),
   };
 }
 
 function getContribution(
   day: DayAccumulator,
-  instrument: Pick<CalendarInstrument, "id" | "name" | "symbol" | "assetType">
-): PnlCalendarContribution {
-  const existing = day.contributions.get(instrument.id);
-  if (existing) return existing;
-  const created: PnlCalendarContribution = {
+  instrument: Pick<
+    CalendarInstrument,
+    "id" | "name" | "symbol" | "assetType" | "market"
+  >
+): ContributionAccumulator {
+  // 同代號仍可能跨市場重複，因此市場必須納入合併鍵。
+  const assetKey = [
+    instrument.assetType,
+    instrument.market ?? "",
+    instrument.symbol.trim().toUpperCase(),
+  ].join(":");
+  const existing = day.contributions.get(assetKey);
+  if (existing) {
+    if (!existing.holdingIds.includes(instrument.id)) {
+      existing.holdingIds.push(instrument.id);
+    }
+    return existing;
+  }
+  const created: ContributionAccumulator = {
     holdingId: instrument.id,
+    holdingIds: [instrument.id],
     name: instrument.name,
     symbol: instrument.symbol,
     assetType: instrument.assetType,
+    market: instrument.market,
     pnl: 0,
     marketPnl: 0,
     tradePnl: 0,
     dividend: 0,
     fee: 0,
     tax: 0,
+    previousPriceTotal: 0,
+    currentPriceTotal: 0,
+    priceQuantity: 0,
   };
-  day.contributions.set(instrument.id, created);
+  day.contributions.set(assetKey, created);
   return created;
+}
+
+function addPriceRange(
+  contribution: ContributionAccumulator,
+  previousPrice: number,
+  currentPrice: number,
+  quantity: number
+): void {
+  // 多批持倉的起訖價依數量加權，避免直接顯示其中任一批的價格。
+  contribution.previousPriceTotal += previousPrice * quantity;
+  contribution.currentPriceTotal += currentPrice * quantity;
+  contribution.priceQuantity += quantity;
+  contribution.previousPrice =
+    contribution.previousPriceTotal / contribution.priceQuantity;
+  contribution.currentPrice =
+    contribution.currentPriceTotal / contribution.priceQuantity;
 }
 
 /**
@@ -196,6 +246,7 @@ export function buildPnlCalendar(
       assetType: holding.assetType,
       name: holding.name,
       symbol: holding.symbol,
+      market: holding.market,
       buyDate: holding.buyDate,
       fallbackQuantity: holding.quantity,
     });
@@ -208,6 +259,7 @@ export function buildPnlCalendar(
         assetType: transaction.assetType,
         name: transaction.name,
         symbol: transaction.symbol,
+        market: transaction.market,
         buyDate: transaction.date,
         fallbackQuantity: 0,
       });
@@ -257,8 +309,7 @@ export function buildPnlCalendar(
       const detail = getContribution(existing, instrument);
       detail.pnl += contribution;
       detail.marketPnl += contribution;
-      detail.previousPrice = previous.price;
-      detail.currentPrice = current.price;
+      addPriceRange(detail, previous.price, current.price, quantity);
       contributionsByDate.set(current.date, existing);
     }
   }
@@ -290,8 +341,7 @@ export function buildPnlCalendar(
     detail.fee += transaction.fee;
     detail.tax += transaction.tax;
     detail.pnl += marketPnl - transaction.fee - transaction.tax;
-    detail.previousPrice = buyPrice;
-    detail.currentPrice = close.price;
+    addPriceRange(detail, buyPrice, close.price, quantity);
     contributionsByDate.set(transaction.date, existing);
   }
 
@@ -322,8 +372,7 @@ export function buildPnlCalendar(
     detail.fee += transaction.fee;
     detail.tax += transaction.tax;
     detail.pnl += tradePnl - transaction.fee - transaction.tax;
-    detail.previousPrice = previous.price;
-    detail.currentPrice = sellPrice;
+    addPriceRange(detail, previous.price, sellPrice, quantity);
     contributionsByDate.set(transaction.date, existing);
   }
 
@@ -402,14 +451,27 @@ export function buildPnlCalendar(
       quality,
       isProvisional: date === options.asOfDate,
       contributions: Array.from(value.contributions.values())
-        .map((contribution) => ({
-          ...contribution,
+        .map((contribution): PnlCalendarContribution => ({
+          holdingId: contribution.holdingId,
+          holdingIds: contribution.holdingIds,
+          name: contribution.name,
+          symbol: contribution.symbol,
+          assetType: contribution.assetType,
+          market: contribution.market,
           pnl: roundResult(contribution.pnl),
           marketPnl: roundResult(contribution.marketPnl),
           tradePnl: roundResult(contribution.tradePnl),
           dividend: roundResult(contribution.dividend),
           fee: roundResult(contribution.fee),
           tax: roundResult(contribution.tax),
+          previousPrice:
+            contribution.previousPrice === undefined
+              ? undefined
+              : roundResult(contribution.previousPrice),
+          currentPrice:
+            contribution.currentPrice === undefined
+              ? undefined
+              : roundResult(contribution.currentPrice),
         }))
         .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl)),
     };

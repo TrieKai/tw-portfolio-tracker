@@ -71,19 +71,24 @@ function DayDetail({
           {day.contributions.map((contribution) => {
             const dividendEvents = transactions.filter(
               (transaction) =>
-                transaction.holdingId === contribution.holdingId &&
+                contribution.holdingIds.includes(transaction.holdingId) &&
                 transaction.type === "cash_dividend" &&
                 transaction.date === day.date
             );
             return (
               <article
-                key={contribution.holdingId}
+                key={`${contribution.assetType}:${contribution.market ?? ""}:${contribution.symbol}`}
                 className="rounded-xl border border-border p-4"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="truncate font-medium">{contribution.name}</h3>
-                    <p className="text-xs text-muted">{contribution.symbol}</p>
+                    <p className="text-xs text-muted">
+                      {contribution.symbol}
+                      {contribution.holdingIds.length > 1
+                        ? ` · ${contribution.holdingIds.length} 筆持倉合併`
+                        : ""}
+                    </p>
                   </div>
                   <p className={`shrink-0 font-semibold tabular-nums ${pnlClass(contribution.pnl)}`}>
                     {signedCurrency(contribution.pnl)}

@@ -52,6 +52,40 @@ describe("buildPnlCalendar", () => {
     });
   });
 
+  it("merges multiple holdings of the same asset into one daily detail", () => {
+    const storage = portfolioWithOneHolding();
+    storage.holdings.push({
+      ...storage.holdings[0],
+      id: "holding-2",
+      quantity: 20,
+    });
+    storage.priceHistory["holding-2"] = [
+      { date: "2026-06-09", price: 98, source: "api" },
+      { date: "2026-06-10", price: 106, source: "api" },
+    ];
+
+    const calendar = buildPnlCalendar(storage, {
+      month: "2026-06",
+      asOfDate: "2026-06-30",
+      filter: { kind: "investment" },
+    });
+    const contributions = calendar.days.find(
+      (item) => item.date === "2026-06-10"
+    )?.contributions;
+
+    expect(contributions).toHaveLength(1);
+    expect(contributions?.[0]).toMatchObject({
+      holdingIds: ["holding-1", "holding-2"],
+      name: "測試股票",
+      symbol: "2330",
+      assetType: "stock",
+      pnl: 210,
+      marketPnl: 210,
+      previousPrice: 98.666666666667,
+      currentPrice: 105.666666666667,
+    });
+  });
+
   it("attributes only the sell-day move and costs for a closed position", () => {
     const calendar = buildPnlCalendar(
       {
