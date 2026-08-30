@@ -3,7 +3,14 @@ import type {
   PortfolioStorage,
   StockMarket,
 } from "@/lib/types/holding";
-import { addDaysToIsoDate, parseIsoDate, toIsoDate } from "@/lib/date/iso-date";
+import {
+  addDaysToIsoDate,
+  endOfMonthIsoFromPrefix,
+  parseIsoDate,
+  startOfMonthIsoFromPrefix,
+  toIsoDate,
+} from "@/lib/date/iso-date";
+import { buildDailyInvestmentFinancingCosts } from "@/lib/loans/calculations";
 
 export type PnlCalendarFilter =
   | { kind: "investment" }
@@ -16,11 +23,15 @@ export interface PnlCalendarOptions {
   /** 查詢基準日，格式 YYYY-MM-DD；之後可用於判斷暫估與未來日期。 */
   asOfDate: string;
   filter: PnlCalendarFilter;
+  /** 僅 investment 篩選有效；保留 grossPnl 並扣除每日估算融資成本。 */
+  includeFinancingCosts?: boolean;
 }
 
 export interface PnlCalendarDay {
   date: string;
   pnl: number;
+  grossPnl?: number;
+  financingCost?: number;
   /** 百分比，例如 5 表示 5%。 */
   returnRate: number;
   pricedHoldingCount: number;
@@ -61,12 +72,16 @@ export interface PnlCalendarWeek {
   startDate: string;
   endDate: string;
   pnl: number;
+  grossPnl?: number;
+  financingCost?: number;
   returnRate: number;
   dataDayCount: number;
 }
 
 export interface PnlCalendarSummary {
   pnl: number;
+  grossPnl?: number;
+  financingCost?: number;
   returnRate: number;
   gainDayCount: number;
   lossDayCount: number;
@@ -500,9 +515,59 @@ export function buildPnlCalendar(
             contributions: [],
           }))
       : [];
-  const days = [...computedDays, ...persistedDays].sort((a, b) =>
+  const grossDays = [...computedDays, ...persistedDays].sort((a, b) =>
     a.date.localeCompare(b.date)
   );
+  let days = grossDays;
+  if (options.includeFinancingCosts && options.filter.kind === "investment") {
+    const rangeEnd =
+      options.asOfDate < endOfMonthIsoFromPrefix(options.month)
+        ? options.asOfDate
+        : endOfMonthIsoFromPrefix(options.month);
+    const costs = buildDailyInvestmentFinancingCosts(
+      storage.loans,
+      startOfMonthIsoFromPrefix(options.month),
+      rangeEnd
+    );
+    const byDate = new Map(grossDays.map((day) => [day.date, day]));
+    for (const [date, financingCost] of Object.entries(costs)) {
+      const gross = byDate.get(date);
+      if (gross) {
+        const baseValue =
+          gross.returnRate !== 0
+            ? gross.pnl / (gross.returnRate / 100)
+            : 0;
+        byDate.set(date, {
+          ...gross,
+          grossPnl: gross.pnl,
+          financingCost,
+          pnl: roundResult(gross.pnl - financingCost),
+          returnRate:
+            baseValue > 0
+              ? roundResult(((gross.pnl - financingCost) / baseValue) * 100)
+              : 0,
+          quality: "estimated",
+        });
+      } else {
+        byDate.set(date, {
+          date,
+          pnl: roundResult(-financingCost),
+          grossPnl: 0,
+          financingCost,
+          returnRate: 0,
+          pricedHoldingCount: 0,
+          totalHoldingCount: 0,
+          coverageRate: 0,
+          quality: "estimated",
+          isProvisional: date === options.asOfDate,
+          contributions: [],
+        });
+      }
+    }
+    days = Array.from(byDate.values()).sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
+  }
 
   const weekDays = new Map<string, PnlCalendarDay[]>();
   for (const day of days) {
@@ -513,12 +578,24 @@ export function buildPnlCalendar(
     startDate,
     endDate: addDaysToIsoDate(startDate, 4),
     pnl: roundResult(entries.reduce((sum, day) => sum + day.pnl, 0)),
+    grossPnl: roundResult(
+      entries.reduce((sum, day) => sum + (day.grossPnl ?? day.pnl), 0)
+    ),
+    financingCost: roundResult(
+      entries.reduce((sum, day) => sum + (day.financingCost ?? 0), 0)
+    ),
     returnRate: compoundReturn(entries),
     dataDayCount: entries.length,
   })).sort((a, b) => a.startDate.localeCompare(b.startDate));
 
   const summary: PnlCalendarSummary = {
     pnl: roundResult(days.reduce((sum, day) => sum + day.pnl, 0)),
+    grossPnl: roundResult(
+      days.reduce((sum, day) => sum + (day.grossPnl ?? day.pnl), 0)
+    ),
+    financingCost: roundResult(
+      days.reduce((sum, day) => sum + (day.financingCost ?? 0), 0)
+    ),
     returnRate: compoundReturn(days),
     gainDayCount: days.filter((day) => day.pnl > 0).length,
     lossDayCount: days.filter((day) => day.pnl < 0).length,

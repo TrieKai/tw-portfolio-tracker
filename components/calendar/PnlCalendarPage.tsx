@@ -299,6 +299,7 @@ export function PnlCalendarPage() {
   const today = todayIsoDate();
   const [month, setMonth] = useState(currentMonth);
   const [filterValue, setFilterValue] = useState("investment");
+  const [performanceView, setPerformanceView] = useState<"gross" | "net">("gross");
   const [selection, setSelection] = useState<PnlDetailSelection | null>(null);
   const [dividendOpen, setDividendOpen] = useState(false);
   const autoLoadedRef = useRef(new Set<string>());
@@ -328,8 +329,15 @@ export function PnlCalendarPage() {
   }, [investmentHoldings, storage.transactions]);
   const filter = useMemo(() => filterFromValue(filterValue), [filterValue]);
   const calendar = useMemo(
-    () => buildPnlCalendar(storage, { month, asOfDate: today, filter }),
-    [storage, month, today, filter]
+    () =>
+      buildPnlCalendar(storage, {
+        month,
+        asOfDate: today,
+        filter,
+        includeFinancingCosts:
+          performanceView === "net" && filter.kind === "investment",
+      }),
+    [storage, month, today, filter, performanceView]
   );
   const rows = useMemo(() => buildTradingCalendarGrid(month), [month]);
   const hasSelectedMonthPrices = useMemo(
@@ -348,8 +356,15 @@ export function PnlCalendarPage() {
       const weekStart = weekStartForDate(transaction.date);
       counts.set(weekStart, (counts.get(weekStart) ?? 0) + 1);
     }
+    for (const day of calendar.days) {
+      if (!day.financingCost || day.financingCost <= 0) continue;
+      const date = parseIsoDate(day.date);
+      if (!date || (date.getDay() !== 0 && date.getDay() !== 6)) continue;
+      const weekStart = weekStartForDate(day.date);
+      counts.set(weekStart, (counts.get(weekStart) ?? 0) + 1);
+    }
     return counts;
-  }, [storage.transactions, month]);
+  }, [calendar.days, storage.transactions, month]);
 
   useEffect(() => {
     if (!ready || month !== currentMonth || hasSelectedMonthPrices) return;
@@ -398,7 +413,7 @@ export function PnlCalendarPage() {
     <div className="space-y-6">
       <PageHeader
         title="損益日曆"
-        description="排除買賣本金，追蹤股票與基金的每日投資表現"
+        description="保留資產本身的投資損益，也可切換查看扣除融資成本後的結果"
         action={
           <div className="flex w-full gap-2 sm:w-auto">
             <button
@@ -483,6 +498,13 @@ export function PnlCalendarPage() {
           </div>
         </div>
 
+        {filter.kind === "investment" ? (
+          <div className="grid grid-cols-2 gap-2 sm:w-80">
+            <button type="button" onClick={() => setPerformanceView("gross")} className={performanceView === "gross" ? "btn-primary" : "btn-secondary"}>投資損益</button>
+            <button type="button" onClick={() => setPerformanceView("net")} className={performanceView === "net" ? "btn-primary" : "btn-secondary"}>扣息後</button>
+          </div>
+        ) : null}
+
         {isEstimatedMonth ? (
           <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
             這個月份早於完整追蹤起點，數字僅依目前仍可重建的持倉估算；已結清舊部位不會捏造日損益。
@@ -493,19 +515,21 @@ export function PnlCalendarPage() {
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <SummaryCard
-          label="本月損益"
+          label={performanceView === "net" && filter.kind === "investment" ? "本月扣息後淨損益" : "本月投資損益"}
           value={signedCurrency(calendar.summary.pnl)}
           className={pnlClass(calendar.summary.pnl)}
+          description={performanceView === "net" ? `投資損益 ${signedCurrency(calendar.summary.grossPnl ?? calendar.summary.pnl)}` : undefined}
         />
         <SummaryCard
-          label="複利報酬率"
+          label={performanceView === "net" ? "估算淨報酬率" : "複利報酬率"}
           value={`${calendar.summary.returnRate > 0 ? "+" : ""}${calendar.summary.returnRate.toFixed(2)}%`}
           className={pnlClass(calendar.summary.returnRate)}
         />
         <SummaryCard
-          label="獲利／虧損日"
-          value={`${calendar.summary.gainDayCount}／${calendar.summary.lossDayCount}`}
-          description={`共 ${calendar.summary.dataDayCount} 個估值日`}
+          label={performanceView === "net" ? "本月融資成本" : "獲利／虧損日"}
+          value={performanceView === "net" ? `−${formatCurrency(calendar.summary.financingCost ?? 0)}` : `${calendar.summary.gainDayCount}／${calendar.summary.lossDayCount}`}
+          className={performanceView === "net" ? "text-loss" : ""}
+          description={performanceView === "net" ? "每日按本金與年利率估算" : `共 ${calendar.summary.dataDayCount} 個估值日`}
         />
         <SummaryCard
           label="資料完整度"
@@ -542,7 +566,7 @@ export function PnlCalendarPage() {
       )}
 
       <p className="text-xs leading-5 text-muted">
-        已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」代表舊資料回算，比例標籤代表只有部分資產更新。無新價格的日期顯示 —。
+        已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」包含舊資料回算或融資成本估算，比例標籤代表只有部分資產更新。非交易日的利息會計入週與月合計。
       </p>
 
       {selection ? (

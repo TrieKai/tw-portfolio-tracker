@@ -8,6 +8,7 @@ const TABS = [
   { href: "/holdings", label: "持倉", match: (p: string) => p === "/holdings" },
   { href: "/holdings/new", label: "新增", match: (p: string) => p === "/holdings/new" },
   { href: "/calendar", label: "日曆", match: (p: string) => p.startsWith("/calendar") },
+  { href: "/loans", label: "貸款", match: (p: string) => p.startsWith("/loans") },
   { href: "/trends", label: "趨勢", match: (p: string) => p.startsWith("/trends") },
 ] as const;
 

@@ -19,6 +19,8 @@ function portfolioWithOneHolding(): PortfolioStorage {
         updatedAt: "2026-06-01T00:00:00.000Z",
       },
     ],
+    loans: [],
+    loanRevisions: [],
     priceHistory: {
       "holding-1": [
         { date: "2026-06-09", price: 100, source: "api" },
@@ -35,6 +37,36 @@ function portfolioWithOneHolding(): PortfolioStorage {
 }
 
 describe("buildPnlCalendar", () => {
+  it("keeps gross pnl and subtracts investment financing costs on request", () => {
+    const storage = portfolioWithOneHolding();
+    storage.loans.push({
+      id: "loan-1",
+      name: "投資信貸",
+      loanType: "personal_credit",
+      purpose: "investment",
+      investmentUsePercent: 100,
+      openingBalance: 1_000_000,
+      trackingStartDate: "2026-06-01",
+      annualInterestRate: 3.65,
+      rateType: "fixed",
+      repaymentMethod: "revolving",
+      status: "active",
+      dataQuality: "complete",
+      createdAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    });
+
+    const calendar = buildPnlCalendar(storage, {
+      month: "2026-06",
+      asOfDate: "2026-06-10",
+      filter: { kind: "investment" },
+      includeFinancingCosts: true,
+    });
+
+    expect(calendar.summary.grossPnl).toBe(50);
+    expect(calendar.summary.financingCost).toBeCloseTo(900, 6);
+    expect(calendar.summary.pnl).toBeCloseTo(-850, 6);
+  });
   it("calculates a held position's close-to-close daily return", () => {
     const calendar = buildPnlCalendar(portfolioWithOneHolding(), {
       month: "2026-06",
@@ -91,6 +123,8 @@ describe("buildPnlCalendar", () => {
       {
         version: 2,
         holdings: [],
+        loans: [],
+        loanRevisions: [],
         priceHistory: {
           "holding-1": [
             { date: "2026-08-18", price: 108, source: "api" },

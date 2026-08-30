@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   formatCurrency,
   formatPercent,
@@ -17,7 +18,7 @@ interface ExposurePanelProps {
   exposure: PortfolioExposureSummary;
   settings: PortfolioSettings;
   onSaveSettings: (
-    patch: Pick<PortfolioSettings, "netAssets" | "liabilities">
+    patch: Pick<PortfolioSettings, "netAssets">
   ) => void;
   view?: DashboardCardView;
   readOnly?: boolean;
@@ -33,9 +34,6 @@ export function ExposurePanel({
   const [netAssetsInput, setNetAssetsInput] = useState(
     settings.netAssets !== undefined ? String(settings.netAssets) : ""
   );
-  const [liabilitiesInput, setLiabilitiesInput] = useState(
-    settings.liabilities !== undefined ? String(settings.liabilities) : ""
-  );
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
@@ -43,15 +41,12 @@ export function ExposurePanel({
       setNetAssetsInput(
         settings.netAssets !== undefined ? String(settings.netAssets) : ""
       );
-      setLiabilitiesInput(
-        settings.liabilities !== undefined ? String(settings.liabilities) : ""
-      );
     }
-  }, [settings.netAssets, settings.liabilities, editing]);
+  }, [settings.netAssets, editing]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    const patch: Pick<PortfolioSettings, "netAssets" | "liabilities"> = {};
+    const patch: Pick<PortfolioSettings, "netAssets"> = {};
 
     const netRaw = netAssetsInput.trim();
     if (netRaw === "") {
@@ -60,15 +55,6 @@ export function ExposurePanel({
       const n = Number.parseFloat(netRaw.replace(/,/g, ""));
       if (!Number.isFinite(n) || n < 0) return;
       patch.netAssets = n;
-    }
-
-    const liabRaw = liabilitiesInput.trim();
-    if (liabRaw === "") {
-      patch.liabilities = undefined;
-    } else {
-      const n = Number.parseFloat(liabRaw.replace(/,/g, ""));
-      if (!Number.isFinite(n) || n < 0) return;
-      patch.liabilities = n;
     }
 
     onSaveSettings(patch);
@@ -111,9 +97,12 @@ export function ExposurePanel({
           className="glass-card space-y-4 p-4 sm:p-5"
         >
           <p className="text-sm text-muted">
-            房貸請在「房子」持倉填寫；此處僅填投資用信貸（質押、融資等）。
-            例：自有 200 萬、投資信貸 100 萬、持倉市值 300 萬 → 可填淨資產
-            200 萬，或僅填投資負債 100 萬。
+            貸款本金會依用途自動納入曝險。若你要直接指定自有資金，可在此覆蓋系統推算值；
+            房貸、信貸與其他借款請到
+            <Link href="/loans" className="mx-1 text-accent hover:underline">
+              貸款頁
+            </Link>
+            管理。
           </p>
           <div className="exposure-form-grid grid gap-4">
             <label className="block text-sm">
@@ -125,17 +114,6 @@ export function ExposurePanel({
                 placeholder="留空則由市值 − 房貸 − 投資負債推算"
                 value={netAssetsInput}
                 onChange={(e) => setNetAssetsInput(e.target.value)}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-muted">投資負債（元，不含房貸）</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                className="input-field mt-1 w-full"
-                placeholder="信貸、質押等"
-                value={liabilitiesInput}
-                onChange={(e) => setLiabilitiesInput(e.target.value)}
               />
             </label>
           </div>

@@ -5,6 +5,8 @@
  * 價格歷史（PricePoint）以 holdingId 為 key 儲存於本地端。
  */
 
+import type { Loan, LoanRevision } from "@/lib/types/loan";
+
 /** 資產大類：台股 / 境內基金 / 房子 */
 export type AssetType = "stock" | "fund" | "property";
 
@@ -231,6 +233,9 @@ export interface CashDividendInput {
 export interface PortfolioStorage {
   version: 2;
   holdings: Holding[];
+  /** 每筆貸款獨立保存；本金與利息不可再合併成單一負債欄位。 */
+  loans: Loan[];
+  loanRevisions: LoanRevision[];
   priceHistory: PriceHistoryMap;
   /** 賣出紀錄（依 createdAt 追加；展示時依 sellDate 排序） */
   sales: SaleTransaction[];
@@ -258,7 +263,7 @@ export interface PortfolioSettings {
    * 用於曝險比例 = 總曝險 ÷ 淨資產；未設定時以「持倉市值 − liabilities」推算
    */
   netAssets?: number;
-  /** 投資負債（信貸、質押等，元；不含房貸） */
+  /** @deprecated 僅供舊資料遷移；新資料使用 PortfolioStorage.loans。 */
   liabilities?: number;
   /** 再平衡導航使用的資產類型目標百分比。 */
   allocationTargets?: AssetAllocationTargets;

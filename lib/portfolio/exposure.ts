@@ -3,17 +3,20 @@
  * ----------------------------------------
  * 曝險金額 = 部位市值 × 槓桿倍數
  * 曝險比例 = 實際總曝險部位 ÷ 淨資產 × 100%
- * 淨資產（未直接指定時）= 持倉市值 − 房貸餘額 − 投資負債
+ * 淨資產（未直接指定時）= 持倉市值 − 房貸本金 − 投資用途貸款本金
  */
 
 import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
 import { resolveLeverage } from "@/lib/portfolio/leverage";
+import { calculateLoanSnapshot } from "@/lib/loans/calculations";
+import { todayIsoDate } from "@/lib/date/iso-date";
 import type {
   AssetType,
   Holding,
   HoldingWithMetrics,
   PortfolioSettings,
 } from "@/lib/types/holding";
+import type { Loan } from "@/lib/types/loan";
 
 export interface HoldingExposureRow {
   groupKey: string;
@@ -38,33 +41,36 @@ export interface PortfolioExposureSummary {
   netAssets: number;
   /** 曝險比例（%）；淨資產為 0 時為 null */
   exposureRatioPct: number | null;
-  /** 投資負債（settings.liabilities） */
+  /** 投資用途貸款本金。 */
   investmentLiabilities: number;
   /** 各房產房貸餘額加總 */
   propertyMortgages: number;
-  /** 總負債 = 投資負債 + 房貸 */
+  /** 所有貸款本金，包含不影響投資組合的個人用途貸款。 */
   totalLiabilities: number;
+  personalLiabilities: number;
   /** 是否使用 settings.netAssets 直接指定 */
   usesNetAssetsOverride: boolean;
   rows: HoldingExposureRow[];
 }
 
-/** 加總各房產的房貸餘額 */
+/** 加總指定日期仍未清償的房貸本金。 */
 export function sumPropertyMortgages(
-  holdings: Pick<Holding, "assetType" | "mortgageBalance">[]
+  loans: Loan[],
+  asOfDate: string = todayIsoDate()
 ): number {
-  return holdings.reduce((sum, h) => {
-    if (h.assetType !== "property") return sum;
-    const balance = h.mortgageBalance ?? 0;
-    return balance > 0 ? sum + balance : sum;
+  return loans.reduce((sum, loan) => {
+    if (loan.purpose !== "property") return sum;
+    return sum + calculateLoanSnapshot(loan, asOfDate).currentPrincipal;
   }, 0);
 }
 
-/** 解析淨資產：優先 netAssets，否則 持倉市值 − 房貸 − 投資負債 */
+/** 解析投資組合淨資產；個人消費用途負債不混入投資曝險分母。 */
 export function resolveNetAssets(
   totalMarketValue: number,
-  settings: Pick<PortfolioSettings, "netAssets" | "liabilities">,
-  propertyMortgages = 0
+  settings: Pick<PortfolioSettings, "netAssets">,
+  investmentLiabilities = 0,
+  propertyMortgages = 0,
+  totalLiabilities = investmentLiabilities + propertyMortgages
 ): {
   netAssets: number;
   usesOverride: boolean;
@@ -72,9 +78,6 @@ export function resolveNetAssets(
   propertyMortgages: number;
   totalLiabilities: number;
 } {
-  const investmentLiabilities = settings.liabilities ?? 0;
-  const totalLiabilities = investmentLiabilities + propertyMortgages;
-
   if (settings.netAssets !== undefined && settings.netAssets >= 0) {
     return {
       netAssets: settings.netAssets,
@@ -86,7 +89,10 @@ export function resolveNetAssets(
   }
 
   return {
-    netAssets: Math.max(0, totalMarketValue - totalLiabilities),
+    netAssets: Math.max(
+      0,
+      totalMarketValue - investmentLiabilities - propertyMortgages
+    ),
     usesOverride: false,
     investmentLiabilities,
     propertyMortgages,
@@ -96,10 +102,21 @@ export function resolveNetAssets(
 
 export function computePortfolioExposure(
   holdings: HoldingWithMetrics[],
-  settings: Pick<PortfolioSettings, "netAssets" | "liabilities"> = {}
+  settings: Pick<PortfolioSettings, "netAssets"> = {},
+  loans: Loan[] = [],
+  asOfDate: string = todayIsoDate()
 ): PortfolioExposureSummary {
   const groups = groupHoldingsWithMetrics(holdings);
-  const propertyMortgages = sumPropertyMortgages(holdings);
+  const loanSnapshots = loans.map((loan) => calculateLoanSnapshot(loan, asOfDate));
+  const propertyMortgages = sumPropertyMortgages(loans, asOfDate);
+  const totalLiabilities = loanSnapshots.reduce(
+    (sum, snapshot) => sum + snapshot.currentPrincipal,
+    0
+  );
+  const investmentLiabilities = loanSnapshots.reduce((sum, snapshot) => {
+    const share = Math.min(100, Math.max(0, snapshot.loan.investmentUsePercent)) / 100;
+    return sum + snapshot.currentPrincipal * share;
+  }, 0);
   const rows: HoldingExposureRow[] = [];
   let totalMarketValue = 0;
   let totalExposure = 0;
@@ -110,9 +127,18 @@ export function computePortfolioExposure(
     totalMarketValue += g.marketValue;
     totalExposure += exposureAmount;
 
+    const holdingIds = new Set(g.lots.map((lot) => lot.id));
     const mortgageBalance =
       g.assetType === "property"
-        ? g.lots[0]?.mortgageBalance
+        ? loanSnapshots.reduce(
+            (sum, snapshot) =>
+              snapshot.loan.purpose === "property" &&
+              snapshot.loan.linkedHoldingId &&
+              holdingIds.has(snapshot.loan.linkedHoldingId)
+                ? sum + snapshot.currentPrincipal
+                : sum,
+            0
+          )
         : undefined;
 
     rows.push({
@@ -143,7 +169,9 @@ export function computePortfolioExposure(
   const resolved = resolveNetAssets(
     totalMarketValue,
     settings,
-    propertyMortgages
+    investmentLiabilities,
+    propertyMortgages,
+    totalLiabilities
   );
 
   const exposureRatioPct =
@@ -157,6 +185,10 @@ export function computePortfolioExposure(
     investmentLiabilities: resolved.investmentLiabilities,
     propertyMortgages: resolved.propertyMortgages,
     totalLiabilities: resolved.totalLiabilities,
+    personalLiabilities: Math.max(
+      0,
+      totalLiabilities - investmentLiabilities - propertyMortgages
+    ),
     usesNetAssetsOverride: resolved.usesOverride,
     rows,
   };

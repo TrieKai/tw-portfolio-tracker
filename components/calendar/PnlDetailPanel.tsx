@@ -63,12 +63,19 @@ function DayDetail({
               {signedRate(day.returnRate)}
             </p>
           </div>
+          {day.financingCost && day.financingCost > 0 ? (
+            <p className="mt-2 text-xs text-muted">
+              投資損益 {signedCurrency(day.grossPnl ?? day.pnl)} · 融資成本 −{formatCurrency(day.financingCost)}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
       {day.contributions.length === 0 ? (
         <p className="rounded-xl border border-border p-4 text-sm text-muted">
-          這一天只有已保存的總額，逐資產明細已超過保存期限。
+          {day.financingCost && day.financingCost > 0
+            ? `這一天只有估算融資成本 −${formatCurrency(day.financingCost)}。`
+            : "這一天只有已保存的總額，逐資產明細已超過保存期限。"}
         </p>
       ) : (
         <div className="space-y-3">
@@ -182,6 +189,11 @@ export function PnlWeekDetail({
           </div>
         </div>
         <p className="mt-2 text-xs text-muted">{week.dataDayCount} 個損益日</p>
+        {week.financingCost && week.financingCost > 0 ? (
+          <p className="mt-1 text-xs text-muted">
+            投資損益 {signedCurrency(week.grossPnl ?? week.pnl)} · 融資成本 −{formatCurrency(week.financingCost)}
+          </p>
+        ) : null}
       </div>
 
       <div className="space-y-2">

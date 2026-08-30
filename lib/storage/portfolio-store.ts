@@ -115,7 +115,7 @@ export function addHolding(
 ): PortfolioStorage {
   const now = new Date().toISOString();
   const id = newId();
-  const { fee = 0, ...holdingInput } = input;
+  const { fee = 0, mortgageBalance, ...holdingInput } = input;
   const holding: Holding = {
     id,
     ...holdingInput,
@@ -130,7 +130,34 @@ export function addHolding(
     holdings: [...state.holdings, holding],
   };
 
-  if (holding.assetType === "property") return next;
+  if (holding.assetType === "property") {
+    if (mortgageBalance !== undefined && mortgageBalance > 0) {
+      return {
+        ...next,
+        loans: [
+          ...state.loans,
+          {
+            id: newId(),
+            name: `${holding.name} 房貸`,
+            loanType: "mortgage",
+            purpose: "property",
+            investmentUsePercent: 0,
+            linkedHoldingId: holding.id,
+            openingBalance: mortgageBalance,
+            trackingStartDate: now.slice(0, 10),
+            annualInterestRate: 0,
+            rateType: "floating",
+            repaymentMethod: "equal_payment",
+            status: "active",
+            dataQuality: "incomplete",
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      };
+    }
+    return next;
+  }
 
   return {
     ...next,
@@ -200,14 +227,6 @@ export function editHolding(
     quantity: input.quantity,
     buyDate: input.buyDate,
     lastError: undefined,
-    ...(input.assetType === "property"
-      ? {
-          mortgageBalance:
-            input.mortgageBalance !== undefined && input.mortgageBalance > 0
-              ? input.mortgageBalance
-              : undefined,
-        }
-      : {}),
   });
 
   if (input.assetType === "property") return next;

@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { useSession } from "next-auth/react";
+import { todayIsoDate } from "@/lib/date/iso-date";
 import { CloudUploadPromptModal } from "@/components/auth/CloudUploadPromptModal";
 import {
   isUploadPromptDismissed,
@@ -44,6 +45,7 @@ import {
   computePortfolioExposure,
   type PortfolioExposureSummary,
 } from "@/lib/portfolio/exposure";
+import { calculatePortfolioLoanSummary } from "@/lib/loans/calculations";
 import {
   buildPortfolioPnlBreakdowns,
   type PortfolioPnlBreakdowns,
@@ -71,6 +73,11 @@ import {
   updateHolding,
   updateSettings,
 } from "@/lib/storage/portfolio-store";
+import {
+  addLoan as addLoanToStorage,
+  editLoan as editLoanInStorage,
+  setLoanStatus as setLoanStatusInStorage,
+} from "@/lib/storage/loan-store";
 import type {
   CreateHoldingInput,
   AssetAllocationTargets,
@@ -85,6 +92,13 @@ import type {
   SaleTransaction,
   SellHoldingInput,
 } from "@/lib/types/holding";
+import type {
+  CreateLoanInput,
+  EditLoanInput,
+  Loan,
+  LoanStatus,
+  PortfolioLoanSummary,
+} from "@/lib/types/loan";
 import type {
   UiPreferences,
   UiTheme,
@@ -129,6 +143,8 @@ interface PortfolioContextValue {
   syncStatus: SyncStatus;
   syncMessage: string | null;
   holdings: HoldingWithMetrics[];
+  loans: Loan[];
+  loanSummary: PortfolioLoanSummary;
   sales: SaleTransaction[];
   summary: PortfolioSummary;
   exposure: PortfolioExposureSummary;
@@ -147,6 +163,13 @@ interface PortfolioContextValue {
   sell: (input: SellHoldingInput | SellHoldingInput[]) => void;
   addDividend: (input: CashDividendInput) => void;
   remove: (id: string) => void;
+  addLoan: (input: CreateLoanInput) => string | null;
+  editLoan: (input: EditLoanInput) => void;
+  setLoanStatus: (
+    id: string,
+    status: LoanStatus,
+    effectiveDate: string
+  ) => void;
   setManualPrice: (id: string, price: number, priceDate: string) => void;
   updateOne: (id: string) => Promise<boolean>;
   updateAll: () => Promise<void>;
@@ -172,7 +195,7 @@ interface PortfolioContextValue {
   ) => Promise<{ ok: boolean; count?: number; error?: string }>;
   setAutoUpdate: (enabled: boolean) => void;
   setExposureSettings: (
-    patch: Pick<PortfolioSettings, "netAssets" | "liabilities">
+    patch: Pick<PortfolioSettings, "netAssets">
   ) => void;
   setAllocationTargets: (targets: AssetAllocationTargets) => void;
   setThemePreference: (theme: UiTheme) => void;
@@ -393,9 +416,34 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [holdings, storage?.sales, storage?.holdings, storage?.priceHistory]
   );
 
+  const loans = storage?.loans ?? [];
+  const grossInvestmentPnl = useMemo(
+    () =>
+      holdings
+        .filter((holding) => holding.assetType !== "property")
+        .reduce((sum, holding) => sum + holding.pnl, 0) +
+      sales
+        .filter((sale) => sale.assetType !== "property")
+        .reduce((sum, sale) => sum + sale.realizedPnl, 0),
+    [holdings, sales]
+  );
+  const loanSummary = useMemo(
+    () =>
+      calculatePortfolioLoanSummary(loans, {
+        asOfDate: todayIsoDate(),
+        grossInvestmentPnl,
+      }),
+    [grossInvestmentPnl, loans]
+  );
+
   const exposure = useMemo(
-    () => computePortfolioExposure(holdings, storage?.settings ?? {}),
-    [holdings, storage?.settings]
+    () =>
+      computePortfolioExposure(
+        holdings,
+        { netAssets: storage?.settings.netAssets },
+        loans
+      ),
+    [holdings, loans, storage?.settings.netAssets]
   );
 
   const pnlBreakdowns = useMemo(
@@ -474,6 +522,33 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     (id: string) => {
       if (!storage) return;
       persist(removeHolding(storage, id));
+    },
+    [storage, persist]
+  );
+
+  const addLoan = useCallback(
+    (input: CreateLoanInput): string | null => {
+      if (!storage) return null;
+      const next = addLoanToStorage(storage, input);
+      const created = next.loans[next.loans.length - 1];
+      persist(next);
+      return created?.id ?? null;
+    },
+    [storage, persist]
+  );
+
+  const editLoan = useCallback(
+    (input: EditLoanInput) => {
+      if (!storage) return;
+      persist(editLoanInStorage(storage, input));
+    },
+    [storage, persist]
+  );
+
+  const setLoanStatus = useCallback(
+    (id: string, status: LoanStatus, effectiveDate: string) => {
+      if (!storage) return;
+      persist(setLoanStatusInStorage(storage, id, status, effectiveDate));
     },
     [storage, persist]
   );
@@ -672,7 +747,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setExposureSettings = useCallback(
-    (patch: Pick<PortfolioSettings, "netAssets" | "liabilities">) => {
+    (patch: Pick<PortfolioSettings, "netAssets">) => {
       if (!storage) return;
       persist(updateSettings(storage, patch));
     },
@@ -925,6 +1000,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       syncStatus,
       syncMessage,
       holdings,
+      loans,
+      loanSummary,
       sales,
       summary,
       exposure,
@@ -943,6 +1020,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       sell,
       addDividend,
       remove,
+      addLoan,
+      editLoan,
+      setLoanStatus,
       setManualPrice,
       updateOne,
       updateAll,
@@ -968,6 +1048,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       syncStatus,
       syncMessage,
       holdings,
+      loans,
+      loanSummary,
       sales,
       summary,
       exposure,
@@ -982,6 +1064,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       sell,
       addDividend,
       remove,
+      addLoan,
+      editLoan,
+      setLoanStatus,
       setManualPrice,
       updateOne,
       updateAll,

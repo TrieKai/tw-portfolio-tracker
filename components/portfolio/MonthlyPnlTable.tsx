@@ -1,9 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { endDateForMonthPrefix, todayIsoDate } from "@/lib/date/iso-date";
+import {
+  addDaysToIsoDate,
+  endDateForMonthPrefix,
+  startOfMonthIsoFromPrefix,
+  todayIsoDate,
+} from "@/lib/date/iso-date";
 import { formatCurrency } from "@/lib/portfolio/calculations";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
+import { estimateInvestmentFinancingCostForPeriod } from "@/lib/loans/calculations";
 import {
   buildMonthlyPnlRows,
   hasMonthlyPnlBeforeYtd,
@@ -18,6 +24,8 @@ import type {
 
 interface CalendarMonthlyPnlRow extends MonthlyPnlRow {
   investmentPnl: number;
+  financingCost: number;
+  netPnl: number;
   returnRate: number;
   dataDayCount: number;
   completeDayCount: number;
@@ -50,14 +58,9 @@ function MonthlyPnlRowMobile({ row }: { row: CalendarMonthlyPnlRow }) {
           </p>
         </div>
         <div className="text-right">
-          <PnlCell value={row.investmentPnl} />
-          <p
-            className={`text-xs tabular-nums ${
-              row.returnRate >= 0 ? "text-gain" : "text-loss"
-            }`}
-          >
-            {row.returnRate > 0 ? "+" : ""}
-            {row.returnRate.toFixed(2)}%
+          <PnlCell value={row.netPnl} />
+          <p className="text-xs tabular-nums text-muted">
+            投資 {formatCurrency(row.investmentPnl)} · 利息 −{formatCurrency(row.financingCost)}
           </p>
         </div>
       </div>
@@ -101,9 +104,20 @@ export function MonthlyPnlTable({
             : endDateForMonthPrefix(row.monthPrefix),
         filter: { kind: "investment" },
       });
+      const periodEnd =
+        row.monthPrefix === effectiveAsOfDate.slice(0, 7)
+          ? effectiveAsOfDate
+          : endDateForMonthPrefix(row.monthPrefix);
+      const financingCost = estimateInvestmentFinancingCostForPeriod(
+        storage.loans,
+        addDaysToIsoDate(startOfMonthIsoFromPrefix(row.monthPrefix), -1),
+        periodEnd
+      );
       return {
         ...row,
         investmentPnl: calendar.summary.pnl,
+        financingCost,
+        netPnl: calendar.summary.pnl - financingCost,
         returnRate: calendar.summary.returnRate,
         dataDayCount: calendar.summary.dataDayCount,
         completeDayCount: calendar.summary.completeDayCount,
@@ -121,7 +135,7 @@ export function MonthlyPnlTable({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
-        依每日估值變動、買賣價差、股利及費稅彙總；買賣本金與減資退現金不列為投資損益。
+        投資損益依每日估值、買賣價差、股利及費稅彙總；扣息後淨損益再扣除投資用途貸款的估算利息與費用。本金還款不列為損益。
       </p>
 
       {rows.length === 0 ? (
@@ -141,12 +155,14 @@ export function MonthlyPnlTable({
           </ul>
 
           <div className="glass-card hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[480px] text-left text-sm">
+            <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-muted">
                   <th className="px-4 py-3">月份</th>
                   <th className="px-4 py-3">投資損益</th>
-                  <th className="px-4 py-3">報酬率</th>
+                  <th className="px-4 py-3">融資成本</th>
+                  <th className="px-4 py-3">扣息後淨損益</th>
+                  <th className="px-4 py-3">投資報酬率</th>
                   <th className="px-4 py-3">資料品質</th>
                 </tr>
               </thead>
@@ -159,6 +175,12 @@ export function MonthlyPnlTable({
                     <td className="px-4 py-3 font-medium">{row.monthLabel}</td>
                     <td className="px-4 py-3">
                       <PnlCell value={row.investmentPnl} />
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-loss">
+                      {row.financingCost > 0 ? `−${formatCurrency(row.financingCost)}` : formatCurrency(0)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <PnlCell value={row.netPnl} />
                     </td>
                     <td className="px-4 py-3">
                       <span

@@ -25,7 +25,7 @@ export function buildExportFile(
 
 export function describePortfolioStorage(state: PortfolioStorage): string {
   const historyKeys = Object.keys(state.priceHistory).length;
-  return `${state.holdings.length} 筆持倉、${state.sales.length} 筆賣出紀錄、${historyKeys} 組價格歷史`;
+  return `${state.holdings.length} 筆持倉、${state.loans.length} 筆貸款、${state.sales.length} 筆賣出紀錄、${historyKeys} 組價格歷史`;
 }
 
 /** 從匯出檔或裸 PortfolioStorage JSON 解析 */
@@ -72,6 +72,18 @@ export function mergePortfolioStorage(
     saleMap.set(s.id, s);
   }
 
+  const loanMap = new Map(current.loans.map((loan) => [loan.id, loan]));
+  for (const loan of incoming.loans) {
+    loanMap.set(loan.id, loan);
+  }
+
+  const loanRevisionMap = new Map(
+    current.loanRevisions.map((revision) => [revision.id, revision])
+  );
+  for (const revision of incoming.loanRevisions) {
+    loanRevisionMap.set(revision.id, revision);
+  }
+
   const corporateActionMap = new Map(
     current.corporateActions.map((action) => [action.id, action])
   );
@@ -102,6 +114,8 @@ export function mergePortfolioStorage(
   return {
     version: 2,
     holdings: [...holdingMap.values()],
+    loans: [...loanMap.values()],
+    loanRevisions: [...loanRevisionMap.values()],
     sales: [...saleMap.values()],
     corporateActions: [...corporateActionMap.values()],
     transactions: [...transactionMap.values()],

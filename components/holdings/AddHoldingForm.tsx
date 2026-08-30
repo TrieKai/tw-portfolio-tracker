@@ -263,7 +263,7 @@ export function AddHoldingForm() {
               min="0"
               value={mortgageBalance}
               onChange={(e) => setMortgageBalance(e.target.value)}
-              placeholder="計算淨資產時扣除；請填全價估價"
+              placeholder="儲存後會建立一筆待補資料房貸"
               className="input-field"
             />
           </Field>
@@ -313,7 +313,7 @@ export function AddHoldingForm() {
 
       {isProperty && (
         <p className="text-center text-xs text-muted">
-          房子無法自動更新價格，請定期手動更新估價
+          房子無法自動更新價格；若填房貸餘額，請到貸款頁補上利率與期限
         </p>
       )}
     </form>

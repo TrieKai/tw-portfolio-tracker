@@ -12,6 +12,27 @@ import {
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 
 describe("portfolio transaction tracking", () => {
+  it("turns a property mortgage balance into a loan record", () => {
+    const next = addHolding(defaultPortfolioStorage(), {
+      assetType: "property",
+      name: "自住房",
+      symbol: "HOME",
+      buyPrice: 10_000_000,
+      quantity: 1,
+      buyDate: "2020-01-01",
+      mortgageBalance: 6_000_000,
+    });
+
+    expect(next.holdings[0].mortgageBalance).toBeUndefined();
+    expect(next.loans[0]).toMatchObject({
+      name: "自住房 房貸",
+      loanType: "mortgage",
+      purpose: "property",
+      openingBalance: 6_000_000,
+      linkedHoldingId: next.holdings[0].id,
+      dataQuality: "incomplete",
+    });
+  });
   it("records a new investment holding as a buy transaction", () => {
     const next = addHolding(defaultPortfolioStorage(), {
       assetType: "stock",

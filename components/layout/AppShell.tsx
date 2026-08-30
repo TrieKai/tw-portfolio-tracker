@@ -18,6 +18,7 @@ const NAV = [
   { href: "/holdings", label: "持倉" },
   { href: "/holdings/new", label: "新增" },
   { href: "/calendar", label: "日曆" },
+  { href: "/loans", label: "貸款" },
   { href: "/trends", label: "趨勢" },
 ] as const;
 

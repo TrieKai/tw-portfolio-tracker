@@ -5,6 +5,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AssetAllocationChart } from "@/components/dashboard/AssetAllocationChart";
 import { ExposurePanel } from "@/components/dashboard/ExposurePanel";
+import { LoanSummaryPanel } from "@/components/loans/LoanSummaryPanel";
 import { TimeTravelBar } from "@/components/dashboard/TimeTravelBar";
 import { PortfolioSummaryCards } from "@/components/dashboard/PortfolioSummary";
 import { PortfolioInsights } from "@/components/dashboard/PortfolioInsights";
@@ -28,6 +29,7 @@ import { computePortfolioExposure } from "@/lib/portfolio/exposure";
 import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
 import { buildPortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
+import { calculatePortfolioLoanSummary } from "@/lib/loans/calculations";
 import { computePortfolioHealth } from "@/lib/portfolio/health";
 import { computeInvestmentWeather } from "@/lib/portfolio/weather";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -43,7 +45,7 @@ import { usePortfolio } from "@/providers/PortfolioProvider";
 import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 
 export default function DashboardPage() {
-  const { ready, holdings, summary, exposure, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
+  const { ready, holdings, summary, exposure, loanSummary, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
   const { preferences } = useUiPreferences();
   const [travelDate, setTravelDate] = useState<string | null>(null);
   const currentPnlCalendar = useMemo(
@@ -70,22 +72,37 @@ export default function DashboardPage() {
     const history = trimPriceHistoryAtDate(storage.priceHistory, travelDate);
     const enriched = enrichHoldings(rawHoldings);
     const visibleSales = sales.filter((sale) => sale.sellDate <= travelDate);
+    const travelSummary = computePortfolioSummary(enriched, visibleSales, {
+      holdingsForTimeline: rawHoldings,
+      priceHistory: history,
+      asOfDate: travelDate,
+    });
+    const grossInvestmentPnl =
+      enriched
+        .filter((holding) => holding.assetType !== "property")
+        .reduce((sum, holding) => sum + holding.pnl, 0) +
+      visibleSales
+        .filter((sale) => sale.assetType !== "property")
+        .reduce((sum, sale) => sum + sale.realizedPnl, 0);
     return {
       rawHoldings,
       history,
       holdings: enriched,
       sales: visibleSales,
-      summary: computePortfolioSummary(enriched, visibleSales, {
-        holdingsForTimeline: rawHoldings,
-        priceHistory: history,
+      summary: travelSummary,
+      loanSummary: calculatePortfolioLoanSummary(storage.loans, {
         asOfDate: travelDate,
+        grossInvestmentPnl,
       }),
-      exposure: computePortfolioExposure(enriched, {
-        liabilities: storage.settings.liabilities,
-      }),
+      exposure: computePortfolioExposure(
+        enriched,
+        { netAssets: storage.settings.netAssets },
+        storage.loans,
+        travelDate
+      ),
       pnlBreakdowns: buildPortfolioPnlBreakdowns(enriched, history, travelDate),
     };
-  }, [sales, storage.holdings, storage.priceHistory, storage.settings.liabilities, travelDate]);
+  }, [sales, storage.holdings, storage.loans, storage.priceHistory, storage.settings.netAssets, travelDate]);
 
   if (!ready) {
     return <LoadingSpinner />;
@@ -98,6 +115,7 @@ export default function DashboardPage() {
   const shownSummary = travelState?.summary ?? summary;
   const shownExposure = travelState?.exposure ?? exposure;
   const shownBreakdowns = travelState?.pnlBreakdowns ?? pnlBreakdowns;
+  const shownLoanSummary = travelState?.loanSummary ?? loanSummary;
   const viewFor = (section: DashboardSectionId) =>
     preferences.dashboardLayout.find((item) => item.section === section)?.view ??
     "standard";
@@ -347,6 +365,10 @@ export default function DashboardPage() {
           </Link>
         }
       />
+
+      <div className="mt-6">
+        <LoanSummaryPanel summary={shownLoanSummary} />
+      </div>
 
       <div className="dashboard-grid">
         {preferences.dashboardLayout
