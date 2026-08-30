@@ -118,4 +118,71 @@ describe("loan calculations", () => {
     expect(snapshot.nextPayment?.paymentDate).toBe("2026-03-01");
     expect(snapshot.projectedInterest).toBeGreaterThan(0);
   });
+
+  it("preserves dated balance changes when estimating revolving interest", () => {
+    const revolving = loan({
+      repaymentMethod: "revolving",
+      remainingTermMonths: undefined,
+      balanceHistory: [
+        {
+          effectiveDate: "2026-01-16",
+          balance: 60_000,
+          recordedAt: "2026-01-16T00:00:00.000Z",
+        },
+      ],
+    });
+    const snapshot = calculateLoanSnapshot(revolving, "2026-01-31");
+    const cost = estimateInvestmentFinancingCostForPeriod(
+      [revolving],
+      "2025-12-31",
+      "2026-01-31"
+    );
+
+    expect(snapshot.currentPrincipal).toBe(60_000);
+    expect(cost).toBeCloseTo(
+      (120_000 * 0.06 * 15) / 365 + (60_000 * 0.06 * 15) / 365,
+      4
+    );
+  });
+
+  it("does not reset a flexible interest-only balance on later interest dates", () => {
+    const pledge = loan({
+      loanType: "securities_pledge",
+      repaymentMethod: "interest_only",
+      balanceHistory: [
+        {
+          effectiveDate: "2026-02-15",
+          balance: 60_000,
+          recordedAt: "2026-02-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(calculateLoanSnapshot(pledge, "2026-04-01")).toMatchObject({
+      currentPrincipal: 60_000,
+      nextPayment: null,
+      projectedInterest: null,
+    });
+  });
+
+  it("uses a same-day balance snapshot from the tracking start", () => {
+    const revolving = loan({
+      repaymentMethod: "revolving",
+      remainingTermMonths: undefined,
+      balanceHistory: [
+        {
+          effectiveDate: "2026-01-01",
+          balance: 60_000,
+          recordedAt: "2026-01-01T12:00:00.000Z",
+        },
+      ],
+    });
+    const cost = estimateInvestmentFinancingCostForPeriod(
+      [revolving],
+      "2025-12-31",
+      "2026-01-02"
+    );
+
+    expect(cost).toBeCloseTo((60_000 * 0.06) / 365, 4);
+  });
 });

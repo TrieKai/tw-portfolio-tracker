@@ -1,8 +1,17 @@
 import Link from "next/link";
 import { formatCurrency } from "@/lib/portfolio/calculations";
-import type { PortfolioLoanSummary } from "@/lib/types/loan";
+import type {
+  PortfolioLoanRiskSummary,
+  PortfolioLoanSummary,
+} from "@/lib/types/loan";
 
-export function LoanSummaryPanel({ summary }: { summary: PortfolioLoanSummary }) {
+export function LoanSummaryPanel({
+  summary,
+  riskSummary,
+}: {
+  summary: PortfolioLoanSummary;
+  riskSummary?: PortfolioLoanRiskSummary;
+}) {
   if (summary.activeLoanCount === 0) {
     return (
       <section className="glass-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
@@ -26,6 +35,14 @@ export function LoanSummaryPanel({ summary }: { summary: PortfolioLoanSummary })
         <Metric label="扣息後淨損益" value={formatCurrency(summary.netInvestmentPnl)} gain={netPositive} loss={!netPositive} />
       </dl>
       {summary.hasIncompleteData ? <p className="mt-3 text-xs text-amber-600 dark:text-amber-300">部分貸款採估算或待補資料；詳細可信範圍請至貸款頁查看。</p> : null}
+      {riskSummary && riskSummary.monitoredLoanCount > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-4 text-xs">
+          <span className="text-muted">擔保／循環額度 {riskSummary.monitoredLoanCount} 筆</span>
+          <span className={riskSummary.criticalCount > 0 ? "font-medium text-rose-500" : "text-muted"}>需處理 {riskSummary.criticalCount}</span>
+          <span className={riskSummary.warningCount > 0 ? "font-medium text-amber-600 dark:text-amber-300" : "text-muted"}>警示 {riskSummary.warningCount}</span>
+          <span className="text-muted">最低維持率 {riskSummary.lowestMaintenanceRatioPercent === null ? "—" : `${riskSummary.lowestMaintenanceRatioPercent.toFixed(1)}%`}</span>
+        </div>
+      ) : null}
     </section>
   );
 }

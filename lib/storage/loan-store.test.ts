@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
-import { addLoan, editLoan, setLoanStatus } from "@/lib/storage/loan-store";
+import {
+  addLoan,
+  editLoan,
+  recordLoanBalance,
+  setLoanStatus,
+} from "@/lib/storage/loan-store";
 import type { CreateLoanInput } from "@/lib/types/loan";
 
 const input: CreateLoanInput = {
@@ -63,5 +68,32 @@ describe("loan store", () => {
       status: "paid_off",
       closedAt: "2026-08-30",
     });
+  });
+
+  it("records and replaces a dated balance snapshot", () => {
+    const added = addLoan(defaultPortfolioStorage(), input);
+    const loanId = added.loans[0].id;
+    const recorded = recordLoanBalance(
+      added,
+      loanId,
+      800_000,
+      "2026-09-01",
+      "2026-09-01T00:00:00.000Z"
+    );
+    const replaced = recordLoanBalance(
+      recorded,
+      loanId,
+      750_000,
+      "2026-09-01",
+      "2026-09-01T12:00:00.000Z"
+    );
+
+    expect(replaced.loans[0].balanceHistory).toEqual([
+      {
+        effectiveDate: "2026-09-01",
+        balance: 750_000,
+        recordedAt: "2026-09-01T12:00:00.000Z",
+      },
+    ]);
   });
 });

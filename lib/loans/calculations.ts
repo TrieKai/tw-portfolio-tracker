@@ -13,6 +13,14 @@ import type {
 
 const MS_PER_DAY = 86_400_000;
 
+function isFlexiblePrincipalLoan(loan: Loan): boolean {
+  return (
+    loan.loanType === "securities_margin" ||
+    loan.loanType === "securities_pledge" ||
+    loan.loanType === "revolving_credit"
+  );
+}
+
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
@@ -151,9 +159,23 @@ export function principalAtDate(
     return 0;
   }
   let principal = loan.openingBalance;
-  for (const row of schedule) {
-    if (row.paymentDate > asOfDate) break;
-    principal = row.remainingPrincipal;
+  const events = [
+    ...schedule
+      .filter((row) => row.principal > 0)
+      .map((row) => ({
+        date: row.paymentDate,
+        principal: row.remainingPrincipal,
+        priority: 0,
+      })),
+    ...(loan.balanceHistory ?? []).map((snapshot) => ({
+      date: snapshot.effectiveDate,
+      principal: snapshot.balance,
+      priority: 1,
+    })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.priority - b.priority);
+  for (const event of events) {
+    if (event.date > asOfDate) break;
+    principal = event.principal;
   }
   return roundMoney(principal);
 }
@@ -178,21 +200,31 @@ export function estimateLoanInterestForPeriod(
   let cursor = fromDate > loan.trackingStartDate
     ? fromDate
     : loan.trackingStartDate;
-  let principal = principalAtDate(
-    loan,
-    addDaysToIsoDate(cursor, -1),
-    schedule
-  );
-  if (cursor === loan.trackingStartDate) principal = loan.openingBalance;
+  let principal = principalAtDate(loan, cursor, schedule);
   let interest = 0;
 
-  for (const row of schedule) {
-    if (row.paymentDate <= cursor) continue;
-    if (row.paymentDate > endDate) break;
-    const days = daysBetween(cursor, row.paymentDate);
+  const principalEvents = [
+    ...schedule
+      .filter((row) => row.principal > 0)
+      .map((row) => ({
+        date: row.paymentDate,
+        principal: row.remainingPrincipal,
+        priority: 0,
+      })),
+    ...(loan.balanceHistory ?? []).map((snapshot) => ({
+      date: snapshot.effectiveDate,
+      principal: snapshot.balance,
+      priority: 1,
+    })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.priority - b.priority);
+
+  for (const event of principalEvents) {
+    if (event.date <= cursor) continue;
+    if (event.date > endDate) break;
+    const days = daysBetween(cursor, event.date);
     interest += principal * (loan.annualInterestRate / 100) * (days / 365);
-    principal = row.remainingPrincipal;
-    cursor = row.paymentDate;
+    principal = event.principal;
+    cursor = event.date;
   }
 
   if (cursor < endDate && principal > 0) {
@@ -240,8 +272,9 @@ export function calculateLoanSnapshot(
     schedule
   );
   const fee = loan.trackingStartDate <= asOfDate ? loan.initialFees ?? 0 : 0;
+  const flexiblePrincipal = isFlexiblePrincipalLoan(loan);
   const nextPayment =
-    loan.status === "active"
+    loan.status === "active" && !flexiblePrincipal
       ? schedule.find((row) => row.paymentDate > asOfDate) ?? null
       : null;
   const remainingRows = schedule.filter((row) => row.paymentDate > asOfDate);
@@ -254,11 +287,11 @@ export function calculateLoanSnapshot(
     estimatedInterestToDate,
     estimatedFinancingCostToDate: roundMoney(estimatedInterestToDate + fee),
     projectedInterest:
-      schedule.length > 0
+      schedule.length > 0 && !flexiblePrincipal
         ? roundMoney(remainingRows.reduce((sum, row) => sum + row.interest, 0))
         : null,
     projectedTotalPayment:
-      schedule.length > 0
+      schedule.length > 0 && !flexiblePrincipal
         ? roundMoney(remainingRows.reduce((sum, row) => sum + row.payment, 0))
         : null,
   };

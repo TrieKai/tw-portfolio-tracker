@@ -91,4 +91,62 @@ describe("normalizePortfolioStorage", () => {
     });
     expect(normalizedAgain?.loans).toHaveLength(2);
   });
+
+  it("keeps valid collateral and balance-history fields", () => {
+    const normalized = normalizePortfolioStorage({
+      version: 2,
+      holdings: [],
+      loans: [
+        {
+          id: "pledge-1",
+          name: "股票質押",
+          loanType: "securities_pledge",
+          purpose: "investment",
+          investmentUsePercent: 100,
+          openingBalance: 500_000,
+          trackingStartDate: "2026-08-01",
+          annualInterestRate: 3,
+          rateType: "floating",
+          repaymentMethod: "revolving",
+          creditLimit: 800_000,
+          maturityDate: "2027-08-01",
+          maintenanceWarningPercent: 160,
+          maintenanceCallPercent: 140,
+          collateralPositions: [
+            { holdingId: "holding-1", quantity: 1_000 },
+            { holdingId: "bad", quantity: -1 },
+          ],
+          balanceHistory: [
+            {
+              effectiveDate: "2026-08-15",
+              balance: 450_000,
+              recordedAt: "2026-08-15T00:00:00.000Z",
+            },
+            { effectiveDate: "2026-07-01", balance: 600_000 },
+          ],
+          status: "active",
+          dataQuality: "estimated",
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+      loanRevisions: [],
+      priceHistory: {},
+      sales: [],
+      corporateActions: [],
+      transactions: [],
+      transactionRevisions: [],
+      pnlTracking: { startedAt: "", dailySummaries: {} },
+      settings: { autoUpdateEnabled: false },
+    });
+
+    expect(normalized?.loans[0]).toMatchObject({
+      creditLimit: 800_000,
+      maturityDate: "2027-08-01",
+      collateralPositions: [{ holdingId: "holding-1", quantity: 1_000 }],
+      balanceHistory: [
+        { effectiveDate: "2026-08-15", balance: 450_000 },
+      ],
+    });
+  });
 });

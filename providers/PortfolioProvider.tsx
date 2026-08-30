@@ -46,6 +46,7 @@ import {
   type PortfolioExposureSummary,
 } from "@/lib/portfolio/exposure";
 import { calculatePortfolioLoanSummary } from "@/lib/loans/calculations";
+import { calculatePortfolioLoanRiskSummary } from "@/lib/loans/risk";
 import {
   buildPortfolioPnlBreakdowns,
   type PortfolioPnlBreakdowns,
@@ -76,6 +77,7 @@ import {
 import {
   addLoan as addLoanToStorage,
   editLoan as editLoanInStorage,
+  recordLoanBalance as recordLoanBalanceInStorage,
   setLoanStatus as setLoanStatusInStorage,
 } from "@/lib/storage/loan-store";
 import type {
@@ -98,6 +100,7 @@ import type {
   Loan,
   LoanStatus,
   PortfolioLoanSummary,
+  PortfolioLoanRiskSummary,
 } from "@/lib/types/loan";
 import type {
   UiPreferences,
@@ -145,6 +148,7 @@ interface PortfolioContextValue {
   holdings: HoldingWithMetrics[];
   loans: Loan[];
   loanSummary: PortfolioLoanSummary;
+  loanRiskSummary: PortfolioLoanRiskSummary;
   sales: SaleTransaction[];
   summary: PortfolioSummary;
   exposure: PortfolioExposureSummary;
@@ -165,6 +169,11 @@ interface PortfolioContextValue {
   remove: (id: string) => void;
   addLoan: (input: CreateLoanInput) => string | null;
   editLoan: (input: EditLoanInput) => void;
+  updateLoanBalance: (
+    id: string,
+    balance: number,
+    effectiveDate: string
+  ) => void;
   setLoanStatus: (
     id: string,
     status: LoanStatus,
@@ -435,6 +444,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       }),
     [grossInvestmentPnl, loans]
   );
+  const loanRiskSummary = useMemo(
+    () =>
+      calculatePortfolioLoanRiskSummary(
+        loans,
+        storage?.holdings ?? [],
+        todayIsoDate()
+      ),
+    [loans, storage?.holdings]
+  );
 
   const exposure = useMemo(
     () =>
@@ -541,6 +559,16 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     (input: EditLoanInput) => {
       if (!storage) return;
       persist(editLoanInStorage(storage, input));
+    },
+    [storage, persist]
+  );
+
+  const updateLoanBalance = useCallback(
+    (id: string, balance: number, effectiveDate: string) => {
+      if (!storage) return;
+      persist(
+        recordLoanBalanceInStorage(storage, id, balance, effectiveDate)
+      );
     },
     [storage, persist]
   );
@@ -1002,6 +1030,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       holdings,
       loans,
       loanSummary,
+      loanRiskSummary,
       sales,
       summary,
       exposure,
@@ -1022,6 +1051,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       remove,
       addLoan,
       editLoan,
+      updateLoanBalance,
       setLoanStatus,
       setManualPrice,
       updateOne,
@@ -1050,6 +1080,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       holdings,
       loans,
       loanSummary,
+      loanRiskSummary,
       sales,
       summary,
       exposure,
@@ -1066,6 +1097,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       remove,
       addLoan,
       editLoan,
+      updateLoanBalance,
       setLoanStatus,
       setManualPrice,
       updateOne,

@@ -30,6 +30,7 @@ import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
 import { buildPortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { calculatePortfolioLoanSummary } from "@/lib/loans/calculations";
+import { calculatePortfolioLoanRiskSummary } from "@/lib/loans/risk";
 import { computePortfolioHealth } from "@/lib/portfolio/health";
 import { computeInvestmentWeather } from "@/lib/portfolio/weather";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -45,7 +46,7 @@ import { usePortfolio } from "@/providers/PortfolioProvider";
 import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 
 export default function DashboardPage() {
-  const { ready, holdings, summary, exposure, loanSummary, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
+  const { ready, holdings, summary, exposure, loanSummary, loanRiskSummary, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
   const { preferences } = useUiPreferences();
   const [travelDate, setTravelDate] = useState<string | null>(null);
   const currentPnlCalendar = useMemo(
@@ -94,6 +95,11 @@ export default function DashboardPage() {
         asOfDate: travelDate,
         grossInvestmentPnl,
       }),
+      loanRiskSummary: calculatePortfolioLoanRiskSummary(
+        storage.loans,
+        rawHoldings,
+        travelDate
+      ),
       exposure: computePortfolioExposure(
         enriched,
         { netAssets: storage.settings.netAssets },
@@ -116,6 +122,8 @@ export default function DashboardPage() {
   const shownExposure = travelState?.exposure ?? exposure;
   const shownBreakdowns = travelState?.pnlBreakdowns ?? pnlBreakdowns;
   const shownLoanSummary = travelState?.loanSummary ?? loanSummary;
+  const shownLoanRiskSummary =
+    travelState?.loanRiskSummary ?? loanRiskSummary;
   const viewFor = (section: DashboardSectionId) =>
     preferences.dashboardLayout.find((item) => item.section === section)?.view ??
     "standard";
@@ -367,7 +375,7 @@ export default function DashboardPage() {
       />
 
       <div className="mt-6">
-        <LoanSummaryPanel summary={shownLoanSummary} />
+        <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} />
       </div>
 
       <div className="dashboard-grid">

@@ -31,6 +31,35 @@ function normalizeLoanInput(input: CreateLoanInput): CreateLoanInput {
     ...(input.accountLastFour?.trim()
       ? { accountLastFour: input.accountLastFour.trim().slice(-4) }
       : { accountLastFour: undefined }),
+    ...(input.creditLimit !== undefined
+      ? { creditLimit: Math.max(0, input.creditLimit) }
+      : {}),
+    ...(input.maintenanceWarningPercent !== undefined
+      ? {
+          maintenanceWarningPercent: Math.max(
+            0,
+            input.maintenanceWarningPercent
+          ),
+        }
+      : {}),
+    ...(input.maintenanceCallPercent !== undefined
+      ? { maintenanceCallPercent: Math.max(0, input.maintenanceCallPercent) }
+      : {}),
+    ...(input.collateralPositions
+      ? {
+          collateralPositions: input.collateralPositions
+            .filter(
+              (position) =>
+                position.holdingId &&
+                Number.isFinite(position.quantity) &&
+                position.quantity > 0
+            )
+            .map((position) => ({ ...position })),
+        }
+      : {}),
+    ...(input.manualCollateralValue !== undefined
+      ? { manualCollateralValue: Math.max(0, input.manualCollateralValue) }
+      : {}),
   };
 }
 
@@ -68,6 +97,10 @@ export function editLoan(
     createdAt: previous.createdAt,
     updatedAt: now,
   };
+  next.balanceHistory = (next.balanceHistory ?? []).filter(
+    (snapshot) => snapshot.effectiveDate >= next.trackingStartDate
+  );
+  if (next.balanceHistory.length === 0) next.balanceHistory = undefined;
   return {
     ...state,
     loans: state.loans.map((loan) => (loan.id === input.id ? next : loan)),
@@ -102,6 +135,39 @@ export function setLoanStatus(
             updatedAt: now,
           }
         : loan
+    ),
+  };
+}
+
+/** 記錄某日起適用的本金，不改寫先前期間的利息計算基準。 */
+export function recordLoanBalance(
+  state: PortfolioStorage,
+  loanId: string,
+  balance: number,
+  effectiveDate: string,
+  now = new Date().toISOString()
+): PortfolioStorage {
+  if (!Number.isFinite(balance) || balance < 0) return state;
+  const loan = state.loans.find((item) => item.id === loanId);
+  if (!loan || effectiveDate < loan.trackingStartDate) return state;
+
+  const byDate = new Map(
+    (loan.balanceHistory ?? []).map((snapshot) => [
+      snapshot.effectiveDate,
+      snapshot,
+    ])
+  );
+  byDate.set(effectiveDate, { effectiveDate, balance, recordedAt: now });
+  const balanceHistory = [...byDate.values()].sort((a, b) =>
+    a.effectiveDate.localeCompare(b.effectiveDate)
+  );
+
+  return {
+    ...state,
+    loans: state.loans.map((item) =>
+      item.id === loanId
+        ? { ...item, balanceHistory, updatedAt: now }
+        : item
     ),
   };
 }

@@ -1,6 +1,7 @@
 import type {
   LoanDataQuality,
   LoanPurpose,
+  LoanRiskLevel,
   LoanRepaymentMethod,
   LoanType,
 } from "@/lib/types/loan";
@@ -36,4 +37,12 @@ export const LOAN_QUALITY_LABELS: Record<LoanDataQuality, string> = {
   complete: "完整資料",
   estimated: "估算",
   incomplete: "待補資料",
+};
+
+export const LOAN_RISK_LABELS: Record<LoanRiskLevel, string> = {
+  safe: "風險正常",
+  warning: "接近警示",
+  critical: "需要處理",
+  unknown: "風險待補資料",
+  not_applicable: "無維持率",
 };

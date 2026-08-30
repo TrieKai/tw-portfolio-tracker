@@ -9,6 +9,8 @@ import type {
 import {
   LOAN_TYPES,
   type Loan,
+  type LoanBalanceSnapshot,
+  type LoanCollateralPosition,
   type LoanPurpose,
   type LoanRateType,
   type LoanRepaymentMethod,
@@ -68,6 +70,60 @@ function optionalPositiveNumber(value: unknown): number | undefined {
     : undefined;
 }
 
+function normalizeCollateralPositions(
+  value: unknown
+): LoanCollateralPosition[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const positions = value.flatMap((position) => {
+    if (
+      !isRecord(position) ||
+      typeof position.holdingId !== "string" ||
+      !position.holdingId ||
+      typeof position.quantity !== "number" ||
+      !Number.isFinite(position.quantity) ||
+      position.quantity <= 0
+    ) {
+      return [];
+    }
+    return [{ holdingId: position.holdingId, quantity: position.quantity }];
+  });
+  return positions.length > 0 ? positions : undefined;
+}
+
+function normalizeBalanceHistory(
+  value: unknown,
+  trackingStartDate: string,
+  fallbackRecordedAt: string
+): LoanBalanceSnapshot[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const byDate = new Map<string, LoanBalanceSnapshot>();
+  for (const snapshot of value) {
+    if (
+      !isRecord(snapshot) ||
+      typeof snapshot.effectiveDate !== "string" ||
+      typeof snapshot.balance !== "number" ||
+      !Number.isFinite(snapshot.balance) ||
+      snapshot.balance < 0
+    ) {
+      continue;
+    }
+    const effectiveDate = normalizeToIsoDate(snapshot.effectiveDate);
+    if (!effectiveDate || effectiveDate < trackingStartDate) continue;
+    byDate.set(effectiveDate, {
+      effectiveDate,
+      balance: snapshot.balance,
+      recordedAt:
+        typeof snapshot.recordedAt === "string"
+          ? snapshot.recordedAt
+          : fallbackRecordedAt,
+    });
+  }
+  const history = [...byDate.values()].sort((a, b) =>
+    a.effectiveDate.localeCompare(b.effectiveDate)
+  );
+  return history.length > 0 ? history : undefined;
+}
+
 function normalizeLoan(raw: unknown): Loan | null {
   if (!isRecord(raw)) return null;
   if (
@@ -104,6 +160,15 @@ function normalizeLoan(raw: unknown): Loan | null {
     raw.dataQuality === "incomplete"
       ? raw.dataQuality
       : "estimated";
+  const collateralPositions = normalizeCollateralPositions(
+    raw.collateralPositions
+  );
+  const trackingStartDate = normalizeToIsoDate(raw.trackingStartDate)!;
+  const balanceHistory = normalizeBalanceHistory(
+    raw.balanceHistory,
+    trackingStartDate,
+    now
+  );
 
   return {
     id: raw.id,
@@ -118,7 +183,7 @@ function normalizeLoan(raw: unknown): Loan | null {
       ? { linkedHoldingId: raw.linkedHoldingId }
       : {}),
     openingBalance: raw.openingBalance,
-    trackingStartDate: normalizeToIsoDate(raw.trackingStartDate)!,
+    trackingStartDate,
     ...(optionalPositiveNumber(raw.remainingTermMonths)
       ? { remainingTermMonths: Math.round(raw.remainingTermMonths as number) }
       : {}),
@@ -152,6 +217,26 @@ function normalizeLoan(raw: unknown): Loan | null {
     ...(typeof raw.accountLastFour === "string" && /^\d{4}$/.test(raw.accountLastFour)
       ? { accountLastFour: raw.accountLastFour }
       : {}),
+    ...(optionalPositiveNumber(raw.creditLimit)
+      ? { creditLimit: raw.creditLimit as number }
+      : {}),
+    ...(typeof raw.maturityDate === "string" &&
+    normalizeToIsoDate(raw.maturityDate)
+      ? { maturityDate: normalizeToIsoDate(raw.maturityDate) }
+      : {}),
+    ...(optionalPositiveNumber(raw.maintenanceWarningPercent)
+      ? { maintenanceWarningPercent: raw.maintenanceWarningPercent as number }
+      : {}),
+    ...(optionalPositiveNumber(raw.maintenanceCallPercent)
+      ? { maintenanceCallPercent: raw.maintenanceCallPercent as number }
+      : {}),
+    ...(collateralPositions ? { collateralPositions } : {}),
+    ...(typeof raw.manualCollateralValue === "number" &&
+    Number.isFinite(raw.manualCollateralValue) &&
+    raw.manualCollateralValue >= 0
+      ? { manualCollateralValue: raw.manualCollateralValue }
+      : {}),
+    ...(balanceHistory ? { balanceHistory } : {}),
     status,
     ...(typeof raw.closedAt === "string" && normalizeToIsoDate(raw.closedAt)
       ? { closedAt: normalizeToIsoDate(raw.closedAt) }
