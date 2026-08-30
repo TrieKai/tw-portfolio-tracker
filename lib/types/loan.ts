@@ -37,6 +37,40 @@ export interface LoanBalanceSnapshot {
   recordedAt: string;
 }
 
+export interface LoanPaymentRecord {
+  id: string;
+  paymentDate: string;
+  principalPaid: number;
+  interestPaid: number;
+  feePaid: number;
+  subsidyReceived: number;
+  /** 填入後會同時建立當日本金快照，作為後續利息與維持率基準。 */
+  remainingPrincipalAfter?: number;
+  /** 兩者皆填時，付款日會以實付利息和該期間估算利息做差額對帳。 */
+  interestPeriodStartDate?: string;
+  interestPeriodEndDate?: string;
+  note?: string;
+  createdAt: string;
+}
+
+export interface LoanRateChange {
+  id: string;
+  effectiveDate: string;
+  annualInterestRate: number;
+  note?: string;
+  createdAt: string;
+}
+
+export type CreateLoanPaymentInput = Omit<
+  LoanPaymentRecord,
+  "id" | "createdAt"
+>;
+
+export type CreateLoanRateChangeInput = Omit<
+  LoanRateChange,
+  "id" | "createdAt"
+>;
+
 /**
  * 一筆獨立貸款契約。openingBalance 是 trackingStartDate 當日的本金快照；
  * 這個基準讓既有貸款不必捏造追蹤前的本金與利息。
@@ -79,6 +113,8 @@ export interface Loan {
   manualCollateralValue?: number;
   /** openingBalance 之後的本金變動，避免更正目前餘額時回寫歷史。 */
   balanceHistory?: LoanBalanceSnapshot[];
+  paymentHistory?: LoanPaymentRecord[];
+  rateHistory?: LoanRateChange[];
   status: LoanStatus;
   closedAt?: string;
   dataQuality: LoanDataQuality;
@@ -113,6 +149,8 @@ export interface LoanScheduleRow {
 export interface LoanSnapshot {
   loan: Loan;
   currentPrincipal: number;
+  currentAnnualInterestRate: number;
+  effectiveAprPercent: number | null;
   schedule: LoanScheduleRow[];
   nextPayment: LoanScheduleRow | null;
   estimatedInterestToDate: number;
@@ -168,4 +206,22 @@ export interface PortfolioLoanRiskSummary {
   lowestMaintenanceRatioPercent: number | null;
   nextMaturityDate: string | null;
   totalCollateralMarketValue: number;
+}
+
+export type LoanReminderKind =
+  | "critical_risk"
+  | "risk_warning"
+  | "payment_due"
+  | "maturity_due"
+  | "risk_data_missing"
+  | "unreconciled_interest";
+
+export interface LoanReminder {
+  id: string;
+  loanId: string;
+  loanName: string;
+  kind: LoanReminderKind;
+  severity: "info" | "warning" | "critical";
+  date?: string;
+  message: string;
 }

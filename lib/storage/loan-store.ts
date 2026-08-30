@@ -1,5 +1,7 @@
 import type { PortfolioStorage } from "@/lib/types/holding";
 import type {
+  CreateLoanPaymentInput,
+  CreateLoanRateChangeInput,
   CreateLoanInput,
   EditLoanInput,
   Loan,
@@ -100,7 +102,15 @@ export function editLoan(
   next.balanceHistory = (next.balanceHistory ?? []).filter(
     (snapshot) => snapshot.effectiveDate >= next.trackingStartDate
   );
+  next.paymentHistory = (next.paymentHistory ?? []).filter(
+    (payment) => payment.paymentDate >= next.trackingStartDate
+  );
+  next.rateHistory = (next.rateHistory ?? []).filter(
+    (change) => change.effectiveDate >= next.trackingStartDate
+  );
   if (next.balanceHistory.length === 0) next.balanceHistory = undefined;
+  if (next.paymentHistory.length === 0) next.paymentHistory = undefined;
+  if (next.rateHistory.length === 0) next.rateHistory = undefined;
   return {
     ...state,
     loans: state.loans.map((loan) => (loan.id === input.id ? next : loan)),
@@ -167,6 +177,119 @@ export function recordLoanBalance(
     loans: state.loans.map((item) =>
       item.id === loanId
         ? { ...item, balanceHistory, updatedAt: now }
+        : item
+    ),
+  };
+}
+
+export function recordLoanPayment(
+  state: PortfolioStorage,
+  loanId: string,
+  input: CreateLoanPaymentInput,
+  now = new Date().toISOString()
+): PortfolioStorage {
+  const loan = state.loans.find((item) => item.id === loanId);
+  if (!loan || input.paymentDate < loan.trackingStartDate) return state;
+  const amounts = [
+    input.principalPaid,
+    input.interestPaid,
+    input.feePaid,
+    input.subsidyReceived,
+  ];
+  if (amounts.some((amount) => !Number.isFinite(amount) || amount < 0)) {
+    return state;
+  }
+  if (
+    input.remainingPrincipalAfter !== undefined &&
+    (!Number.isFinite(input.remainingPrincipalAfter) ||
+      input.remainingPrincipalAfter < 0)
+  ) {
+    return state;
+  }
+  if (input.principalPaid > 0 && input.remainingPrincipalAfter === undefined) {
+    return state;
+  }
+  const hasInterestPeriod =
+    !!input.interestPeriodStartDate && !!input.interestPeriodEndDate;
+  if (
+    (!!input.interestPeriodStartDate !== !!input.interestPeriodEndDate) ||
+    (hasInterestPeriod &&
+      (input.interestPeriodStartDate! >= input.interestPeriodEndDate! ||
+        input.interestPeriodStartDate! < loan.trackingStartDate ||
+        input.interestPeriodEndDate! > input.paymentDate))
+  ) {
+    return state;
+  }
+
+  const payment = {
+    ...input,
+    id: newId("loan-payment"),
+    note: input.note?.trim() || undefined,
+    createdAt: now,
+  };
+  let next: PortfolioStorage = {
+    ...state,
+    loans: state.loans.map((item) =>
+      item.id === loanId
+        ? {
+            ...item,
+            paymentHistory: [...(item.paymentHistory ?? []), payment].sort(
+              (a, b) =>
+                a.paymentDate.localeCompare(b.paymentDate) ||
+                a.createdAt.localeCompare(b.createdAt)
+            ),
+            updatedAt: now,
+          }
+        : item
+    ),
+  };
+  if (input.remainingPrincipalAfter !== undefined) {
+    next = recordLoanBalance(
+      next,
+      loanId,
+      input.remainingPrincipalAfter,
+      input.paymentDate,
+      now
+    );
+  }
+  return next;
+}
+
+export function recordLoanRateChange(
+  state: PortfolioStorage,
+  loanId: string,
+  input: CreateLoanRateChangeInput,
+  now = new Date().toISOString()
+): PortfolioStorage {
+  const loan = state.loans.find((item) => item.id === loanId);
+  if (
+    !loan ||
+    input.effectiveDate < loan.trackingStartDate ||
+    !Number.isFinite(input.annualInterestRate) ||
+    input.annualInterestRate < 0 ||
+    input.annualInterestRate > 100
+  ) {
+    return state;
+  }
+  const change = {
+    ...input,
+    id: newId("loan-rate"),
+    note: input.note?.trim() || undefined,
+    createdAt: now,
+  };
+  return {
+    ...state,
+    loans: state.loans.map((item) =>
+      item.id === loanId
+        ? {
+            ...item,
+            rateHistory: [...(item.rateHistory ?? []), change].sort(
+              (a, b) =>
+                a.effectiveDate.localeCompare(b.effectiveDate) ||
+                a.createdAt.localeCompare(b.createdAt)
+            ),
+            updatedAt: now,
+          }
         : item
     ),
   };

@@ -11,6 +11,8 @@ import {
   type Loan,
   type LoanBalanceSnapshot,
   type LoanCollateralPosition,
+  type LoanPaymentRecord,
+  type LoanRateChange,
   type LoanPurpose,
   type LoanRateType,
   type LoanRepaymentMethod,
@@ -124,6 +126,128 @@ function normalizeBalanceHistory(
   return history.length > 0 ? history : undefined;
 }
 
+function normalizePaymentHistory(
+  value: unknown,
+  trackingStartDate: string,
+  fallbackCreatedAt: string
+): LoanPaymentRecord[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const payments: LoanPaymentRecord[] = [];
+  for (const payment of value) {
+    if (!isRecord(payment) || typeof payment.id !== "string") continue;
+    const paymentDate =
+      typeof payment.paymentDate === "string"
+        ? normalizeToIsoDate(payment.paymentDate)
+        : null;
+    const amounts = [
+      payment.principalPaid,
+      payment.interestPaid,
+      payment.feePaid,
+      payment.subsidyReceived,
+    ];
+    if (
+      !paymentDate ||
+      paymentDate < trackingStartDate ||
+      amounts.some(
+        (amount) =>
+          typeof amount !== "number" ||
+          !Number.isFinite(amount) ||
+          amount < 0
+      )
+    ) {
+      continue;
+    }
+    const periodStart =
+      typeof payment.interestPeriodStartDate === "string"
+        ? normalizeToIsoDate(payment.interestPeriodStartDate)
+        : null;
+    const periodEnd =
+      typeof payment.interestPeriodEndDate === "string"
+        ? normalizeToIsoDate(payment.interestPeriodEndDate)
+        : null;
+    const hasValidPeriod =
+      !!periodStart &&
+      !!periodEnd &&
+      periodStart >= trackingStartDate &&
+      periodStart < periodEnd &&
+      periodEnd <= paymentDate;
+    payments.push({
+      id: payment.id,
+      paymentDate,
+      principalPaid: payment.principalPaid as number,
+      interestPaid: payment.interestPaid as number,
+      feePaid: payment.feePaid as number,
+      subsidyReceived: payment.subsidyReceived as number,
+      ...(typeof payment.remainingPrincipalAfter === "number" &&
+      Number.isFinite(payment.remainingPrincipalAfter) &&
+      payment.remainingPrincipalAfter >= 0
+        ? { remainingPrincipalAfter: payment.remainingPrincipalAfter }
+        : {}),
+      ...(hasValidPeriod
+        ? {
+            interestPeriodStartDate: periodStart,
+            interestPeriodEndDate: periodEnd,
+          }
+        : {}),
+      ...(typeof payment.note === "string" && payment.note.trim()
+        ? { note: payment.note.trim() }
+        : {}),
+      createdAt:
+        typeof payment.createdAt === "string"
+          ? payment.createdAt
+          : fallbackCreatedAt,
+    });
+  }
+  payments.sort(
+    (a, b) =>
+      a.paymentDate.localeCompare(b.paymentDate) ||
+      a.createdAt.localeCompare(b.createdAt)
+  );
+  return payments.length > 0 ? payments : undefined;
+}
+
+function normalizeRateHistory(
+  value: unknown,
+  trackingStartDate: string,
+  fallbackCreatedAt: string
+): LoanRateChange[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const changes: LoanRateChange[] = [];
+  for (const change of value) {
+    if (
+      !isRecord(change) ||
+      typeof change.id !== "string" ||
+      typeof change.effectiveDate !== "string" ||
+      typeof change.annualInterestRate !== "number" ||
+      !Number.isFinite(change.annualInterestRate) ||
+      change.annualInterestRate < 0 ||
+      change.annualInterestRate > 100
+    ) {
+      continue;
+    }
+    const effectiveDate = normalizeToIsoDate(change.effectiveDate);
+    if (!effectiveDate || effectiveDate < trackingStartDate) continue;
+    changes.push({
+      id: change.id,
+      effectiveDate,
+      annualInterestRate: change.annualInterestRate,
+      ...(typeof change.note === "string" && change.note.trim()
+        ? { note: change.note.trim() }
+        : {}),
+      createdAt:
+        typeof change.createdAt === "string"
+          ? change.createdAt
+          : fallbackCreatedAt,
+    });
+  }
+  changes.sort(
+    (a, b) =>
+      a.effectiveDate.localeCompare(b.effectiveDate) ||
+      a.createdAt.localeCompare(b.createdAt)
+  );
+  return changes.length > 0 ? changes : undefined;
+}
+
 function normalizeLoan(raw: unknown): Loan | null {
   if (!isRecord(raw)) return null;
   if (
@@ -166,6 +290,16 @@ function normalizeLoan(raw: unknown): Loan | null {
   const trackingStartDate = normalizeToIsoDate(raw.trackingStartDate)!;
   const balanceHistory = normalizeBalanceHistory(
     raw.balanceHistory,
+    trackingStartDate,
+    now
+  );
+  const paymentHistory = normalizePaymentHistory(
+    raw.paymentHistory,
+    trackingStartDate,
+    now
+  );
+  const rateHistory = normalizeRateHistory(
+    raw.rateHistory,
     trackingStartDate,
     now
   );
@@ -237,6 +371,8 @@ function normalizeLoan(raw: unknown): Loan | null {
       ? { manualCollateralValue: raw.manualCollateralValue }
       : {}),
     ...(balanceHistory ? { balanceHistory } : {}),
+    ...(paymentHistory ? { paymentHistory } : {}),
+    ...(rateHistory ? { rateHistory } : {}),
     status,
     ...(typeof raw.closedAt === "string" && normalizeToIsoDate(raw.closedAt)
       ? { closedAt: normalizeToIsoDate(raw.closedAt) }

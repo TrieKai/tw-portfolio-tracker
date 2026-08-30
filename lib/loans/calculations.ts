@@ -60,11 +60,71 @@ function resolveFirstPaymentDate(loan: Loan): string {
   );
 }
 
+function buildPrincipalEvents(
+  loan: Loan,
+  schedule: LoanScheduleRow[]
+): Array<{ date: string; principal: number; priority: number }> {
+  const scheduleChanges = schedule
+    .filter((row) => row.principal > 0)
+    .map((row) => ({ date: row.paymentDate, row, priority: 0 as const }));
+  const snapshots = (loan.balanceHistory ?? []).map((snapshot) => ({
+    date: snapshot.effectiveDate,
+    snapshot,
+    priority: 1 as const,
+  }));
+  const sources = [...scheduleChanges, ...snapshots].sort(
+    (a, b) => a.date.localeCompare(b.date) || a.priority - b.priority
+  );
+  let scheduleOffset = 0;
+  const events: Array<{ date: string; principal: number; priority: number }> = [];
+
+  for (const source of sources) {
+    if ("row" in source) {
+      events.push({
+        date: source.date,
+        principal:
+          source.row.remainingPrincipal === 0
+            ? 0
+            : Math.max(0, source.row.remainingPrincipal + scheduleOffset),
+        priority: source.priority,
+      });
+      continue;
+    }
+
+    let scheduledPrincipal = loan.openingBalance;
+    for (const row of scheduleChanges) {
+      if (row.date > source.date) break;
+      scheduledPrincipal = row.row.remainingPrincipal;
+    }
+    scheduleOffset = source.snapshot.balance - scheduledPrincipal;
+    events.push({
+      date: source.date,
+      principal: source.snapshot.balance,
+      priority: source.priority,
+    });
+  }
+  return events;
+}
+
 function annuityPayment(principal: number, monthlyRate: number, periods: number) {
   if (periods <= 0) return principal;
   if (monthlyRate === 0) return principal / periods;
   const factor = Math.pow(1 + monthlyRate, periods);
   return (principal * monthlyRate * factor) / (factor - 1);
+}
+
+export function interestRateAtDate(loan: Loan, asOfDate: string): number {
+  let rate = loan.annualInterestRate;
+  const changes = [...(loan.rateHistory ?? [])].sort(
+    (a, b) =>
+      a.effectiveDate.localeCompare(b.effectiveDate) ||
+      a.createdAt.localeCompare(b.createdAt)
+  );
+  for (const change of changes) {
+    if (change.effectiveDate > asOfDate) break;
+    rate = change.annualInterestRate;
+  }
+  return Math.max(0, rate);
 }
 
 /**
@@ -159,20 +219,7 @@ export function principalAtDate(
     return 0;
   }
   let principal = loan.openingBalance;
-  const events = [
-    ...schedule
-      .filter((row) => row.principal > 0)
-      .map((row) => ({
-        date: row.paymentDate,
-        principal: row.remainingPrincipal,
-        priority: 0,
-      })),
-    ...(loan.balanceHistory ?? []).map((snapshot) => ({
-      date: snapshot.effectiveDate,
-      principal: snapshot.balance,
-      priority: 1,
-    })),
-  ].sort((a, b) => a.date.localeCompare(b.date) || a.priority - b.priority);
+  const events = buildPrincipalEvents(loan, schedule);
   for (const event of events) {
     if (event.date > asOfDate) break;
     principal = event.principal;
@@ -188,7 +235,6 @@ export function estimateLoanInterestForPeriod(
   schedule: LoanScheduleRow[] = buildLoanSchedule(loan)
 ): number {
   if (
-    loan.annualInterestRate <= 0 ||
     toDate <= fromDate ||
     toDate <= loan.trackingStartDate
   ) {
@@ -201,35 +247,35 @@ export function estimateLoanInterestForPeriod(
     ? fromDate
     : loan.trackingStartDate;
   let principal = principalAtDate(loan, cursor, schedule);
+  let annualInterestRate = interestRateAtDate(loan, cursor);
   let interest = 0;
 
-  const principalEvents = [
-    ...schedule
-      .filter((row) => row.principal > 0)
-      .map((row) => ({
-        date: row.paymentDate,
-        principal: row.remainingPrincipal,
-        priority: 0,
-      })),
-    ...(loan.balanceHistory ?? []).map((snapshot) => ({
-      date: snapshot.effectiveDate,
-      principal: snapshot.balance,
-      priority: 1,
+  const events = [
+    ...buildPrincipalEvents(loan, schedule).map((event) => ({
+      ...event,
+      kind: "principal" as const,
+    })),
+    ...(loan.rateHistory ?? []).map((change) => ({
+      date: change.effectiveDate,
+      kind: "rate" as const,
+      rate: change.annualInterestRate,
+      priority: 2,
     })),
   ].sort((a, b) => a.date.localeCompare(b.date) || a.priority - b.priority);
 
-  for (const event of principalEvents) {
+  for (const event of events) {
     if (event.date <= cursor) continue;
     if (event.date > endDate) break;
     const days = daysBetween(cursor, event.date);
-    interest += principal * (loan.annualInterestRate / 100) * (days / 365);
-    principal = event.principal;
+    interest += principal * (annualInterestRate / 100) * (days / 365);
+    if (event.kind === "principal") principal = event.principal;
+    else annualInterestRate = Math.max(0, event.rate);
     cursor = event.date;
   }
 
   if (cursor < endDate && principal > 0) {
     const days = daysBetween(cursor, endDate);
-    interest += principal * (loan.annualInterestRate / 100) * (days / 365);
+    interest += principal * (annualInterestRate / 100) * (days / 365);
   }
   return roundMoney(interest);
 }
@@ -242,7 +288,66 @@ export function estimateLoanFinancingCostForPeriod(
   const interest = estimateLoanInterestForPeriod(loan, fromDate, toDate);
   const includesInitialFee =
     loan.trackingStartDate > fromDate && loan.trackingStartDate <= toDate;
-  return roundMoney(interest + (includesInitialFee ? loan.initialFees ?? 0 : 0));
+  let reconciliationAdjustment = 0;
+  for (const payment of loan.paymentHistory ?? []) {
+    if (payment.paymentDate <= fromDate || payment.paymentDate > toDate) {
+      continue;
+    }
+    reconciliationAdjustment += payment.feePaid - payment.subsidyReceived;
+    if (
+      payment.interestPeriodStartDate &&
+      payment.interestPeriodEndDate
+    ) {
+      const estimatedForStatement = estimateLoanInterestForPeriod(
+        loan,
+        payment.interestPeriodStartDate,
+        payment.interestPeriodEndDate
+      );
+      reconciliationAdjustment +=
+        payment.interestPaid - estimatedForStatement;
+    }
+  }
+  return roundMoney(
+    interest +
+      (includesInitialFee ? loan.initialFees ?? 0 : 0) +
+      reconciliationAdjustment
+  );
+}
+
+/** 固定利率分期貸款的費用後年化報酬率；浮動或循環額度因未來現金流未知不估算。 */
+export function calculateLoanEffectiveApr(loan: Loan): number | null {
+  if (
+    loan.rateType !== "fixed" ||
+    isFlexiblePrincipalLoan(loan) ||
+    (loan.rateHistory?.length ?? 0) > 0
+  ) {
+    return null;
+  }
+  const schedule = buildLoanSchedule(loan);
+  const netProceeds = loan.openingBalance - (loan.initialFees ?? 0);
+  if (schedule.length === 0 || netProceeds <= 0) return null;
+  const payments = schedule.map((row) => row.payment);
+  const npv = (monthlyRate: number) =>
+    netProceeds -
+    payments.reduce(
+      (sum, payment, index) =>
+        sum + payment / Math.pow(1 + monthlyRate, index + 1),
+      0
+    );
+  if (Math.abs(npv(0)) < 1e-8) return 0;
+  if (npv(0) > 0) return null;
+
+  let low = 0;
+  let high = 1;
+  while (npv(high) < 0 && high < 128) high *= 2;
+  if (npv(high) < 0) return null;
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const middle = (low + high) / 2;
+    if (npv(middle) > 0) high = middle;
+    else low = middle;
+  }
+  const monthlyRate = (low + high) / 2;
+  return roundMoney((Math.pow(1 + monthlyRate, 12) - 1) * 100);
 }
 
 export function estimateInvestmentFinancingCostForPeriod(
@@ -271,7 +376,11 @@ export function calculateLoanSnapshot(
     asOfDate,
     schedule
   );
-  const fee = loan.trackingStartDate <= asOfDate ? loan.initialFees ?? 0 : 0;
+  const estimatedFinancingCostToDate = estimateLoanFinancingCostForPeriod(
+    loan,
+    addDaysToIsoDate(loan.trackingStartDate, -1),
+    asOfDate
+  );
   const flexiblePrincipal = isFlexiblePrincipalLoan(loan);
   const nextPayment =
     loan.status === "active" && !flexiblePrincipal
@@ -282,10 +391,12 @@ export function calculateLoanSnapshot(
   return {
     loan,
     currentPrincipal,
+    currentAnnualInterestRate: interestRateAtDate(loan, asOfDate),
+    effectiveAprPercent: calculateLoanEffectiveApr(loan),
     schedule,
     nextPayment,
     estimatedInterestToDate,
-    estimatedFinancingCostToDate: roundMoney(estimatedInterestToDate + fee),
+    estimatedFinancingCostToDate,
     projectedInterest:
       schedule.length > 0 && !flexiblePrincipal
         ? roundMoney(remainingRows.reduce((sum, row) => sum + row.interest, 0))
@@ -375,7 +486,7 @@ export function buildDailyInvestmentFinancingCosts(
   while (date <= toDate) {
     const previous = addDaysToIsoDate(date, -1);
     const cost = estimateInvestmentFinancingCostForPeriod(loans, previous, date);
-    if (cost > 0) result[date] = cost;
+    if (Math.abs(cost) > 1e-9) result[date] = cost;
     date = addDaysToIsoDate(date, 1);
   }
   return result;

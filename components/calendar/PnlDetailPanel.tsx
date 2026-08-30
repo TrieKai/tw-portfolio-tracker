@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
+import { formatFinancingCostImpact } from "@/lib/loans/format";
 import { formatIsoDateZh } from "@/lib/date/iso-date";
 import type {
   PnlCalendarDay,
@@ -63,9 +64,9 @@ function DayDetail({
               {signedRate(day.returnRate)}
             </p>
           </div>
-          {day.financingCost && day.financingCost > 0 ? (
+          {day.financingCost && Math.abs(day.financingCost) > 1e-9 ? (
             <p className="mt-2 text-xs text-muted">
-              投資損益 {signedCurrency(day.grossPnl ?? day.pnl)} · 融資成本 −{formatCurrency(day.financingCost)}
+              投資損益 {signedCurrency(day.grossPnl ?? day.pnl)} · 融資成本影響 {formatFinancingCostImpact(day.financingCost)}
             </p>
           ) : null}
         </div>
@@ -73,8 +74,8 @@ function DayDetail({
 
       {day.contributions.length === 0 ? (
         <p className="rounded-xl border border-border p-4 text-sm text-muted">
-          {day.financingCost && day.financingCost > 0
-            ? `這一天只有估算融資成本 −${formatCurrency(day.financingCost)}。`
+          {day.financingCost && Math.abs(day.financingCost) > 1e-9
+            ? `這一天只有融資成本調整 ${formatFinancingCostImpact(day.financingCost)}。`
             : "這一天只有已保存的總額，逐資產明細已超過保存期限。"}
         </p>
       ) : (
@@ -189,9 +190,9 @@ export function PnlWeekDetail({
           </div>
         </div>
         <p className="mt-2 text-xs text-muted">{week.dataDayCount} 個損益日</p>
-        {week.financingCost && week.financingCost > 0 ? (
+        {week.financingCost && Math.abs(week.financingCost) > 1e-9 ? (
           <p className="mt-1 text-xs text-muted">
-            投資損益 {signedCurrency(week.grossPnl ?? week.pnl)} · 融資成本 −{formatCurrency(week.financingCost)}
+            投資損益 {signedCurrency(week.grossPnl ?? week.pnl)} · 融資成本影響 {formatFinancingCostImpact(week.financingCost)}
           </p>
         ) : null}
       </div>

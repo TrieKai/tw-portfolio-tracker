@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildDailyInvestmentFinancingCosts,
   buildLoanSchedule,
+  calculateLoanEffectiveApr,
   calculateLoanSnapshot,
   calculatePortfolioLoanSummary,
   estimateInvestmentFinancingCostForPeriod,
+  interestRateAtDate,
 } from "@/lib/loans/calculations";
 import type { Loan } from "@/lib/types/loan";
 
@@ -184,5 +187,114 @@ describe("loan calculations", () => {
     );
 
     expect(cost).toBeCloseTo((60_000 * 0.06) / 365, 4);
+  });
+
+  it("applies rate changes only from their effective dates", () => {
+    const floating = loan({
+      rateType: "floating",
+      remainingTermMonths: undefined,
+      rateHistory: [
+        {
+          id: "rate-1",
+          effectiveDate: "2026-01-16",
+          annualInterestRate: 3,
+          createdAt: "2026-01-16T00:00:00.000Z",
+        },
+      ],
+    });
+    const cost = estimateInvestmentFinancingCostForPeriod(
+      [floating],
+      "2025-12-31",
+      "2026-01-31"
+    );
+
+    expect(interestRateAtDate(floating, "2026-01-15")).toBe(6);
+    expect(interestRateAtDate(floating, "2026-01-16")).toBe(3);
+    expect(cost).toBeCloseTo(
+      (120_000 * 0.06 * 15) / 365 + (120_000 * 0.03 * 15) / 365,
+      4
+    );
+  });
+
+  it("true-ups estimated interest to the actual statement amount", () => {
+    const reconciled = loan({
+      remainingTermMonths: undefined,
+      paymentHistory: [
+        {
+          id: "payment-1",
+          paymentDate: "2026-02-01",
+          principalPaid: 0,
+          interestPaid: 610,
+          feePaid: 20,
+          subsidyReceived: 10,
+          interestPeriodStartDate: "2026-01-01",
+          interestPeriodEndDate: "2026-01-31",
+          createdAt: "2026-02-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const cost = estimateInvestmentFinancingCostForPeriod(
+      [reconciled],
+      "2025-12-31",
+      "2026-02-01"
+    );
+
+    const unreconciledDay = (120_000 * 0.06) / 365;
+    expect(cost).toBeCloseTo(610 + unreconciledDay + 20 - 10, 4);
+  });
+
+  it("keeps a negative reconciliation adjustment on the payment date", () => {
+    const reconciled = loan({
+      remainingTermMonths: undefined,
+      paymentHistory: [
+        {
+          id: "payment-refund",
+          paymentDate: "2026-02-01",
+          principalPaid: 0,
+          interestPaid: 100,
+          feePaid: 0,
+          subsidyReceived: 0,
+          interestPeriodStartDate: "2026-01-01",
+          interestPeriodEndDate: "2026-01-31",
+          createdAt: "2026-02-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const daily = buildDailyInvestmentFinancingCosts(
+      [reconciled],
+      "2026-02-01",
+      "2026-02-01"
+    );
+
+    expect(daily["2026-02-01"]).toBeLessThan(0);
+  });
+
+  it("calculates fee-inclusive effective APR for fixed installments", () => {
+    const withoutFee = calculateLoanEffectiveApr(loan());
+    const withFee = calculateLoanEffectiveApr(loan({ initialFees: 2_000 }));
+
+    expect(withoutFee).toBeGreaterThan(6);
+    expect(withFee).toBeGreaterThan(withoutFee!);
+    expect(calculateLoanEffectiveApr(loan({ rateType: "floating" }))).toBeNull();
+  });
+
+  it("carries an actual balance correction into later installment estimates", () => {
+    const base = loan();
+    const schedule = buildLoanSchedule(base);
+    const correctedBalance = schedule[0].remainingPrincipal - 5_000;
+    const corrected = loan({
+      balanceHistory: [
+        {
+          effectiveDate: schedule[0].paymentDate,
+          balance: correctedBalance,
+          recordedAt: "2026-02-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(
+      calculateLoanSnapshot(corrected, schedule[1].paymentDate)
+        .currentPrincipal
+    ).toBeCloseTo(schedule[1].remainingPrincipal - 5_000, 4);
   });
 });

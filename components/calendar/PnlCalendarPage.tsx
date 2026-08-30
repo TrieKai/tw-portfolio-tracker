@@ -29,6 +29,7 @@ import {
   type TradingCalendarRow,
 } from "@/lib/date/trading-calendar";
 import { formatCurrency } from "@/lib/portfolio/calculations";
+import { formatFinancingCostImpact } from "@/lib/loans/format";
 import {
   buildPnlCalendar,
   type PnlCalendarDay,
@@ -357,7 +358,7 @@ export function PnlCalendarPage() {
       counts.set(weekStart, (counts.get(weekStart) ?? 0) + 1);
     }
     for (const day of calendar.days) {
-      if (!day.financingCost || day.financingCost <= 0) continue;
+      if (!day.financingCost || Math.abs(day.financingCost) <= 1e-9) continue;
       const date = parseIsoDate(day.date);
       if (!date || (date.getDay() !== 0 && date.getDay() !== 6)) continue;
       const weekStart = weekStartForDate(day.date);
@@ -527,7 +528,7 @@ export function PnlCalendarPage() {
         />
         <SummaryCard
           label={performanceView === "net" ? "本月融資成本" : "獲利／虧損日"}
-          value={performanceView === "net" ? `−${formatCurrency(calendar.summary.financingCost ?? 0)}` : `${calendar.summary.gainDayCount}／${calendar.summary.lossDayCount}`}
+          value={performanceView === "net" ? formatFinancingCostImpact(calendar.summary.financingCost ?? 0) : `${calendar.summary.gainDayCount}／${calendar.summary.lossDayCount}`}
           className={performanceView === "net" ? "text-loss" : ""}
           description={performanceView === "net" ? "每日按本金與年利率估算" : `共 ${calendar.summary.dataDayCount} 個估值日`}
         />

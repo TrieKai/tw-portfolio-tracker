@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { LoanFormModal } from "@/components/loans/LoanFormModal";
 import { LoanBalanceModal } from "@/components/loans/LoanBalanceModal";
+import { LoanPaymentModal } from "@/components/loans/LoanPaymentModal";
+import { LoanRateModal } from "@/components/loans/LoanRateModal";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -34,15 +36,20 @@ export function LoanManager() {
     ready,
     loans,
     loanSummary,
+    loanReminders,
     storage,
     addLoan,
     editLoan,
     updateLoanBalance,
+    recordLoanPayment,
+    recordLoanRateChange,
     setLoanStatus,
   } = usePortfolio();
   const [formOpen, setFormOpen] = useState(false);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [balanceLoan, setBalanceLoan] = useState<Loan | null>(null);
+  const [paymentLoan, setPaymentLoan] = useState<Loan | null>(null);
+  const [rateLoan, setRateLoan] = useState<Loan | null>(null);
   const today = todayIsoDate();
   const snapshots = useMemo(
     () => loans.map((loan) => calculateLoanSnapshot(loan, today)),
@@ -102,6 +109,22 @@ export function LoanManager() {
         </p>
       ) : null}
 
+      {loanReminders.length > 0 ? (
+        <section className="glass-card space-y-3 p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div><h2 className="font-semibold">貸款提醒</h2><p className="mt-1 text-xs text-muted">依繳款日、到期日、維持率與對帳狀態整理</p></div>
+            <span className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-muted">{loanReminders.length} 項</span>
+          </div>
+          <div className="space-y-2">
+            {loanReminders.map((reminder) => (
+              <div key={reminder.id} className={`rounded-lg border p-3 text-sm ${reminder.severity === "critical" ? "border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-300" : reminder.severity === "warning" ? "border-amber-400/40 bg-amber-400/10 text-amber-700 dark:text-amber-300" : "border-border bg-surface-raised text-muted"}`}>
+                <span className="font-medium">{reminder.loanName}</span><span className="mx-2">·</span><span>{reminder.message}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {riskSummary.monitoredLoanCount > 0 ? (
         <section className="glass-card space-y-4 p-4 sm:p-5">
           <div>
@@ -135,6 +158,8 @@ export function LoanManager() {
                 linkedHoldingName={storage.holdings.find((holding) => holding.id === snapshot.loan.linkedHoldingId)?.name}
                 risk={riskByLoanId.get(snapshot.loan.id)}
                 onEdit={() => setEditingLoan(snapshot.loan)}
+                onRecordPayment={() => setPaymentLoan(snapshot.loan)}
+                onRecordRate={() => setRateLoan(snapshot.loan)}
                 onUpdateBalance={hasFlexibleCredit(snapshot.loan) ? () => setBalanceLoan(snapshot.loan) : undefined}
                 onPaidOff={() => setLoanStatus(snapshot.loan.id, "paid_off", today)}
               />
@@ -180,6 +205,28 @@ export function LoanManager() {
           onClose={() => setBalanceLoan(null)}
         />
       ) : null}
+      {paymentLoan ? (
+        <LoanPaymentModal
+          loan={paymentLoan}
+          currentPrincipal={calculateLoanSnapshot(paymentLoan, today).currentPrincipal}
+          onSave={(input) => {
+            recordLoanPayment(paymentLoan.id, input);
+            setPaymentLoan(null);
+          }}
+          onClose={() => setPaymentLoan(null)}
+        />
+      ) : null}
+      {rateLoan ? (
+        <LoanRateModal
+          loan={rateLoan}
+          currentRate={calculateLoanSnapshot(rateLoan, today).currentAnnualInterestRate}
+          onSave={(input) => {
+            recordLoanRateChange(rateLoan.id, input);
+            setRateLoan(null);
+          }}
+          onClose={() => setRateLoan(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -192,6 +239,8 @@ function LoanCard({
   onPaidOff,
   onReopen,
   onUpdateBalance,
+  onRecordPayment,
+  onRecordRate,
 }: {
   snapshot: ReturnType<typeof calculateLoanSnapshot>;
   linkedHoldingName?: string;
@@ -200,6 +249,8 @@ function LoanCard({
   onPaidOff?: () => void;
   onReopen?: () => void;
   onUpdateBalance?: () => void;
+  onRecordPayment?: () => void;
+  onRecordRate?: () => void;
 }) {
   const { loan } = snapshot;
   const flexibleCredit = hasFlexibleCredit(loan);
@@ -223,6 +274,8 @@ function LoanCard({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {onRecordPayment ? <button type="button" className="btn-secondary text-sm" onClick={onRecordPayment}>記錄繳款</button> : null}
+          {onRecordRate ? <button type="button" className="btn-secondary text-sm" onClick={onRecordRate}>利率異動</button> : null}
           {onUpdateBalance ? <button type="button" className="btn-secondary text-sm" onClick={onUpdateBalance}>更新餘額</button> : null}
           <button type="button" className="btn-secondary text-sm" onClick={onEdit}>更正資料</button>
           {onPaidOff ? <button type="button" className="btn-secondary text-sm" onClick={onPaidOff}>標記已清償</button> : null}
@@ -230,9 +283,10 @@ function LoanCard({
         </div>
       </div>
 
-      <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <Stat label="目前本金" value={formatCurrency(snapshot.currentPrincipal)} />
-        <Stat label="年利率" value={`${loan.annualInterestRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`} />
+        <Stat label="目前年利率" value={`${snapshot.currentAnnualInterestRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`} />
+        <Stat label="實質年利率" value={snapshot.effectiveAprPercent === null ? "—" : `${snapshot.effectiveAprPercent.toFixed(2)}%`} sub={snapshot.effectiveAprPercent === null ? "未來利率或現金流不固定" : "含開辦費的年化估算"} />
         <Stat label="下次應繳" value={snapshot.nextPayment ? formatCurrency(snapshot.nextPayment.payment) : "—"} sub={snapshot.nextPayment?.paymentDate} />
         <Stat
           label={flexibleCredit ? "契約額度" : "預估剩餘利息"}
@@ -251,6 +305,8 @@ function LoanCard({
       {flexibleCredit && risk ? (
         <FlexibleCreditDetails loan={loan} risk={risk} />
       ) : null}
+
+      <LoanHistoryDetails loan={loan} />
 
       {!flexibleCredit ? <details className="mt-5 border-t border-border pt-4">
         <summary className="cursor-pointer text-sm font-medium text-accent">
@@ -327,5 +383,49 @@ function FlexibleCreditDetails({
       {risk.usesManualCollateralValue ? <p className="text-xs text-muted">包含手動輸入的外部擔保品市值；價格變動後請自行更新。</p> : null}
       <p className="text-xs text-muted">{secured ? "維持率與可跌幅是依目前價格的即時估算，實際追繳仍以券商或銀行認定為準。" : "循環額度沒有固定還款表；本金變動時請更正目前動用金額。"}</p>
     </div>
+  );
+}
+
+function LoanHistoryDetails({ loan }: { loan: Loan }) {
+  const payments = [...(loan.paymentHistory ?? [])].sort(
+    (a, b) =>
+      b.paymentDate.localeCompare(a.paymentDate) ||
+      b.createdAt.localeCompare(a.createdAt)
+  );
+  const rates = [...(loan.rateHistory ?? [])].sort(
+    (a, b) =>
+      b.effectiveDate.localeCompare(a.effectiveDate) ||
+      b.createdAt.localeCompare(a.createdAt)
+  );
+  if (payments.length === 0 && rates.length === 0) return null;
+
+  return (
+    <details className="mt-5 border-t border-border pt-4">
+      <summary className="cursor-pointer text-sm font-medium text-accent">帳務紀錄（繳款 {payments.length}、利率異動 {rates.length}）</summary>
+      <div className="mt-3 space-y-4">
+        {payments.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted">最近繳款</p>
+            {payments.slice(0, 8).map((payment) => {
+              const cashOutflow = payment.principalPaid + payment.interestPaid + payment.feePaid - payment.subsidyReceived;
+              const reconciled = !!payment.interestPeriodStartDate && !!payment.interestPeriodEndDate;
+              return (
+                <div key={payment.id} className="rounded-lg bg-surface-raised p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{payment.paymentDate}</span><span className="tabular-nums">實付 {formatCurrency(cashOutflow)}</span></div>
+                  <p className="mt-1 text-xs text-muted">本金 {formatCurrency(payment.principalPaid)} · 利息 {formatCurrency(payment.interestPaid)} · 費用 {formatCurrency(payment.feePaid)}{payment.subsidyReceived > 0 ? ` · 補貼 ${formatCurrency(payment.subsidyReceived)}` : ""}</p>
+                  <p className={`mt-1 text-xs ${reconciled ? "text-emerald-600 dark:text-emerald-300" : payment.interestPaid > 0 ? "text-amber-600 dark:text-amber-300" : "text-muted"}`}>{reconciled ? `已對帳 ${payment.interestPeriodStartDate}～${payment.interestPeriodEndDate}` : payment.interestPaid > 0 ? "尚未指定計息期間，損益仍採估算" : "本次無利息對帳"}{payment.remainingPrincipalAfter !== undefined ? ` · 餘額 ${formatCurrency(payment.remainingPrincipalAfter)}` : ""}</p>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        {rates.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted">利率異動</p>
+            {rates.slice(0, 8).map((change) => <div key={change.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-raised p-3 text-sm"><span>{change.effectiveDate}{change.note ? ` · ${change.note}` : ""}</span><span className="font-medium tabular-nums">{change.annualInterestRate}%</span></div>)}
+          </div>
+        ) : null}
+      </div>
+    </details>
   );
 }

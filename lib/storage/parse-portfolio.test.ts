@@ -124,6 +124,27 @@ describe("normalizePortfolioStorage", () => {
             },
             { effectiveDate: "2026-07-01", balance: 600_000 },
           ],
+          paymentHistory: [
+            {
+              id: "payment-1",
+              paymentDate: "2026-08-20",
+              principalPaid: 50_000,
+              interestPaid: 1_200,
+              feePaid: 10,
+              subsidyReceived: 0,
+              interestPeriodStartDate: "2026-08-01",
+              interestPeriodEndDate: "2026-08-20",
+              createdAt: "2026-08-20T00:00:00.000Z",
+            },
+          ],
+          rateHistory: [
+            {
+              id: "rate-1",
+              effectiveDate: "2026-08-10",
+              annualInterestRate: 2.8,
+              createdAt: "2026-08-10T00:00:00.000Z",
+            },
+          ],
           status: "active",
           dataQuality: "estimated",
           createdAt: "2026-08-01T00:00:00.000Z",
@@ -147,6 +168,8 @@ describe("normalizePortfolioStorage", () => {
       balanceHistory: [
         { effectiveDate: "2026-08-15", balance: 450_000 },
       ],
+      paymentHistory: [{ id: "payment-1", interestPaid: 1_200 }],
+      rateHistory: [{ id: "rate-1", annualInterestRate: 2.8 }],
     });
   });
 });

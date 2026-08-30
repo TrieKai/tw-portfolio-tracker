@@ -31,6 +31,7 @@ import { buildPortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { calculatePortfolioLoanSummary } from "@/lib/loans/calculations";
 import { calculatePortfolioLoanRiskSummary } from "@/lib/loans/risk";
+import { buildLoanReminders } from "@/lib/loans/reminders";
 import { computePortfolioHealth } from "@/lib/portfolio/health";
 import { computeInvestmentWeather } from "@/lib/portfolio/weather";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -46,7 +47,7 @@ import { usePortfolio } from "@/providers/PortfolioProvider";
 import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 
 export default function DashboardPage() {
-  const { ready, holdings, summary, exposure, loanSummary, loanRiskSummary, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
+  const { ready, holdings, summary, exposure, loanSummary, loanRiskSummary, loanReminders, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
   const { preferences } = useUiPreferences();
   const [travelDate, setTravelDate] = useState<string | null>(null);
   const currentPnlCalendar = useMemo(
@@ -100,6 +101,11 @@ export default function DashboardPage() {
         rawHoldings,
         travelDate
       ),
+      loanReminders: buildLoanReminders(
+        storage.loans,
+        rawHoldings,
+        travelDate
+      ),
       exposure: computePortfolioExposure(
         enriched,
         { netAssets: storage.settings.netAssets },
@@ -124,6 +130,7 @@ export default function DashboardPage() {
   const shownLoanSummary = travelState?.loanSummary ?? loanSummary;
   const shownLoanRiskSummary =
     travelState?.loanRiskSummary ?? loanRiskSummary;
+  const shownLoanReminders = travelState?.loanReminders ?? loanReminders;
   const viewFor = (section: DashboardSectionId) =>
     preferences.dashboardLayout.find((item) => item.section === section)?.view ??
     "standard";
@@ -375,7 +382,7 @@ export default function DashboardPage() {
       />
 
       <div className="mt-6">
-        <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} />
+        <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} reminders={shownLoanReminders} />
       </div>
 
       <div className="dashboard-grid">

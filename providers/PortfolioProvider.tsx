@@ -47,6 +47,7 @@ import {
 } from "@/lib/portfolio/exposure";
 import { calculatePortfolioLoanSummary } from "@/lib/loans/calculations";
 import { calculatePortfolioLoanRiskSummary } from "@/lib/loans/risk";
+import { buildLoanReminders } from "@/lib/loans/reminders";
 import {
   buildPortfolioPnlBreakdowns,
   type PortfolioPnlBreakdowns,
@@ -78,6 +79,8 @@ import {
   addLoan as addLoanToStorage,
   editLoan as editLoanInStorage,
   recordLoanBalance as recordLoanBalanceInStorage,
+  recordLoanPayment as recordLoanPaymentInStorage,
+  recordLoanRateChange as recordLoanRateChangeInStorage,
   setLoanStatus as setLoanStatusInStorage,
 } from "@/lib/storage/loan-store";
 import type {
@@ -96,8 +99,11 @@ import type {
 } from "@/lib/types/holding";
 import type {
   CreateLoanInput,
+  CreateLoanPaymentInput,
+  CreateLoanRateChangeInput,
   EditLoanInput,
   Loan,
+  LoanReminder,
   LoanStatus,
   PortfolioLoanSummary,
   PortfolioLoanRiskSummary,
@@ -149,6 +155,7 @@ interface PortfolioContextValue {
   loans: Loan[];
   loanSummary: PortfolioLoanSummary;
   loanRiskSummary: PortfolioLoanRiskSummary;
+  loanReminders: LoanReminder[];
   sales: SaleTransaction[];
   summary: PortfolioSummary;
   exposure: PortfolioExposureSummary;
@@ -174,6 +181,8 @@ interface PortfolioContextValue {
     balance: number,
     effectiveDate: string
   ) => void;
+  recordLoanPayment: (id: string, input: CreateLoanPaymentInput) => void;
+  recordLoanRateChange: (id: string, input: CreateLoanRateChangeInput) => void;
   setLoanStatus: (
     id: string,
     status: LoanStatus,
@@ -453,6 +462,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       ),
     [loans, storage?.holdings]
   );
+  const loanReminders = useMemo(
+    () =>
+      buildLoanReminders(
+        loans,
+        storage?.holdings ?? [],
+        todayIsoDate()
+      ),
+    [loans, storage?.holdings]
+  );
 
   const exposure = useMemo(
     () =>
@@ -569,6 +587,22 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       persist(
         recordLoanBalanceInStorage(storage, id, balance, effectiveDate)
       );
+    },
+    [storage, persist]
+  );
+
+  const recordLoanPayment = useCallback(
+    (id: string, input: CreateLoanPaymentInput) => {
+      if (!storage) return;
+      persist(recordLoanPaymentInStorage(storage, id, input));
+    },
+    [storage, persist]
+  );
+
+  const recordLoanRateChange = useCallback(
+    (id: string, input: CreateLoanRateChangeInput) => {
+      if (!storage) return;
+      persist(recordLoanRateChangeInStorage(storage, id, input));
     },
     [storage, persist]
   );
@@ -1031,6 +1065,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       loans,
       loanSummary,
       loanRiskSummary,
+      loanReminders,
       sales,
       summary,
       exposure,
@@ -1052,6 +1087,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       addLoan,
       editLoan,
       updateLoanBalance,
+      recordLoanPayment,
+      recordLoanRateChange,
       setLoanStatus,
       setManualPrice,
       updateOne,
@@ -1081,6 +1118,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       loans,
       loanSummary,
       loanRiskSummary,
+      loanReminders,
       sales,
       summary,
       exposure,
@@ -1098,6 +1136,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       addLoan,
       editLoan,
       updateLoanBalance,
+      recordLoanPayment,
+      recordLoanRateChange,
       setLoanStatus,
       setManualPrice,
       updateOne,

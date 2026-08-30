@@ -10,6 +10,7 @@ import {
 import { formatCurrency } from "@/lib/portfolio/calculations";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { estimateInvestmentFinancingCostForPeriod } from "@/lib/loans/calculations";
+import { formatFinancingCostImpact } from "@/lib/loans/format";
 import {
   buildMonthlyPnlRows,
   hasMonthlyPnlBeforeYtd,
@@ -60,7 +61,7 @@ function MonthlyPnlRowMobile({ row }: { row: CalendarMonthlyPnlRow }) {
         <div className="text-right">
           <PnlCell value={row.netPnl} />
           <p className="text-xs tabular-nums text-muted">
-            投資 {formatCurrency(row.investmentPnl)} · 利息 −{formatCurrency(row.financingCost)}
+            投資 {formatCurrency(row.investmentPnl)} · 融資成本影響 {formatFinancingCostImpact(row.financingCost)}
           </p>
         </div>
       </div>
@@ -176,8 +177,8 @@ export function MonthlyPnlTable({
                     <td className="px-4 py-3">
                       <PnlCell value={row.investmentPnl} />
                     </td>
-                    <td className="px-4 py-3 tabular-nums text-loss">
-                      {row.financingCost > 0 ? `−${formatCurrency(row.financingCost)}` : formatCurrency(0)}
+                    <td className={`px-4 py-3 tabular-nums ${row.financingCost > 0 ? "text-loss" : row.financingCost < 0 ? "text-gain" : ""}`}>
+                      {formatFinancingCostImpact(row.financingCost)}
                     </td>
                     <td className="px-4 py-3">
                       <PnlCell value={row.netPnl} />
