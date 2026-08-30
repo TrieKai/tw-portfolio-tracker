@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
 import { formatIsoDateZh } from "@/lib/date/iso-date";
 import type {
@@ -152,14 +154,33 @@ export function PnlDetailPanel({
   transactions: PortfolioTransaction[];
   onClose: () => void;
 }) {
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const isDay = selection.kind === "day";
   const title = isDay
     ? formatIsoDateZh(selection.day.date)
     : `${selection.week.startDate.slice(5).replace("-", "/")}–${selection.week.endDate.slice(5).replace("-", "/")} 週損益`;
 
-  return (
+  useEffect(() => {
+    setPortalRoot(document.body);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  if (!portalRoot) return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end bg-black/50 sm:items-stretch sm:justify-end"
+      className="fixed inset-0 z-[100] flex h-[100dvh] w-screen items-end bg-black/60 sm:items-stretch sm:justify-end"
       role="dialog"
       aria-modal="true"
       aria-labelledby="pnl-detail-title"
@@ -168,10 +189,9 @@ export function PnlDetailPanel({
       }}
     >
       <aside
-        className="h-[88dvh] w-full overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-2xl sm:h-full sm:max-w-md sm:rounded-none sm:border-l sm:border-border sm:p-6"
-        style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
+        className="h-[88dvh] w-full overflow-y-auto rounded-t-2xl bg-surface shadow-2xl sm:h-[100dvh] sm:max-w-md sm:rounded-none sm:border-l sm:border-border"
       >
-        <div className="sticky top-0 z-10 mb-5 flex items-center justify-between gap-4 bg-surface pb-3">
+        <div className="sticky top-0 z-20 flex items-center justify-between gap-4 rounded-t-2xl border-b border-border bg-surface px-5 py-4 sm:rounded-none sm:px-6">
           <div>
             <p className="text-xs text-muted">損益明細</p>
             <h2 id="pnl-detail-title" className="mt-1 text-lg font-semibold">
@@ -188,31 +208,37 @@ export function PnlDetailPanel({
           </button>
         </div>
 
-        {selection.kind === "day" ? (
-          <DayDetail day={selection.day} transactions={transactions} />
-        ) : selection.days.length === 0 ? (
-          <p className="rounded-xl border border-border p-5 text-sm text-muted">
-            這一週尚無可計算的估值資料。
-          </p>
-        ) : (
-          <div className="space-y-5">
-            <div className="rounded-xl border border-border bg-surface-raised/60 p-4">
-              <p className={`text-2xl font-semibold tabular-nums ${pnlClass(selection.week.pnl)}`}>
-                {signedCurrency(selection.week.pnl)}
-              </p>
-              <p className={`mt-1 text-sm tabular-nums ${pnlClass(selection.week.returnRate)}`}>
-                複利報酬 {signedRate(selection.week.returnRate)}
-              </p>
-            </div>
-            {selection.days.map((day) => (
-              <div key={day.date} className="space-y-2">
-                <h3 className="text-sm font-semibold">{formatIsoDateZh(day.date)}</h3>
-                <DayDetail day={day} transactions={transactions} />
+        <div
+          className="px-5 pt-5 sm:px-6"
+          style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
+        >
+          {selection.kind === "day" ? (
+            <DayDetail day={selection.day} transactions={transactions} />
+          ) : selection.days.length === 0 ? (
+            <p className="rounded-xl border border-border p-5 text-sm text-muted">
+              這一週尚無可計算的估值資料。
+            </p>
+          ) : (
+            <div className="space-y-5">
+              <div className="rounded-xl border border-border bg-surface-raised/60 p-4">
+                <p className={`text-2xl font-semibold tabular-nums ${pnlClass(selection.week.pnl)}`}>
+                  {signedCurrency(selection.week.pnl)}
+                </p>
+                <p className={`mt-1 text-sm tabular-nums ${pnlClass(selection.week.returnRate)}`}>
+                  複利報酬 {signedRate(selection.week.returnRate)}
+                </p>
               </div>
-            ))}
-          </div>
-        )}
+              {selection.days.map((day) => (
+                <div key={day.date} className="space-y-2">
+                  <h3 className="text-sm font-semibold">{formatIsoDateZh(day.date)}</h3>
+                  <DayDetail day={day} transactions={transactions} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </aside>
-    </div>
+    </div>,
+    portalRoot
   );
 }

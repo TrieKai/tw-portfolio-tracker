@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -167,7 +168,7 @@ function CalendarDayCell({
   );
 }
 
-function CalendarGrid({
+export function CalendarGrid({
   rows,
   calendar,
   weekendEvents,
@@ -217,20 +218,11 @@ function CalendarGrid({
             key={row.weekStartDate}
             className="grid grid-cols-5 gap-1.5 sm:gap-2 md:grid-cols-[repeat(5,minmax(0,1fr))_minmax(7.5rem,.8fr)]"
           >
-            {row.dates.map((date, dayIndex) => (
-              <CalendarDayCell
-                key={date ?? `${row.weekStartDate}-${dayIndex}`}
-                date={date}
-                day={date ? dayByDate.get(date) : undefined}
-                maximum={maximum}
-                onSelect={onSelectDay}
-              />
-            ))}
             <button
               type="button"
               disabled={!week && weekendEventCount === 0}
               onClick={() => selectableWeek && onSelectWeek(selectableWeek)}
-              className="col-span-5 flex min-h-12 items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-left disabled:cursor-default md:col-span-1 md:min-h-28 md:flex-col md:items-stretch md:justify-center md:text-center"
+              className="order-first col-span-5 flex min-h-12 items-center justify-between rounded-xl border border-border bg-surface px-3 py-2 text-left disabled:cursor-default md:order-last md:col-span-1 md:min-h-28 md:flex-col md:items-stretch md:justify-center md:text-center"
               aria-label={`第 ${index + 1} 週損益`}
             >
               <span className="text-xs text-muted md:mb-2">第 {index + 1} 週</span>
@@ -249,6 +241,15 @@ function CalendarGrid({
                 </span>
               ) : null}
             </button>
+            {row.dates.map((date, dayIndex) => (
+              <CalendarDayCell
+                key={date ?? `${row.weekStartDate}-${dayIndex}`}
+                date={date}
+                day={date ? dayByDate.get(date) : undefined}
+                maximum={maximum}
+                onSelect={onSelectDay}
+              />
+            ))}
           </div>
         );
       })}
@@ -301,6 +302,7 @@ export function PnlCalendarPage() {
   const [selection, setSelection] = useState<PnlDetailSelection | null>(null);
   const [dividendOpen, setDividendOpen] = useState(false);
   const autoLoadedRef = useRef(new Set<string>());
+  const closeDetail = useCallback(() => setSelection(null), []);
 
   const investmentHoldings = useMemo(
     () => holdings.filter((holding) => holding.assetType !== "property"),
@@ -547,7 +549,7 @@ export function PnlCalendarPage() {
         <PnlDetailPanel
           selection={selection}
           transactions={storage.transactions}
-          onClose={() => setSelection(null)}
+          onClose={closeDetail}
         />
       ) : null}
       {dividendOpen ? (
