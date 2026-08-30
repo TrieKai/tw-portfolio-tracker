@@ -44,23 +44,27 @@ function qualityLabel(day: PnlCalendarDay): string {
 function DayDetail({
   day,
   transactions,
+  showSummary = true,
 }: {
   day: PnlCalendarDay;
   transactions: PortfolioTransaction[];
+  showSummary?: boolean;
 }) {
   return (
     <section className="space-y-4">
-      <div className="rounded-xl border border-border bg-surface-raised/60 p-4">
-        <p className="text-xs text-muted">{qualityLabel(day)}</p>
-        <div className="mt-2 flex items-end justify-between gap-3">
-          <p className={`text-2xl font-semibold tabular-nums ${pnlClass(day.pnl)}`}>
-            {signedCurrency(day.pnl)}
-          </p>
-          <p className={`font-medium tabular-nums ${pnlClass(day.returnRate)}`}>
-            {signedRate(day.returnRate)}
-          </p>
+      {showSummary ? (
+        <div className="rounded-xl border border-border bg-surface-raised/60 p-4">
+          <p className="text-xs text-muted">{qualityLabel(day)}</p>
+          <div className="mt-2 flex items-end justify-between gap-3">
+            <p className={`text-2xl font-semibold tabular-nums ${pnlClass(day.pnl)}`}>
+              {signedCurrency(day.pnl)}
+            </p>
+            <p className={`font-medium tabular-nums ${pnlClass(day.returnRate)}`}>
+              {signedRate(day.returnRate)}
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {day.contributions.length === 0 ? (
         <p className="rounded-xl border border-border p-4 text-sm text-muted">
@@ -150,6 +154,78 @@ function DayDetail({
   );
 }
 
+export function PnlWeekDetail({
+  week,
+  days,
+  transactions,
+}: {
+  week: PnlCalendarWeek;
+  days: PnlCalendarDay[];
+  transactions: PortfolioTransaction[];
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border bg-surface-raised/60 p-4">
+        <p className="text-xs text-muted">本週總結</p>
+        <div className="mt-3 grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs text-muted">總損益</p>
+            <p className={`mt-1 text-2xl font-semibold tabular-nums ${pnlClass(week.pnl)}`}>
+              {signedCurrency(week.pnl)}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-muted">複利報酬</p>
+            <p className={`mt-1 font-medium tabular-nums ${pnlClass(week.returnRate)}`}>
+              {signedRate(week.returnRate)}
+            </p>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-muted">{week.dataDayCount} 個損益日</p>
+      </div>
+
+      <div className="space-y-2">
+        {days.map((day) => (
+          <details
+            key={day.date}
+            className="group rounded-xl border border-border bg-surface"
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:content-none [&::-webkit-details-marker]:hidden">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold">{formatIsoDateZh(day.date)}</h3>
+                <p className="mt-0.5 text-xs text-muted">{qualityLabel(day)}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3 text-right">
+                <div>
+                  <p className={`font-semibold tabular-nums ${pnlClass(day.pnl)}`}>
+                    {signedCurrency(day.pnl)}
+                  </p>
+                  <p className={`text-xs tabular-nums ${pnlClass(day.returnRate)}`}>
+                    {signedRate(day.returnRate)}
+                  </p>
+                </div>
+                <span
+                  aria-hidden="true"
+                  className="text-muted transition-transform group-open:rotate-180"
+                >
+                  ⌄
+                </span>
+              </div>
+            </summary>
+            <div className="border-t border-border px-4 py-4">
+              <DayDetail
+                day={day}
+                transactions={transactions}
+                showSummary={false}
+              />
+            </div>
+          </details>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PnlDetailPanel({
   selection,
   transactions,
@@ -224,22 +300,11 @@ export function PnlDetailPanel({
               這一週尚無可計算的估值資料。
             </p>
           ) : (
-            <div className="space-y-5">
-              <div className="rounded-xl border border-border bg-surface-raised/60 p-4">
-                <p className={`text-2xl font-semibold tabular-nums ${pnlClass(selection.week.pnl)}`}>
-                  {signedCurrency(selection.week.pnl)}
-                </p>
-                <p className={`mt-1 text-sm tabular-nums ${pnlClass(selection.week.returnRate)}`}>
-                  複利報酬 {signedRate(selection.week.returnRate)}
-                </p>
-              </div>
-              {selection.days.map((day) => (
-                <div key={day.date} className="space-y-2">
-                  <h3 className="text-sm font-semibold">{formatIsoDateZh(day.date)}</h3>
-                  <DayDetail day={day} transactions={transactions} />
-                </div>
-              ))}
-            </div>
+            <PnlWeekDetail
+              week={selection.week}
+              days={selection.days}
+              transactions={transactions}
+            />
           )}
         </div>
       </aside>
