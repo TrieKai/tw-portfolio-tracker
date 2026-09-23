@@ -10,8 +10,8 @@ import {
   type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
-import { formatCurrency } from "@/lib/portfolio/calculations";
 import type { PnlBreakdown, PeriodPnlBreakdown } from "@/lib/portfolio/pnl-breakdown";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 const VIEWPORT_MARGIN = 12;
 const GAP = 8;
@@ -42,6 +42,7 @@ function BreakdownPanel({
   style: CSSProperties;
   panelRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   return (
     <div
       ref={panelRef}
@@ -63,7 +64,7 @@ function BreakdownPanel({
               <span
                 className={`tabular-nums font-medium ${amountClass(row.amount)}`}
               >
-                {formatCurrency(row.amount)}
+                {formatAmount(row.amount)}
               </span>
             </span>
           ))}
@@ -81,7 +82,7 @@ function BreakdownPanel({
               <span
                 className={`shrink-0 tabular-nums ${amountClass(row.amount)}`}
               >
-                {formatCurrency(row.amount)}
+                {formatAmount(row.amount)}
               </span>
             </span>
           ))}
@@ -93,7 +94,7 @@ function BreakdownPanel({
       <span className="mt-2 flex justify-between gap-3 border-t border-border/60 pt-2 font-medium">
         <span>合計</span>
         <span className={`tabular-nums ${amountClass(total)}`}>
-          {formatCurrency(total)}
+          {formatAmount(total)}
         </span>
       </span>
     </div>

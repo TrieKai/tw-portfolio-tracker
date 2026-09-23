@@ -1,11 +1,13 @@
+"use client";
+
 import Link from "next/link";
 import { formatFinancingCostImpact } from "@/lib/loans/format";
-import { formatCurrency } from "@/lib/portfolio/calculations";
 import type {
   PortfolioLoanRiskSummary,
   PortfolioLoanSummary,
   LoanReminder,
 } from "@/lib/types/loan";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 export function LoanSummaryPanel({
   summary,
@@ -16,6 +18,7 @@ export function LoanSummaryPanel({
   riskSummary?: PortfolioLoanRiskSummary;
   reminders?: LoanReminder[];
 }) {
+  const { formatAmount, maskAmount } = useAmountPrivacy();
   if (summary.activeLoanCount === 0) {
     return (
       <section className="glass-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
@@ -33,10 +36,10 @@ export function LoanSummaryPanel({
         <Link href="/loans" className="text-sm font-medium text-accent hover:underline">管理貸款 →</Link>
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Metric label="貸款總額" value={formatCurrency(summary.totalDebt)} />
-        <Metric label="累計投資融資成本" value={formatFinancingCostImpact(summary.investmentFinancingCostToDate)} loss={summary.investmentFinancingCostToDate > 0} gain={summary.investmentFinancingCostToDate < 0} />
-        <Metric label="本月融資成本" value={formatFinancingCostImpact(summary.monthlyInvestmentFinancingCost)} loss={summary.monthlyInvestmentFinancingCost > 0} gain={summary.monthlyInvestmentFinancingCost < 0} />
-        <Metric label="扣息後淨損益" value={formatCurrency(summary.netInvestmentPnl)} gain={netPositive} loss={!netPositive} />
+        <Metric label="貸款總額" value={formatAmount(summary.totalDebt)} />
+        <Metric label="累計投資融資成本" value={maskAmount(formatFinancingCostImpact(summary.investmentFinancingCostToDate))} loss={summary.investmentFinancingCostToDate > 0} gain={summary.investmentFinancingCostToDate < 0} />
+        <Metric label="本月融資成本" value={maskAmount(formatFinancingCostImpact(summary.monthlyInvestmentFinancingCost))} loss={summary.monthlyInvestmentFinancingCost > 0} gain={summary.monthlyInvestmentFinancingCost < 0} />
+        <Metric label="扣息後淨損益" value={formatAmount(summary.netInvestmentPnl)} gain={netPositive} loss={!netPositive} />
       </dl>
       {summary.hasIncompleteData ? <p className="mt-3 text-xs text-amber-600 dark:text-amber-300">部分貸款採估算或待補資料；詳細可信範圍請至貸款頁查看。</p> : null}
       {riskSummary && riskSummary.monitoredLoanCount > 0 ? (

@@ -1,28 +1,26 @@
 "use client";
 
-import {
-  formatCurrency,
-  formatPercent,
-  formatQuotePrice,
-} from "@/lib/portfolio/calculations";
+import { formatPercent, formatQuotePrice } from "@/lib/portfolio/calculations";
 import type { PortfolioTimelinePoint } from "@/lib/portfolio/portfolio-timeline";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 export function PortfolioTimelineTooltip({
   point,
 }: {
   point: PortfolioTimelinePoint;
 }) {
+  const { formatAmount, maskAmount } = useAmountPrivacy();
   return (
     <div className="max-w-[min(18rem,85vw)] space-y-2 text-xs">
       <p className="font-medium">{point.date}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1">
         <span className="text-muted">總市值</span>
         <span className="text-right tabular-nums">
-          {formatCurrency(point.totalValue)}
+          {formatAmount(point.totalValue)}
         </span>
         <span className="text-muted">投入成本</span>
         <span className="text-right tabular-nums">
-          {formatCurrency(point.totalCost)}
+          {formatAmount(point.totalCost)}
         </span>
         <span className="text-muted">損益</span>
         <span
@@ -30,13 +28,13 @@ export function PortfolioTimelineTooltip({
             point.pnl >= 0 ? "text-gain" : "text-loss"
           }`}
         >
-          {formatCurrency(point.pnl)} ({formatPercent(point.returnRate)})
+          {formatAmount(point.pnl)} ({formatPercent(point.returnRate)})
         </span>
       </div>
 
       {point.costAddedToday > 0 && (
         <p className="rounded bg-accent-dim px-2 py-1 text-accent">
-          當日新投入 {formatCurrency(point.costAddedToday)}：
+          當日新投入 {formatAmount(point.costAddedToday)}：
           {point.newHoldings.join("、")}
         </p>
       )}
@@ -54,11 +52,11 @@ export function PortfolioTimelineTooltip({
                   )}
                 </span>
                 <span className="shrink-0 tabular-nums">
-                  {formatCurrency(h.marketValue)}
+                  {formatAmount(h.marketValue)}
                 </span>
               </div>
               <div className="text-muted">
-                買入 {h.buyDate} · {formatQuotePrice(h.buyPrice, h.assetType)} ×{" "}
+                買入 {h.buyDate} · {maskAmount(formatQuotePrice(h.buyPrice, h.assetType))} ×{" "}
                 {h.quantity}
                 {!h.hasMarketPrice && " · 以買入價估算"}
               </div>

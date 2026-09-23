@@ -14,7 +14,7 @@ import {
   YAxis,
 } from "recharts";
 import type { ChartRange } from "@/lib/portfolio/calculations";
-import { formatCurrency, formatPercent } from "@/lib/portfolio/calculations";
+import { formatPercent } from "@/lib/portfolio/calculations";
 import {
   buildPortfolioTimeline,
   summarizePortfolioPeriod,
@@ -23,6 +23,7 @@ import {
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
 import { ChartFrame } from "@/components/ui/ChartFrame";
 import { PortfolioTimelineTooltip } from "./PortfolioTimelineTooltip";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 interface PortfolioValueTrendChartProps {
   holdings: Holding[];
@@ -35,6 +36,7 @@ export function PortfolioValueTrendChart({
   priceHistory,
   range,
 }: PortfolioValueTrendChartProps) {
+  const { amountsHidden, formatAmount } = useAmountPrivacy();
   const timeline = useMemo(
     () => buildPortfolioTimeline(holdings, priceHistory, range),
     [holdings, priceHistory, range]
@@ -87,17 +89,17 @@ export function PortfolioValueTrendChart({
     <div className="space-y-4">
       {summary && (
         <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="期初市值" value={formatCurrency(summary.startValue)} />
-          <Stat label="期末市值" value={formatCurrency(summary.endValue)} />
+          <Stat label="期初市值" value={formatAmount(summary.startValue)} />
+          <Stat label="期末市值" value={formatAmount(summary.endValue)} />
           <Stat
             label="市值變化"
-            value={`${formatCurrency(summary.change)} (${formatPercent(summary.changePercent)})`}
+            value={`${formatAmount(summary.change)} (${formatPercent(summary.changePercent)})`}
             highlight={summary.change >= 0 ? "gain" : "loss"}
           />
           {periodSummary && (
             <Stat
               label="期間新投入"
-              value={formatCurrency(periodSummary.costAddedInPeriod)}
+              value={formatAmount(periodSummary.costAddedInPeriod)}
               sub={
                 periodSummary.lotsAddedInPeriod.length > 0
                   ? `${periodSummary.lotsAddedInPeriod.length} 筆新買入`
@@ -122,7 +124,11 @@ export function PortfolioValueTrendChart({
             stroke="var(--muted)"
             domain={["auto", "auto"]}
             tickFormatter={(v) =>
-              v >= 10000 ? `${Math.round(Number(v) / 10000)}萬` : String(v)
+              amountsHidden
+                ? "••"
+                : v >= 10000
+                  ? `${Math.round(Number(v) / 10000)}萬`
+                  : String(v)
             }
           />
           <Tooltip

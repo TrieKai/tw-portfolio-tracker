@@ -2,10 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  formatCurrency,
-  formatPercent,
-} from "@/lib/portfolio/calculations";
+import { formatPercent } from "@/lib/portfolio/calculations";
 import {
   formatExposureRatio,
   type PortfolioExposureSummary,
@@ -13,6 +10,7 @@ import {
 import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import type { PortfolioSettings } from "@/lib/types/holding";
 import type { DashboardCardView } from "@/lib/types/ui-preferences";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 interface ExposurePanelProps {
   exposure: PortfolioExposureSummary;
@@ -31,6 +29,7 @@ export function ExposurePanel({
   view = "standard",
   readOnly = false,
 }: ExposurePanelProps) {
+  const { formatAmount } = useAmountPrivacy();
   const [netAssetsInput, setNetAssetsInput] = useState(
     settings.netAssets !== undefined ? String(settings.netAssets) : ""
   );
@@ -69,7 +68,7 @@ export function ExposurePanel({
     );
   }
 
-  const netAssetsHint = buildNetAssetsHint(exposure);
+  const netAssetsHint = buildNetAssetsHint(exposure, formatAmount);
 
   return (
     <section className="exposure-panel min-w-0 space-y-4">
@@ -126,16 +125,16 @@ export function ExposurePanel({
       <div className="exposure-metrics grid gap-4">
         <MetricCard
           label="持倉市值"
-          value={formatCurrency(exposure.totalMarketValue)}
+          value={formatAmount(exposure.totalMarketValue)}
         />
         <MetricCard
           label="總曝險金額"
-          value={formatCurrency(exposure.totalExposure)}
+          value={formatAmount(exposure.totalExposure)}
           sub="Σ（市值 × 槓桿）"
         />
         <MetricCard
           label="淨資產"
-          value={formatCurrency(exposure.netAssets)}
+          value={formatAmount(exposure.netAssets)}
           sub={netAssetsHint}
         />
         <MetricCard
@@ -187,18 +186,18 @@ export function ExposurePanel({
                   )}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
-                  {formatCurrency(row.marketValue)}
+                  {formatAmount(row.marketValue)}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-muted">
                   {row.mortgageBalance !== undefined
-                    ? formatCurrency(row.mortgageBalance)
+                    ? formatAmount(row.mortgageBalance)
                     : "—"}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
                   {row.leverage === 1 ? "1×" : `${row.leverage}×`}
                 </td>
                 <td className="px-4 py-3 text-right font-medium tabular-nums">
-                  {formatCurrency(row.exposureAmount)}
+                  {formatAmount(row.exposureAmount)}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums text-muted">
                   {formatPercent(row.exposureSharePct)}
@@ -212,15 +211,18 @@ export function ExposurePanel({
   );
 }
 
-function buildNetAssetsHint(exposure: PortfolioExposureSummary): string {
+function buildNetAssetsHint(
+  exposure: PortfolioExposureSummary,
+  formatAmount: (value: number) => string
+): string {
   if (exposure.usesNetAssetsOverride) return "已指定淨資產";
 
   const parts: string[] = [];
   if (exposure.propertyMortgages > 0) {
-    parts.push(`房貸 ${formatCurrency(exposure.propertyMortgages)}`);
+    parts.push(`房貸 ${formatAmount(exposure.propertyMortgages)}`);
   }
   if (exposure.investmentLiabilities > 0) {
-    parts.push(`投資負債 ${formatCurrency(exposure.investmentLiabilities)}`);
+    parts.push(`投資負債 ${formatAmount(exposure.investmentLiabilities)}`);
   }
   if (parts.length === 0) return "未設定時以持倉市值為淨資產";
   return `持倉市值 − ${parts.join(" − ")}`;

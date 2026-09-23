@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  formatCurrency,
   formatPercent,
   getMergedSortedHistory,
 } from "@/lib/portfolio/calculations";
@@ -10,6 +9,7 @@ import { groupHoldings } from "@/lib/portfolio/holding-groups";
 import { computeParallelUniverse } from "@/lib/portfolio/parallel-universe";
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
 import type { DashboardCardView } from "@/lib/types/ui-preferences";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 export function ParallelUniversePanel({
   holdings,
@@ -20,6 +20,7 @@ export function ParallelUniversePanel({
   priceHistory: PriceHistoryMap;
   view?: DashboardCardView;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   const options = useMemo(
     () => groupHoldings(holdings)
       .filter((group) => group.assetType !== "property")
@@ -131,11 +132,11 @@ export function ParallelUniversePanel({
                       <p className="text-sm font-medium">{item.label}</p>
                       {winner === item.id && <span className="text-[10px] font-semibold text-accent">本次領先</span>}
                     </div>
-                    <p className="mt-3 text-xl font-bold tabular-nums">{formatCurrency(item.finalValue)}</p>
+                    <p className="mt-3 text-xl font-bold tabular-nums">{formatAmount(item.finalValue)}</p>
                     <p className={`mt-1 text-sm font-semibold tabular-nums ${item.pnl >= 0 ? "text-gain" : "text-loss"}`}>
-                      {formatCurrency(item.pnl)} · {formatPercent(item.returnRate)}
+                      {formatAmount(item.pnl)} · {formatPercent(item.returnRate)}
                     </p>
-                    {view !== "compact" && <p className="mt-1 text-xs text-muted">投入 {formatCurrency(item.invested)}</p>}
+                    {view !== "compact" && <p className="mt-1 text-xs text-muted">投入 {formatAmount(item.invested)}</p>}
                   </section>
                 ))}
               </div>

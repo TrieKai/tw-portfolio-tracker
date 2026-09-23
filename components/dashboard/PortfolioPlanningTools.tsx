@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatCurrency } from "@/lib/portfolio/calculations";
 import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import {
   DEFAULT_ALLOCATION_TARGETS,
@@ -18,6 +17,7 @@ import type {
   PortfolioSummary,
 } from "@/lib/types/holding";
 import type { DashboardCardView } from "@/lib/types/ui-preferences";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 const ASSET_TYPES: AssetType[] = ["stock", "fund", "property"];
 
@@ -73,6 +73,7 @@ export function PortfolioPlanningTools({
 }
 
 export function StressTestPanel({ holdings, view = "standard" }: { holdings: HoldingWithMetrics[]; view?: DashboardCardView }) {
+  const { formatAmount } = useAmountPrivacy();
   const [scenarioId, setScenarioId] = useState<StressScenarioId>("correction");
   const [customShocks, setCustomShocks] = useState<AssetShockRates>(STRESS_SCENARIOS.custom.shocks);
   const scenario = STRESS_SCENARIOS[scenarioId];
@@ -126,8 +127,8 @@ export function StressTestPanel({ holdings, view = "standard" }: { holdings: Hol
       <div className="mt-5 rounded-2xl bg-rose-500/10 p-4">
         <p className="text-xs text-muted">情境後預估總資產</p>
         <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-2xl font-bold tabular-nums">{formatCurrency(result.stressedValue)}</span>
-          <span className="font-semibold tabular-nums text-loss">{result.impactRate.toFixed(1)}% · {formatCurrency(result.impact)}</span>
+          <span className="text-2xl font-bold tabular-nums">{formatAmount(result.stressedValue)}</span>
+          <span className="font-semibold tabular-nums text-loss">{result.impactRate.toFixed(1)}% · {formatAmount(result.impact)}</span>
         </div>
         {result.shockedHoldingName && <p className="mt-1 text-xs text-muted">假設「{result.shockedHoldingName}」單一標的下跌 30%</p>}
       </div>
@@ -140,7 +141,7 @@ export function StressTestPanel({ holdings, view = "standard" }: { holdings: Hol
               <span className="ml-2 text-xs text-muted">情境 {row.shockRate > 0 ? "+" : ""}{row.shockRate}%</span>
             </div>
             <span className={`tabular-nums ${row.impact < 0 ? "text-loss" : row.impact > 0 ? "text-gain" : "text-muted"}`}>
-              {row.impact > 0 ? "+" : ""}{formatCurrency(row.impact)}
+              {row.impact > 0 ? "+" : ""}{formatAmount(row.impact)}
             </span>
           </div>
         ))}
@@ -162,6 +163,7 @@ export function RebalancePanel({
   readOnly: boolean;
   view?: DashboardCardView;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   const [targets, setTargets] = useState<AssetAllocationTargets>(savedTargets ?? DEFAULT_ALLOCATION_TARGETS);
   const [cash, setCash] = useState(0);
   const [saved, setSaved] = useState(false);
@@ -244,7 +246,7 @@ export function RebalancePanel({
                   </div>
                   <div className="text-right">
                     <p className={`text-xs ${nearTarget ? "text-muted" : action.adjustment > 0 ? "text-gain" : "text-loss"}`}>{verb}</p>
-                    <p className="font-semibold tabular-nums">{nearTarget ? "—" : formatCurrency(Math.abs(action.adjustment))}</p>
+                    <p className="font-semibold tabular-nums">{nearTarget ? "—" : formatAmount(Math.abs(action.adjustment))}</p>
                   </div>
                 </div>
               </div>

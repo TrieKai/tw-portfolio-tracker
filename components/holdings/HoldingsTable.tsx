@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  formatCurrency,
   formatPercent,
   formatQuotePrice,
 } from "@/lib/portfolio/calculations";
@@ -22,6 +21,7 @@ import { HoldingLotDetailPanel } from "./HoldingLotActions";
 import { ManualPriceModal } from "./ManualPriceModal";
 import { SellGroupHoldingModal } from "./SellGroupHoldingModal";
 import { SellHoldingModal } from "./SellHoldingModal";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 type SortKey = "name" | "value" | "pnl" | "returnRate";
 
@@ -276,6 +276,7 @@ function GroupRows({
   onManual: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
+  const { formatAmount, maskAmount } = useAmountPrivacy();
   const lot = g.lots[0];
 
   return (
@@ -315,15 +316,15 @@ function GroupRows({
         <td className="px-4 py-3 tabular-nums">
           <div>
             {g.isMerged ? "均價 " : ""}
-            {formatQuotePrice(
+            {maskAmount(formatQuotePrice(
               g.isMerged ? g.avgBuyPrice : lot.buyPrice,
               g.assetType
-            )}
+            ))}
           </div>
           <div className="text-xs text-muted mt-0.5">
             現價{" "}
             {g.hasLivePrice
-              ? formatQuotePrice(g.currentPrice!, g.assetType)
+              ? maskAmount(formatQuotePrice(g.currentPrice!, g.assetType))
               : "—"}
           </div>
           {g.priceDate && (
@@ -332,10 +333,10 @@ function GroupRows({
         </td>
         <td className="px-4 py-3 tabular-nums">{g.quantity}</td>
         <td className="px-4 py-3 tabular-nums">
-          {formatCurrency(g.marketValue)}
+          {formatAmount(g.marketValue)}
         </td>
         <td className={`px-4 py-3 tabular-nums ${pnlClass}`}>
-          {g.hasLivePrice ? formatCurrency(g.pnl) : "—"}
+          {g.hasLivePrice ? formatAmount(g.pnl) : "—"}
         </td>
         <td className={`px-4 py-3 tabular-nums ${pnlClass}`}>
           {g.hasLivePrice ? formatPercent(g.returnRate) : "—"}

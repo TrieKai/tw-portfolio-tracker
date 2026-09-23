@@ -3,13 +3,13 @@
 import type { ReactNode } from "react";
 import { formatCurrentMonthZh } from "@/lib/date/iso-date";
 import {
-  formatCurrency,
   formatPercent,
 } from "@/lib/portfolio/calculations";
 import type { PortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
 import { PnlValueWithBreakdown } from "@/components/ui/PnlBreakdownTooltip";
 import type { PortfolioSummary as Summary } from "@/lib/types/holding";
 import type { DashboardCardView } from "@/lib/types/ui-preferences";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 export function PortfolioSummaryCards({
   summary,
@@ -22,6 +22,7 @@ export function PortfolioSummaryCards({
   view?: DashboardCardView;
   asOfDate?: string;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   const unrealizedPositive = summary.totalPnl >= 0;
   const realizedPositive = summary.totalRealizedPnl >= 0;
   const dailyUnrealizedPositive =
@@ -53,9 +54,9 @@ export function PortfolioSummaryCards({
   if (view === "compact") {
     return (
       <div className="glass-card grid gap-4 p-5 sm:grid-cols-4">
-        <MiniStat label="總資產" value={formatCurrency(summary.totalValue)} />
-        <MiniStat label="總成本" value={formatCurrency(summary.totalCost)} />
-        <MiniStat label="未實現" value={formatCurrency(summary.totalPnl)} highlight={unrealizedPositive ? "gain" : "loss"} />
+        <MiniStat label="總資產" value={formatAmount(summary.totalValue)} />
+        <MiniStat label="總成本" value={formatAmount(summary.totalCost)} />
+        <MiniStat label="未實現" value={formatAmount(summary.totalPnl)} highlight={unrealizedPositive ? "gain" : "loss"} />
         <MiniStat label="報酬率" value={formatPercent(summary.totalReturnRate)} highlight={unrealizedPositive ? "gain" : "loss"} />
       </div>
     );
@@ -69,14 +70,14 @@ export function PortfolioSummaryCards({
       <div className="glass-card grid gap-5 p-5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] sm:items-center">
         <div>
           <p className="text-sm text-muted">資產淨值</p>
-          <p className="mt-1 text-3xl font-bold tabular-nums sm:text-4xl">{formatCurrency(summary.totalValue)}</p>
+          <p className="mt-1 text-3xl font-bold tabular-nums sm:text-4xl">{formatAmount(summary.totalValue)}</p>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-raised">
             <div className={`h-full rounded-full ${unrealizedPositive ? "bg-gain" : "bg-loss"}`} style={{ width: `${progress}%` }} />
           </div>
           <p className="mt-2 text-xs text-muted">相對投入成本的資產進度</p>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <MiniStat label="未實現" value={formatCurrency(summary.totalPnl)} highlight={unrealizedPositive ? "gain" : "loss"} />
+          <MiniStat label="未實現" value={formatAmount(summary.totalPnl)} highlight={unrealizedPositive ? "gain" : "loss"} />
           <MiniStat label="報酬率" value={formatPercent(summary.totalReturnRate)} highlight={unrealizedPositive ? "gain" : "loss"} />
         </div>
       </div>
@@ -85,10 +86,10 @@ export function PortfolioSummaryCards({
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4">
-      <StatCard label="總資產" value={formatCurrency(summary.totalValue)} />
+      <StatCard label="總資產" value={formatAmount(summary.totalValue)} />
       <StatCard
         label="總成本"
-        value={formatCurrency(summary.totalCost)}
+        value={formatAmount(summary.totalCost)}
         muted
       />
       <StatCard
@@ -96,7 +97,7 @@ export function PortfolioSummaryCards({
         value={
           <PnlValueWithBreakdown
             title="未實現損益"
-            value={formatCurrency(summary.totalPnl)}
+            value={formatAmount(summary.totalPnl)}
             valueClassName={`text-xl font-semibold sm:text-2xl ${unrealizedValueClass}`}
             breakdown={pnlBreakdowns.totalUnrealized}
           />
@@ -106,7 +107,7 @@ export function PortfolioSummaryCards({
       />
       <StatCard
         label="已實現損益"
-        value={formatCurrency(summary.totalRealizedPnl)}
+        value={formatAmount(summary.totalRealizedPnl)}
         sub={
           summary.saleCount > 0
             ? `${summary.saleCount} 筆賣出`
@@ -126,7 +127,7 @@ export function PortfolioSummaryCards({
             title="日未實現"
             value={
               summary.dailyUnrealizedPnl !== null
-                ? formatCurrency(summary.dailyUnrealizedPnl)
+                ? formatAmount(summary.dailyUnrealizedPnl)
                 : "—"
             }
             valueClassName={`text-xl font-semibold sm:text-2xl ${dailyValueClass}`}
@@ -165,7 +166,7 @@ export function PortfolioSummaryCards({
             title="月未實現"
             value={
               summary.monthlyUnrealizedPnl !== null
-                ? formatCurrency(summary.monthlyUnrealizedPnl)
+                ? formatAmount(summary.monthlyUnrealizedPnl)
                 : "—"
             }
             valueClassName={`text-xl font-semibold sm:text-2xl ${monthlyValueClass}`}
@@ -188,7 +189,7 @@ export function PortfolioSummaryCards({
       />
       <StatCard
         label="月已實現"
-        value={formatCurrency(summary.monthlyRealizedPnl)}
+        value={formatAmount(summary.monthlyRealizedPnl)}
         sub={
           summary.monthlySaleCount > 0
             ? `${monthLabel} · ${summary.monthlySaleCount} 筆賣出`

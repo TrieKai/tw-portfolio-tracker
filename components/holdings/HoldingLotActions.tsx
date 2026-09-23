@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  formatCurrency,
   formatPercent,
   formatQuotePrice,
 } from "@/lib/portfolio/calculations";
@@ -9,6 +8,7 @@ import {
   supportsAutoPriceUpdate,
 } from "@/lib/portfolio/asset-labels";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 /** 單筆買入明細（展開列）：買入資訊 + 操作按鈕 */
 export function HoldingLotDetailPanel({
@@ -30,6 +30,7 @@ export function HoldingLotDetailPanel({
   onRemove: (id: string) => void;
   compact?: boolean;
 }) {
+  const { formatAmount, maskAmount } = useAmountPrivacy();
   const lotPnlClass =
     lot.hasLivePrice && lot.pnl >= 0 ? "text-gain" : "text-loss";
 
@@ -55,7 +56,7 @@ export function HoldingLotDetailPanel({
         <div>
           <dt className="text-muted">買入價</dt>
           <dd className="tabular-nums">
-            {formatQuotePrice(lot.buyPrice, lot.assetType)}
+            {maskAmount(formatQuotePrice(lot.buyPrice, lot.assetType))}
           </dd>
         </div>
         <div>
@@ -65,10 +66,10 @@ export function HoldingLotDetailPanel({
         <div>
           <dt className="text-muted">投入 / 損益</dt>
           <dd className="tabular-nums">
-            {formatCurrency(lot.costBasis)}
+            {formatAmount(lot.costBasis)}
             {lot.hasLivePrice && (
               <span className={`ml-1 ${lotPnlClass}`}>
-                ({formatCurrency(lot.pnl)})
+                ({formatAmount(lot.pnl)})
               </span>
             )}
           </dd>

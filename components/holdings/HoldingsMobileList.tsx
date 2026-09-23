@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import {
-  formatCurrency,
   formatPercent,
   formatQuotePrice,
 } from "@/lib/portfolio/calculations";
 import { getAssetTypeLabel, supportsAutoPriceUpdate } from "@/lib/portfolio/asset-labels";
 import type { HoldingGroupWithMetrics } from "@/lib/portfolio/holding-groups";
 import { HoldingLotDetailPanel } from "./HoldingLotActions";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 export function HoldingsMobileList({
   groups,
@@ -31,6 +31,7 @@ export function HoldingsMobileList({
   onRemove: (id: string) => void;
   onRefreshGroup: (group: HoldingGroupWithMetrics) => void;
 }) {
+  const { formatAmount, maskAmount } = useAmountPrivacy();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   function toggleExpanded(groupKey: string) {
@@ -63,12 +64,12 @@ export function HoldingsMobileList({
                 <p className="mt-0.5 text-xs text-muted">
                   {getAssetTypeLabel(g.assetType)}
                   {g.isMerged
-                    ? ` · ${g.lots.length} 筆 · 均價 ${formatQuotePrice(g.avgBuyPrice, g.assetType)}`
+                    ? ` · ${g.lots.length} 筆 · 均價 ${maskAmount(formatQuotePrice(g.avgBuyPrice, g.assetType))}`
                     : ` · 買入 ${g.lots[0].buyDate}`}
                 </p>
                 {!g.isMerged && (
                   <p className="text-xs text-muted tabular-nums">
-                    買入價 {formatQuotePrice(g.lots[0].buyPrice, g.assetType)} · 數量{" "}
+                    買入價 {maskAmount(formatQuotePrice(g.lots[0].buyPrice, g.assetType))} · 數量{" "}
                     {g.quantity}
                   </p>
                 )}
@@ -76,7 +77,7 @@ export function HoldingsMobileList({
               <div className="text-right shrink-0">
                 <p className="text-sm text-muted">市值</p>
                 <p className="font-semibold tabular-nums">
-                  {formatCurrency(g.marketValue)}
+                  {formatAmount(g.marketValue)}
                 </p>
               </div>
             </div>
@@ -86,7 +87,7 @@ export function HoldingsMobileList({
                 <p className="text-xs text-muted">現價</p>
                 <p className="tabular-nums">
                   {g.hasLivePrice
-                    ? formatQuotePrice(g.currentPrice!, g.assetType)
+                    ? maskAmount(formatQuotePrice(g.currentPrice!, g.assetType))
                     : "—"}
                 </p>
                 {g.priceDate && (
@@ -96,7 +97,7 @@ export function HoldingsMobileList({
               <div>
                 <p className="text-xs text-muted">損益</p>
                 <p className={`tabular-nums font-medium ${pnlClass}`}>
-                  {g.hasLivePrice ? formatCurrency(g.pnl) : "—"}
+                  {g.hasLivePrice ? formatAmount(g.pnl) : "—"}
                 </p>
                 <p className={`text-xs tabular-nums ${pnlClass}`}>
                   {g.hasLivePrice ? formatPercent(g.returnRate) : "—"}
@@ -106,7 +107,7 @@ export function HoldingsMobileList({
 
             {g.isMerged && (
               <p className="text-xs text-muted tabular-nums">
-                合計數量 {g.quantity} · 總成本 {formatCurrency(g.costBasis)}
+                合計數量 {g.quantity} · 總成本 {formatAmount(g.costBasis)}
               </p>
             )}
 

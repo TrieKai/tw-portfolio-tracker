@@ -1,5 +1,6 @@
+"use client";
+
 import { formatIsoDateZh } from "@/lib/date/iso-date";
-import { formatCurrency } from "@/lib/portfolio/calculations";
 import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import { buildWeeklyPortfolioReport } from "@/lib/portfolio/weekly-report";
 import type {
@@ -9,6 +10,7 @@ import type {
   SaleTransaction,
 } from "@/lib/types/holding";
 import type { DashboardCardView } from "@/lib/types/ui-preferences";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 export function WeeklyPortfolioReport({
   holdings,
@@ -25,6 +27,7 @@ export function WeeklyPortfolioReport({
   targets?: AssetAllocationTargets;
   view?: DashboardCardView;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   const report = buildWeeklyPortfolioReport(
     holdings,
     priceHistory,
@@ -62,16 +65,16 @@ export function WeeklyPortfolioReport({
 
       <p className="mt-5 rounded-2xl bg-surface-raised/70 p-4 text-sm leading-6">
         期間市場未實現損益
-        <strong className={marketPositive ? "text-gain" : "text-loss"}> {marketPositive ? "增加" : "減少"} {formatCurrency(Math.abs(report.unrealizedChange))}</strong>
+        <strong className={marketPositive ? "text-gain" : "text-loss"}> {marketPositive ? "增加" : "減少"} {formatAmount(Math.abs(report.unrealizedChange))}</strong>
         {report.topPositive && <>，最大正貢獻來自 {report.topPositive.name}</>}
         {report.topNegative && <>；主要拖累是 {report.topNegative.name}</>}。
       </p>
 
       <div className="weekly-metrics mt-4 grid gap-3">
-        <Metric label="期末資產" value={formatCurrency(report.endValue)} />
-        <Metric label="市場損益變化" value={formatCurrency(report.unrealizedChange)} tone={marketPositive ? "gain" : "loss"} />
-        <Metric label="期間已實現" value={formatCurrency(report.realizedPnl)} tone={report.realizedPnl >= 0 ? "gain" : "loss"} />
-        <Metric label="新增投入" value={formatCurrency(report.newCapital)} />
+        <Metric label="期末資產" value={formatAmount(report.endValue)} />
+        <Metric label="市場損益變化" value={formatAmount(report.unrealizedChange)} tone={marketPositive ? "gain" : "loss"} />
+        <Metric label="期間已實現" value={formatAmount(report.realizedPnl)} tone={report.realizedPnl >= 0 ? "gain" : "loss"} />
+        <Metric label="新增投入" value={formatAmount(report.newCapital)} />
       </div>
 
       {view !== "compact" && (
@@ -79,14 +82,14 @@ export function WeeklyPortfolioReport({
           <Insight
             label="主要貢獻"
             text={report.topPositive
-              ? `${report.topPositive.name} ${formatCurrency(report.topPositive.amount)}`
+              ? `${report.topPositive.name} ${formatAmount(report.topPositive.amount)}`
               : "本期沒有正貢獻標的"}
             tone="gain"
           />
           <Insight
             label="主要拖累"
             text={report.topNegative
-              ? `${report.topNegative.name} ${formatCurrency(report.topNegative.amount)}`
+              ? `${report.topNegative.name} ${formatAmount(report.topNegative.amount)}`
               : "本期沒有負貢獻標的"}
             tone="loss"
           />

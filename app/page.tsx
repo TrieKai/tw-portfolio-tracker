@@ -16,6 +16,7 @@ import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTren
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { AmountVisibilityToggle } from "@/components/ui/AmountVisibilityToggle";
 import {
   currentYearMonthPrefix,
   formatCurrentMonthZh,
@@ -23,7 +24,6 @@ import {
 import {
   computePortfolioSummary,
   enrichHoldings,
-  formatCurrency,
 } from "@/lib/portfolio/calculations";
 import { computePortfolioExposure } from "@/lib/portfolio/exposure";
 import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
@@ -45,10 +45,12 @@ import type { DashboardSectionId } from "@/lib/types/ui-preferences";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 import { useUiPreferences } from "@/providers/UiPreferencesProvider";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 export default function DashboardPage() {
   const { ready, holdings, summary, exposure, loanSummary, loanRiskSummary, loanReminders, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
   const { preferences } = useUiPreferences();
+  const { formatAmount } = useAmountPrivacy();
   const [travelDate, setTravelDate] = useState<string | null>(null);
   const currentPnlCalendar = useMemo(
     () =>
@@ -197,7 +199,13 @@ export default function DashboardPage() {
     summary: (
       <PortfolioSummaryCards summary={shownSummary} pnlBreakdowns={shownBreakdowns} view={viewFor("summary")} asOfDate={travelDate ?? undefined} />
     ),
-    allocation: <AssetAllocationChart summary={shownSummary} view={viewFor("allocation")} />,
+    allocation: (
+      <AssetAllocationChart
+        summary={shownSummary}
+        holdings={shownHoldings}
+        view={viewFor("allocation")}
+      />
+    ),
     quickStats: (
       <div className="glass-card h-full p-5">
         <h2 className="mb-3 text-sm font-medium text-muted">快速統計</h2>
@@ -208,15 +216,15 @@ export default function DashboardPage() {
           </li>
             <li className="flex justify-between">
               <span className="text-muted">股票市值</span>
-              <span>{shownSummary.stockValue.toLocaleString("zh-TW")} 元</span>
+              <span>{formatAmount(shownSummary.stockValue)}</span>
             </li>
             <li className="flex justify-between">
               <span className="text-muted">基金市值</span>
-              <span>{shownSummary.fundValue.toLocaleString("zh-TW")} 元</span>
+              <span>{formatAmount(shownSummary.fundValue)}</span>
             </li>
             <li className="flex justify-between">
               <span className="text-muted">房子市值</span>
-              <span>{shownSummary.propertyValue.toLocaleString("zh-TW")} 元</span>
+              <span>{formatAmount(shownSummary.propertyValue)}</span>
             </li>
             <li className="flex justify-between border-t border-border/60 pt-2">
               <span className="text-muted">日未實現（最近估值日）</span>
@@ -225,7 +233,7 @@ export default function DashboardPage() {
                   title="日未實現"
                   value={
                     shownSummary.dailyUnrealizedPnl !== null
-                      ? formatCurrency(shownSummary.dailyUnrealizedPnl)
+                      ? formatAmount(shownSummary.dailyUnrealizedPnl)
                       : "—"
                   }
                   valueClassName={
@@ -261,7 +269,7 @@ export default function DashboardPage() {
                 title="月未實現"
                 value={
                   shownSummary.monthlyUnrealizedPnl !== null
-                    ? formatCurrency(shownSummary.monthlyUnrealizedPnl)
+                    ? formatAmount(shownSummary.monthlyUnrealizedPnl)
                     : "—"
                 }
                 valueClassName={
@@ -283,7 +291,7 @@ export default function DashboardPage() {
                   shownSummary.monthlyRealizedPnl >= 0 ? "text-gain" : "text-loss"
                 }
               >
-                {formatCurrency(shownSummary.monthlyRealizedPnl)}
+                {formatAmount(shownSummary.monthlyRealizedPnl)}
               </span>
             </li>
             <li className="flex justify-between">
@@ -293,7 +301,7 @@ export default function DashboardPage() {
                   shownSummary.totalRealizedPnl >= 0 ? "text-gain" : "text-loss"
                 }
               >
-                {shownSummary.totalRealizedPnl.toLocaleString("zh-TW")} 元
+                {formatAmount(shownSummary.totalRealizedPnl)}
               </span>
             </li>
         </ul>
@@ -316,7 +324,7 @@ export default function DashboardPage() {
             <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
               <span className={`text-2xl font-semibold tabular-nums ${currentPnlCalendar.summary.pnl >= 0 ? "text-gain" : "text-loss"}`}>
                 {currentPnlCalendar.summary.pnl > 0 ? "+" : ""}
-                {formatCurrency(currentPnlCalendar.summary.pnl)}
+                {formatAmount(currentPnlCalendar.summary.pnl)}
               </span>
               <span className={`text-sm tabular-nums ${currentPnlCalendar.summary.returnRate >= 0 ? "text-gain" : "text-loss"}`}>
                 本月複利 {currentPnlCalendar.summary.returnRate > 0 ? "+" : ""}
@@ -372,12 +380,15 @@ export default function DashboardPage() {
         title="投資總覽"
         description="台股、境內基金與房子持倉 · 本機儲存"
         action={
-          <Link
-            href="/holdings/new"
-            className="btn-primary w-full sm:w-auto touch-target"
-          >
-            新增持倉
-          </Link>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <AmountVisibilityToggle />
+            <Link
+              href="/holdings/new"
+              className="btn-primary min-w-0 flex-1 sm:w-auto sm:flex-none touch-target"
+            >
+              新增持倉
+            </Link>
+          </div>
         }
       />
 
@@ -408,6 +419,7 @@ export default function DashboardPage() {
 }
 
 function HoldingSnapshotCards({ holdings, compact }: { holdings: HoldingWithMetrics[]; compact?: boolean }) {
+  const { formatAmount } = useAmountPrivacy();
   const visible = groupHoldingsWithMetrics(holdings)
     .sort((a, b) => b.marketValue - a.marketValue)
     .slice(0, compact ? 4 : 8);
@@ -429,16 +441,16 @@ function HoldingSnapshotCards({ holdings, compact }: { holdings: HoldingWithMetr
               {holding.returnRate > 0 ? "+" : ""}{holding.returnRate.toFixed(1)}%
             </span>
           </div>
-          <p className="mt-5 text-lg font-semibold tabular-nums">{formatCurrency(holding.marketValue)}</p>
+          <p className="mt-5 text-lg font-semibold tabular-nums">{formatAmount(holding.marketValue)}</p>
           <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
             <div>
               <dt className="text-muted">成本</dt>
-              <dd className="mt-0.5 truncate tabular-nums">{formatCurrency(holding.costBasis)}</dd>
+              <dd className="mt-0.5 truncate tabular-nums">{formatAmount(holding.costBasis)}</dd>
             </div>
             <div className="text-right">
               <dt className="text-muted">損益</dt>
               <dd className={`mt-0.5 truncate font-medium tabular-nums ${holding.pnl >= 0 ? "text-gain" : "text-loss"}`}>
-                {formatCurrency(holding.pnl)}
+                {formatAmount(holding.pnl)}
               </dd>
             </div>
           </dl>

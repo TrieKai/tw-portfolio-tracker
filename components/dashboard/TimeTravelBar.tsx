@@ -1,9 +1,10 @@
 "use client";
 
 import { formatIsoDateZh, normalizeToIsoDate } from "@/lib/date/iso-date";
-import { formatCurrency, formatPercent } from "@/lib/portfolio/calculations";
+import { formatPercent } from "@/lib/portfolio/calculations";
 import type { PortfolioSummary } from "@/lib/types/holding";
 import type { DashboardCardView } from "@/lib/types/ui-preferences";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 interface TimeTravelBarProps {
   dates: string[];
@@ -26,6 +27,7 @@ export function TimeTravelBar({
   selectedSummary,
   view = "standard",
 }: TimeTravelBarProps) {
+  const { formatAmount } = useAmountPrivacy();
   if (dates.length === 0) return null;
   const activeIndex = selectedDate
     ? Math.max(0, dates.indexOf(selectedDate))
@@ -115,10 +117,10 @@ export function TimeTravelBar({
         <div className="mt-3 border-t border-border/70 pt-3">
           {selectedSummary && (
             <div className="grid gap-2 sm:grid-cols-3">
-              <TimeMetric label="當時總資產" value={formatCurrency(selectedSummary.totalValue)} />
+              <TimeMetric label="當時總資產" value={formatAmount(selectedSummary.totalValue)} />
               <TimeMetric
                 label="自當時至今"
-                value={formatCurrency(currentSummary.totalValue - selectedSummary.totalValue)}
+                value={formatAmount(currentSummary.totalValue - selectedSummary.totalValue)}
                 tone={currentSummary.totalValue - selectedSummary.totalValue >= 0 ? "gain" : "loss"}
                 sub={selectedSummary.totalValue > 0 ? formatPercent(((currentSummary.totalValue - selectedSummary.totalValue) / selectedSummary.totalValue) * 100) : undefined}
               />

@@ -7,7 +7,6 @@ import {
   startOfMonthIsoFromPrefix,
   todayIsoDate,
 } from "@/lib/date/iso-date";
-import { formatCurrency } from "@/lib/portfolio/calculations";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { estimateInvestmentFinancingCostForPeriod } from "@/lib/loans/calculations";
 import { formatFinancingCostImpact } from "@/lib/loans/format";
@@ -22,6 +21,7 @@ import type {
   PriceHistoryMap,
   SaleTransaction,
 } from "@/lib/types/holding";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 interface CalendarMonthlyPnlRow extends MonthlyPnlRow {
   investmentPnl: number;
@@ -33,6 +33,7 @@ interface CalendarMonthlyPnlRow extends MonthlyPnlRow {
 }
 
 function PnlCell({ value }: { value: number | null }) {
+  const { formatAmount } = useAmountPrivacy();
   if (value === null) {
     return <span className="text-muted">—</span>;
   }
@@ -42,12 +43,13 @@ function PnlCell({ value }: { value: number | null }) {
         value >= 0 ? "text-gain" : "text-loss"
       }`}
     >
-      {formatCurrency(value)}
+      {formatAmount(value)}
     </span>
   );
 }
 
 function MonthlyPnlRowMobile({ row }: { row: CalendarMonthlyPnlRow }) {
+  const { formatAmount, maskAmount } = useAmountPrivacy();
   return (
     <li className="glass-card space-y-2 p-4 text-sm">
       <div className="flex items-start justify-between gap-3">
@@ -61,7 +63,7 @@ function MonthlyPnlRowMobile({ row }: { row: CalendarMonthlyPnlRow }) {
         <div className="text-right">
           <PnlCell value={row.netPnl} />
           <p className="text-xs tabular-nums text-muted">
-            投資 {formatCurrency(row.investmentPnl)} · 融資成本影響 {formatFinancingCostImpact(row.financingCost)}
+            投資 {formatAmount(row.investmentPnl)} · 融資成本影響 {maskAmount(formatFinancingCostImpact(row.financingCost))}
           </p>
         </div>
       </div>
@@ -82,6 +84,7 @@ export function MonthlyPnlTable({
   storage: PortfolioStorage;
   asOfDate?: string;
 }) {
+  const { maskAmount } = useAmountPrivacy();
   const [includeBeforeYtd, setIncludeBeforeYtd] = useState(false);
   const effectiveAsOfDate = asOfDate ?? todayIsoDate();
 
@@ -178,7 +181,7 @@ export function MonthlyPnlTable({
                       <PnlCell value={row.investmentPnl} />
                     </td>
                     <td className={`px-4 py-3 tabular-nums ${row.financingCost > 0 ? "text-loss" : row.financingCost < 0 ? "text-gain" : ""}`}>
-                      {formatFinancingCostImpact(row.financingCost)}
+                      {maskAmount(formatFinancingCostImpact(row.financingCost))}
                     </td>
                     <td className="px-4 py-3">
                       <PnlCell value={row.netPnl} />
