@@ -84,6 +84,53 @@ describe("buildPnlCalendar", () => {
     });
   });
 
+  it("uses the purchase price when historical quotes predate a holding without a buy transaction", () => {
+    const storage = portfolioWithOneHolding();
+    storage.holdings[0] = {
+      ...storage.holdings[0],
+      buyDate: "2026-06-10",
+    };
+    storage.priceHistory["holding-1"] = [
+      { date: "2026-06-09", price: 80, source: "api" },
+      { date: "2026-06-10", price: 100, source: "api" },
+      { date: "2026-06-11", price: 105, source: "api" },
+    ];
+
+    const calendar = buildPnlCalendar(storage, {
+      month: "2026-06",
+      asOfDate: "2026-06-30",
+      filter: { kind: "investment" },
+    });
+
+    expect(calendar.days.find((day) => day.date === "2026-06-10")).toMatchObject({
+      pnl: 100,
+      returnRate: 100 / 9,
+      contributions: [{ previousPrice: 90, currentPrice: 100, pnl: 100 }],
+    });
+    expect(calendar.days.find((day) => day.date === "2026-06-11")?.pnl).toBe(50);
+    expect(calendar.summary.pnl).toBe(150);
+  });
+
+  it("uses the purchase price when the first quote arrives after the purchase date", () => {
+    const storage = portfolioWithOneHolding();
+    storage.holdings[0] = {
+      ...storage.holdings[0],
+      buyDate: "2026-06-10",
+    };
+    storage.priceHistory["holding-1"] = [
+      { date: "2026-06-09", price: 80, source: "api" },
+      { date: "2026-06-11", price: 105, source: "api" },
+    ];
+
+    const calendar = buildPnlCalendar(storage, {
+      month: "2026-06",
+      asOfDate: "2026-06-30",
+      filter: { kind: "investment" },
+    });
+
+    expect(calendar.days.find((day) => day.date === "2026-06-11")?.pnl).toBe(150);
+  });
+
   it("merges multiple holdings of the same asset into one daily detail", () => {
     const storage = portfolioWithOneHolding();
     storage.holdings.push({

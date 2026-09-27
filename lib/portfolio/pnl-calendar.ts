@@ -97,6 +97,7 @@ interface CalendarInstrument {
   symbol: string;
   market?: StockMarket;
   buyDate: string;
+  buyPrice?: number;
   fallbackQuantity: number;
 }
 
@@ -263,6 +264,7 @@ export function buildPnlCalendar(
       symbol: holding.symbol,
       market: holding.market,
       buyDate: holding.buyDate,
+      buyPrice: holding.buyPrice,
       fallbackQuantity: holding.quantity,
     });
   }
@@ -314,17 +316,22 @@ export function buildPnlCalendar(
         instrument.fallbackQuantity
       );
       if (quantity <= 0) continue;
-      const contribution = (current.price - previous.price) * quantity;
+      // 首筆持有期間行情不可從建倉前收盤價起算，否則會計入尚未持有時的漲跌。
+      const previousPrice =
+        previous.date < instrument.buyDate && instrument.buyPrice !== undefined
+          ? instrument.buyPrice
+          : previous.price;
+      const contribution = (current.price - previousPrice) * quantity;
       const existing =
         contributionsByDate.get(current.date) ?? emptyDayAccumulator();
       existing.pnl += contribution;
-      existing.baseValue += previous.price * quantity;
+      existing.baseValue += previousPrice * quantity;
       existing.pricedHoldingIds.add(instrument.id);
       existing.totalHoldingIds.add(instrument.id);
       const detail = getContribution(existing, instrument);
       detail.pnl += contribution;
       detail.marketPnl += contribution;
-      addPriceRange(detail, previous.price, current.price, quantity);
+      addPriceRange(detail, previousPrice, current.price, quantity);
       contributionsByDate.set(current.date, existing);
     }
   }
