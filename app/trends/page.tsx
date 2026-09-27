@@ -137,6 +137,9 @@ export default function TrendsPage() {
                     <p className="mt-1 text-xs text-muted">
                       每筆依各自買入日／買入價納入；新買入日成本階梯上升
                     </p>
+                    <p className="mt-1 text-xs text-muted">
+                      依目前持倉回推；賣出前股數、已結清部位及已實現損益未納入。
+                    </p>
                   </div>
                   <button
                     type="button"

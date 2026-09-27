@@ -112,6 +112,7 @@ export function getUnitPriceOnDate(
   let marketPrice: number | null = null;
   for (const p of history) {
     if (p.date > date) break;
+    if (p.date < holding.buyDate) continue;
     marketPrice = p.price;
   }
 
