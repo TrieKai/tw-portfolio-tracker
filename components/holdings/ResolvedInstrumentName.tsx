@@ -68,11 +68,11 @@ export function ResolvedInstrumentName({
       return;
     }
 
+    setStatus("loading");
+    setError(null);
+
     let cancelled = false;
     const timer = setTimeout(async () => {
-      setStatus("loading");
-      setError(null);
-
       const res = await lookupInstrument({
         assetType,
         symbol: raw,

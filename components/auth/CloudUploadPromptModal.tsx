@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { describePortfolioStorage } from "@/lib/storage/portfolio-export";
 import type { PortfolioStorage } from "@/lib/types/holding";
 
@@ -15,12 +16,7 @@ export function CloudUploadPromptModal({
   onKeepLocalOnly,
 }: CloudUploadPromptModalProps) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="upload-prompt-title"
-    >
+    <Modal labelledBy="upload-prompt-title" onClose={onKeepLocalOnly}>
       <div className="w-full max-w-md rounded-2xl border border-border bg-page p-5 shadow-xl">
         <h2 id="upload-prompt-title" className="text-lg font-semibold">
           上傳本機資料到雲端？
@@ -47,6 +43,6 @@ export function CloudUploadPromptModal({
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

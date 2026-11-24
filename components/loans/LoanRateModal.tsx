@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -38,7 +39,7 @@ export function LoanRateModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="loan-rate-title">
+    <Modal labelledBy="loan-rate-title" onClose={onClose}>
       <form onSubmit={handleSubmit} className="glass-card w-full max-w-md space-y-5 rounded-b-none p-5 sm:rounded-2xl sm:p-6">
         <div>
           <p className="text-xs text-muted">{loan.name}</p>
@@ -51,6 +52,6 @@ export function LoanRateModal({
         {error ? <p className="text-sm text-rose-500">{error}</p> : null}
         <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={onClose}>取消</button><button type="submit" className="btn-primary">儲存利率異動</button></div>
       </form>
-    </div>
+    </Modal>
   );
 }

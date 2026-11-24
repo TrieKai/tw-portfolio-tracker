@@ -53,7 +53,7 @@ export function PortfolioSummaryCards({
 
   if (view === "compact") {
     return (
-      <div className="glass-card grid gap-4 p-5 sm:grid-cols-4">
+      <div className="metric-grid">
         <MiniStat label="總資產" value={formatAmount(summary.totalValue)} />
         <MiniStat label="總成本" value={formatAmount(summary.totalCost)} />
         <MiniStat label="未實現" value={formatAmount(summary.totalPnl)} highlight={unrealizedPositive ? "gain" : "loss"} />
@@ -69,7 +69,7 @@ export function PortfolioSummaryCards({
     return (
       <div className="glass-card grid gap-5 p-5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] sm:items-center">
         <div>
-          <p className="text-sm text-muted">資產淨值</p>
+          <p className="text-sm text-muted">總資產</p>
           <p className="mt-1 text-3xl font-bold tabular-nums sm:text-4xl">{formatAmount(summary.totalValue)}</p>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-raised">
             <div className={`h-full rounded-full ${unrealizedPositive ? "bg-gain" : "bg-loss"}`} style={{ width: `${progress}%` }} />
@@ -85,7 +85,7 @@ export function PortfolioSummaryCards({
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4">
+    <div className="metric-grid">
       <StatCard label="總資產" value={formatAmount(summary.totalValue)} />
       <StatCard
         label="總成本"
@@ -113,7 +113,7 @@ export function PortfolioSummaryCards({
             ? `${summary.saleCount} 筆賣出`
             : "尚無賣出紀錄"
         }
-        highlight={realizedPositive ? "gain" : "loss"}
+        highlight={summary.totalRealizedPnl ? (realizedPositive ? "gain" : "loss") : undefined}
       />
       <StatCard
         label="未實現報酬率"
@@ -195,7 +195,7 @@ export function PortfolioSummaryCards({
             ? `${monthLabel} · ${summary.monthlySaleCount} 筆賣出`
             : `${monthLabel} · 本月尚無賣出`
         }
-        highlight={monthlyRealizedPositive ? "gain" : "loss"}
+        highlight={summary.monthlyRealizedPnl ? (monthlyRealizedPositive ? "gain" : "loss") : undefined}
       />
     </div>
   );
@@ -240,7 +240,7 @@ function StatCard({
       : "text-foreground";
 
   return (
-    <div className="glass-card p-5">
+    <div>
       <p className="text-sm text-muted">{label}</p>
       {valueIsNode ? (
         <div className="mt-1">{value}</div>

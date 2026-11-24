@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
@@ -104,12 +105,7 @@ export function EditHoldingModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
-      role="dialog"
-      aria-modal
-      aria-labelledby="edit-holding-title"
-    >
+    <Modal labelledBy="edit-holding-title" onClose={submitting ? undefined : onClose}>
       <form
         onSubmit={handleSubmit}
         className="glass-card max-h-[90dvh] w-full max-w-lg space-y-4 overflow-y-auto rounded-b-none p-4 sm:rounded-2xl sm:p-6"
@@ -236,7 +232,7 @@ export function EditHoldingModal({
           </p>
         )}
       </form>
-    </div>
+    </Modal>
   );
 }
 

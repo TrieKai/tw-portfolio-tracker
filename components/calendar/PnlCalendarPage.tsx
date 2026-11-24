@@ -15,6 +15,7 @@ import {
   type PnlDetailSelection,
 } from "@/components/calendar/PnlDetailPanel";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   addDaysToIsoDate,
@@ -270,7 +271,7 @@ function SummaryCard({
   description?: string;
 }) {
   return (
-    <div className="glass-card p-4">
+    <div>
       <p className="text-xs text-muted">{label}</p>
       <p className={`mt-2 text-xl font-semibold tabular-nums sm:text-2xl ${className}`}>
         {value}
@@ -440,10 +441,9 @@ export function PnlCalendarPage() {
       />
 
       <section className="glass-card space-y-4 p-4 sm:p-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <p className="text-xs text-muted">目前月份</p>
-            <h2 className="mt-1 text-2xl font-semibold">{formatYearMonthZh(month)}</h2>
+            <h2 className="text-xl font-semibold tabular-nums">{formatYearMonthZh(month)}</h2>
           </div>
           <div className="grid grid-cols-[auto_1fr_auto] gap-2 sm:flex sm:items-center">
             <button
@@ -500,9 +500,9 @@ export function PnlCalendarPage() {
         </div>
 
         {filter.kind === "investment" ? (
-          <div className="grid grid-cols-2 gap-2 sm:w-80">
-            <button type="button" onClick={() => setPerformanceView("gross")} className={performanceView === "gross" ? "btn-primary" : "btn-secondary"}>投資損益</button>
-            <button type="button" onClick={() => setPerformanceView("net")} className={performanceView === "net" ? "btn-primary" : "btn-secondary"}>扣息後</button>
+          <div className="grid grid-cols-2 gap-2 sm:max-w-xs" role="group" aria-label="損益口徑">
+            <button type="button" onClick={() => setPerformanceView("gross")} aria-pressed={performanceView === "gross"} className={performanceView === "gross" ? "btn-primary" : "btn-secondary"}>投資損益</button>
+            <button type="button" onClick={() => setPerformanceView("net")} aria-pressed={performanceView === "net"} className={performanceView === "net" ? "btn-primary" : "btn-secondary"}>扣息後</button>
           </div>
         ) : null}
 
@@ -514,7 +514,8 @@ export function PnlCalendarPage() {
         {batchMessage ? <p className="text-xs text-muted">{batchMessage}</p> : null}
       </section>
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="metric-grid-container" aria-label="本月損益摘要">
+        <div className="metric-grid">
         <SummaryCard
           label={performanceView === "net" && filter.kind === "investment" ? "本月扣息後淨損益" : "本月投資損益"}
           value={signedCurrency(calendar.summary.pnl)}
@@ -537,18 +538,15 @@ export function PnlCalendarPage() {
           value={`${completeness.toFixed(0)}%`}
           description={`${calendar.summary.completeDayCount}/${calendar.summary.dataDayCount || 0} 日完整`}
         />
+        </div>
       </section>
 
       {investmentHoldings.length === 0 && storage.transactions.length === 0 ? (
-        <section className="glass-card p-10 text-center">
-          <h2 className="text-lg font-semibold">尚無股票或基金</h2>
-          <p className="mt-2 text-sm text-muted">
-            房產不納入每日投資報酬；新增股票或基金後即可建立損益日曆。
-          </p>
-          <Link href="/holdings/new" className="btn-primary mt-5 inline-flex">
-            新增投資資產
-          </Link>
-        </section>
+        <EmptyState
+          title="尚無股票或基金"
+          description="新增股票或基金後，即可在日曆查看每日投資損益。"
+          action={<Link href="/holdings/new" className="btn-primary">新增投資資產</Link>}
+        />
       ) : (
         <section className="glass-card overflow-hidden p-2 sm:p-4">
           {!hasSelectedMonthPrices && calendar.days.length === 0 ? (

@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { useCallback, useRef, useState } from "react";
 import {
   describePortfolioStorage,
@@ -142,12 +143,7 @@ export function PortfolioDataPanel() {
       </section>
 
       {confirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="import-confirm-title"
-        >
+        <Modal labelledBy="import-confirm-title" onClose={() => setConfirm(null)}>
           <div className="w-full max-w-md rounded-2xl border border-border bg-page p-5 shadow-xl">
             <h2 id="import-confirm-title" className="text-lg font-semibold">
               確認匯入
@@ -212,7 +208,7 @@ export function PortfolioDataPanel() {
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </>
   );

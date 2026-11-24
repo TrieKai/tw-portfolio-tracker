@@ -234,7 +234,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const isAuthenticated =
     authStatus === "authenticated" && !!session?.user?.id;
 
-  const [storage, setStorage] = useState<PortfolioStorage | null>(null);
+  const [storage, setStorageState] = useState<PortfolioStorage | null>(null);
+  const storageRef = useRef<PortfolioStorage | null>(null);
+  const setStorage = useCallback((next: PortfolioStorage) => {
+    storageRef.current = next;
+    setStorageState(next);
+  }, []);
   const [storageMode, setStorageMode] = useState<StorageMode>("anonymous");
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -288,7 +293,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     }
     setSyncStatus("error");
     setSyncMessage(res.error);
-  }, []);
+  }, [setStorage]);
 
   /** 登入後每次變更立即寫入雲端；若前一次尚在進行中則排隊最新一份 */
   const pushCloudSync = useCallback(
@@ -318,7 +323,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         void pushCloudSync(next);
       }
     },
-    [isAuthenticated, pushCloudSync]
+    [isAuthenticated, pushCloudSync, setStorage]
   );
 
   const uploadToCloud = useCallback(async (next: PortfolioStorage) => {
@@ -387,7 +392,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     }
     setSyncStatus("synced");
     setSyncMessage(null);
-  }, [pushCloudSync, sessionUserId]);
+  }, [pushCloudSync, sessionUserId, setStorage]);
 
   useEffect(() => {
     if (authStatus === "loading") return;
@@ -406,7 +411,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
     setStorageMode("cloud");
     void initCloudStorage();
-  }, [authStatus, isAuthenticated, session?.user?.id, initCloudStorage]);
+  }, [authStatus, isAuthenticated, session?.user?.id, initCloudStorage, setStorage]);
 
   const persist = useCallback(
     (next: PortfolioStorage) => {
@@ -503,6 +508,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       input: CreateHoldingInput,
       options?: { initialPrice?: number; initialPriceDate?: string }
     ): string | null => {
+      const storage = storageRef.current;
       if (!storage) return null;
       let next = addHolding(storage, input);
       const created = next.holdings[next.holdings.length - 1];
@@ -526,7 +532,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       persist(next);
       return created?.id ?? null;
     },
-    [storage, persist]
+    [persist]
   );
 
   const edit = useCallback(
@@ -617,44 +623,54 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const setManualPrice = useCallback(
     (id: string, price: number, priceDate: string) => {
-      setStorage((prev) => {
-        if (!prev) return prev;
-        const next = applyPriceUpdate(prev, id, price, priceDate, "manual", {
-          clearError: true,
-        });
-        savePortfolio(next);
-        if (isAuthenticated) {
-          void pushCloudSync(next);
-        }
-        return next;
-      });
+      const current = storageRef.current;
+      if (!current?.holdings.some((holding) => holding.id === id)) return;
+      persist(applyPriceUpdate(current, id, price, priceDate, "manual", { clearError: true }));
     },
-    [isAuthenticated, pushCloudSync]
+    [persist]
   );
 
   const updateOne = useCallback(
     async (id: string): Promise<boolean> => {
-      if (!storage) return false;
-      const holding = storage.holdings.find((h) => h.id === id);
-      if (!holding) return false;
-      if (!supportsAutoPriceUpdate(holding.assetType)) return false;
+      // 新增後會立即查價，必須讀取最新存檔，即使 React 還沒重新渲染。
+      const holding = storageRef.current?.holdings.find((h) => h.id === id);
+      if (!holding || !supportsAutoPriceUpdate(holding.assetType)) return false;
+      const generation = initGenerationRef.current;
+      let response;
+      try {
+        response = await fetchPriceUpdate(holdingToUpdateRequest(holding));
+      } catch {
+        response = {
+          success: false as const,
+          code: "PRICE_UNAVAILABLE",
+          error: "無法連線更新價格，可稍後重試或手動輸入。",
+        };
+      }
 
-      const res = await fetchPriceUpdate(holdingToUpdateRequest(holding));
-      if (isPriceError(res)) {
-        persist(updateHolding(storage, id, { lastError: res.error }));
+      const current = storageRef.current;
+      const target = current?.holdings.find((h) => h.id === id);
+      if (
+        !current || !target ||
+        generation !== initGenerationRef.current ||
+        holdingGroupKey(target) !== holdingGroupKey(holding) ||
+        target.lastUpdatedAt !== holding.lastUpdatedAt
+      ) return false;
+
+      if (isPriceError(response)) {
+        persist(updateHolding(current, id, { lastError: response.error }));
         return false;
       }
 
       persist(
-        applyPriceUpdate(storage, id, res.price, res.priceDate, "api", {
-          name: res.name,
-          market: res.market,
+        applyPriceUpdate(current, id, response.price, response.priceDate, "api", {
+          name: response.name,
+          market: response.market,
           clearError: true,
         })
       );
       return true;
     },
-    [storage, persist]
+    [persist]
   );
 
   const updateAll = useCallback(async () => {
@@ -760,44 +776,29 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const applyDetectedCorporateAction = useCallback(
     (event: CorporateActionEvent) => {
-      setStorage((prev) => {
-        if (!prev) return prev;
-        const next = applyCorporateAction(prev, event);
-        savePortfolio(next);
-        if (isAuthenticated) void pushCloudSync(next);
-        return next;
-      });
+      const current = storageRef.current;
+      if (current) persist(applyCorporateAction(current, event));
       setCorporateActionMessage("已處理公司行動");
     },
-    [isAuthenticated, pushCloudSync]
+    [persist]
   );
 
   const applyManualAction = useCallback(
     (input: ManualCorporateActionInput) => {
-      setStorage((prev) => {
-        if (!prev) return prev;
-        const next = applyManualCorporateAction(prev, input);
-        savePortfolio(next);
-        if (isAuthenticated) void pushCloudSync(next);
-        return next;
-      });
+      const current = storageRef.current;
+      if (current) persist(applyManualCorporateAction(current, input));
       setCorporateActionMessage("已套用手動公司行動調整");
     },
-    [isAuthenticated, pushCloudSync]
+    [persist]
   );
 
   const applyManualActionToGroup = useCallback(
     (groupKey: string, input: Omit<ManualCorporateActionInput, "holdingId">) => {
-      setStorage((prev) => {
-        if (!prev) return prev;
-        const next = applyManualCorporateActionToGroup(prev, groupKey, input);
-        savePortfolio(next);
-        if (isAuthenticated) void pushCloudSync(next);
-        return next;
-      });
+      const current = storageRef.current;
+      if (current) persist(applyManualCorporateActionToGroup(current, groupKey, input));
       setCorporateActionMessage("已套用手動公司行動調整");
     },
-    [isAuthenticated, pushCloudSync]
+    [persist]
   );
 
   const setAutoUpdate = useCallback(

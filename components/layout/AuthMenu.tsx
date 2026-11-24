@@ -5,75 +5,53 @@ import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export function AuthMenu() {
   const { data: session, status } = useSession();
-  const { syncStatus, syncMessage, storageMode, refreshFromCloud } =
-    usePortfolio();
+  const { syncStatus, syncMessage, storageMode, refreshFromCloud } = usePortfolio();
 
-  const loading = status === "loading";
-  const signedIn = status === "authenticated" && !!session?.user;
+  if (status === "loading") {
+    return <p role="status" className="text-sm text-muted">正在確認登入狀態…</p>;
+  }
 
-  if (loading) {
+  if (status !== "authenticated" || !session?.user) {
     return (
-      <span className="hidden h-9 w-20 animate-pulse rounded-lg bg-surface-raised sm:inline-block" />
+      <div className="space-y-3">
+        <p className="text-sm text-muted">登入 Google 後可跨裝置同步持倉。</p>
+        <button type="button" onClick={() => void signIn("google")} className="btn-primary w-full">
+          Google 登入
+        </button>
+      </div>
     );
   }
 
-  if (!signedIn) {
-    return (
-      <button
-        type="button"
-        onClick={() => signIn("google")}
-        className="touch-target rounded-lg border border-border bg-surface-raised px-2.5 py-2 text-xs font-medium text-foreground transition hover:bg-surface sm:px-3 sm:text-sm"
-        title="登入後可在不同裝置同步持倉"
-      >
-        <span className="hidden sm:inline">Google 登入</span>
-        <span className="sm:hidden">登入</span>
-      </button>
-    );
-  }
-
-  const name = session.user?.name ?? session.user?.email ?? "已登入";
-  const syncHint =
-    syncStatus === "syncing"
-      ? "同步中…"
-      : syncStatus === "error" && syncMessage
-        ? syncMessage
-        : storageMode === "cloud"
-          ? "已同步"
-          : null;
+  const name = session.user.name ?? session.user.email ?? "已登入 Google";
+  const syncHint = syncStatus === "syncing"
+    ? "同步中…"
+    : syncStatus === "error" && syncMessage
+      ? syncMessage
+      : storageMode === "cloud"
+        ? "已同步"
+        : "使用本機資料";
 
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="hidden max-w-[8rem] flex-col items-end text-right sm:flex">
-        <span className="truncate text-xs font-medium text-foreground" title={name}>
-          {name}
-        </span>
-        {syncHint && (
-          <span
-            className={`truncate text-[10px] ${
-              syncStatus === "error" ? "text-rose-500" : "text-muted"
-            }`}
-            title={syncHint}
-          >
-            {syncHint}
-          </span>
-        )}
+    <div className="space-y-3">
+      <div className="break-words">
+        <p className="text-sm font-semibold">{name}</p>
+        <p role="status" className={`mt-1 text-sm ${syncStatus === "error" ? "text-rose-700 dark:text-rose-300" : "text-muted"}`}>
+          {syncHint}
+        </p>
       </div>
-      <button
-        type="button"
-        onClick={() => void refreshFromCloud()}
-        disabled={syncStatus === "syncing"}
-        className="touch-target hidden rounded-lg border border-border px-2.5 py-2 text-xs text-muted transition hover:bg-surface-raised hover:text-foreground disabled:opacity-50 sm:inline-block sm:px-3 sm:text-sm"
-        title="從雲端重新載入持倉"
-      >
-        雲端載入
-      </button>
-      <button
-        type="button"
-        onClick={() => signOut({ callbackUrl: "/" })}
-        className="touch-target rounded-lg border border-border px-2.5 py-2 text-xs text-muted transition hover:bg-surface-raised hover:text-foreground sm:px-3 sm:text-sm"
-      >
-        登出
-      </button>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => void refreshFromCloud()}
+          disabled={syncStatus === "syncing"}
+          className="btn-secondary"
+        >
+          雲端載入
+        </button>
+        <button type="button" onClick={() => void signOut({ callbackUrl: "/" })} className="btn-secondary">
+          登出
+        </button>
+      </div>
     </div>
   );
 }

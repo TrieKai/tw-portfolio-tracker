@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -97,7 +98,7 @@ export function LoanPaymentModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="loan-payment-title">
+    <Modal labelledBy="loan-payment-title" onClose={onClose}>
       <form onSubmit={handleSubmit} className="glass-card max-h-[92dvh] w-full max-w-xl space-y-5 overflow-y-auto rounded-b-none p-5 sm:rounded-2xl sm:p-6">
         <div>
           <p className="text-xs text-muted">{loan.name}</p>
@@ -137,7 +138,7 @@ export function LoanPaymentModal({
           <button type="submit" className="btn-primary">儲存繳款紀錄</button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 

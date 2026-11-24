@@ -2,15 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const TABS = [
-  { href: "/", label: "總覽", match: (p: string) => p === "/" },
-  { href: "/holdings", label: "持倉", match: (p: string) => p === "/holdings" },
-  { href: "/holdings/new", label: "新增", match: (p: string) => p === "/holdings/new" },
-  { href: "/calendar", label: "日曆", match: (p: string) => p.startsWith("/calendar") },
-  { href: "/loans", label: "貸款", match: (p: string) => p.startsWith("/loans") },
-  { href: "/trends", label: "趨勢", match: (p: string) => p.startsWith("/trends") },
-] as const;
+import { isActiveRoute, NAVIGATION } from "./navigation";
 
 /** 手機版底部導覽（md 以上隱藏） */
 export function MobileBottomNav() {
@@ -18,29 +10,25 @@ export function MobileBottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-page/95 backdrop-blur-md md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface md:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       aria-label="主要導覽"
     >
-      <div className="mx-auto flex max-w-6xl">
-        {TABS.map(({ href, label, match }) => {
-          const active = match(pathname);
+      <div className="grid grid-cols-5 gap-1 px-2 py-1">
+        {NAVIGATION.map(({ href, label, icon }) => {
+          const active = isActiveRoute(pathname, href);
           return (
             <Link
               key={href}
               href={href}
-              className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-xs font-medium transition touch-target ${
-                active
-                  ? "text-accent"
-                  : "text-muted hover:text-foreground"
+              aria-current={active ? (pathname === href ? "page" : "location") : undefined}
+              className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-lg py-1.5 text-xs font-medium ${
+                active ? "bg-accent-dim text-accent" : "text-muted hover:bg-surface-raised hover:text-foreground"
               }`}
             >
-              <span
-                className={`h-1 w-8 rounded-full ${
-                  active ? "bg-accent" : "bg-transparent"
-                }`}
-                aria-hidden
-              />
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d={icon} />
+              </svg>
               {label}
             </Link>
           );

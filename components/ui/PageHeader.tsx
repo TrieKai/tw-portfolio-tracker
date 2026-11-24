@@ -9,14 +9,14 @@ export function PageHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-4">
+    <header className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4 sm:pb-6">
       <div className="min-w-0">
         <h1 className="page-title">{title}</h1>
         {description && (
-          <p className="mt-1 text-sm text-muted">{description}</p>
+          <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-muted">{description}</p>
         )}
       </div>
       {action && <div className="shrink-0">{action}</div>}
-    </div>
+    </header>
   );
 }

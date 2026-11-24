@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { useState, type FormEvent } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -43,15 +44,7 @@ export function DividendModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end bg-black/50 sm:items-center sm:justify-center sm:p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="dividend-modal-title"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <Modal labelledBy="dividend-modal-title" onClose={onClose} dismissOnBackdrop>
       <form
         onSubmit={handleSubmit}
         className="glass-card max-h-[90dvh] w-full space-y-4 overflow-y-auto rounded-b-none p-5 sm:max-w-lg sm:rounded-2xl sm:p-6"
@@ -149,6 +142,6 @@ export function DividendModal({
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

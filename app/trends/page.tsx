@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { PortfolioReturnChart } from "@/components/charts/PortfolioReturnChart";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingLotsTable } from "@/components/portfolio/HoldingLotsTable";
@@ -8,6 +9,7 @@ import { buildHoldingLotSummaries } from "@/lib/portfolio/portfolio-timeline";
 import { PriceTrendChart } from "@/components/charts/PriceTrendChart";
 import { ErrorAlert } from "@/components/ui/ErrorAlert";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { EmptyState } from "@/components/ui/EmptyState";
 import type { ChartRange } from "@/lib/portfolio/calculations";
 import { ChartRangePicker } from "@/components/ui/ChartRangePicker";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -100,15 +102,19 @@ export default function TrendsPage() {
     <div className="space-y-6">
       <PageHeader
         title="趨勢分析"
-        description="資產總覽依持倉歷史價格加總；單一標的則顯示股價或淨值走勢"
+        description="比較持倉總市值、成本與報酬，或查看單一標的的價格走勢。"
       />
 
       {holdings.length === 0 ? (
-        <p className="text-muted">請先新增持倉並更新價格</p>
+        <EmptyState
+          title="新增持倉後即可查看趨勢"
+          description="累積至少兩筆價格後，就能比較不同日期的市值與報酬。"
+          action={<Link href="/holdings/new" className="btn-primary">新增持倉</Link>}
+        />
       ) : (
         <>
-          <div className="space-y-3">
-            <div className="flex w-full gap-1 rounded-lg border border-border p-1">
+          <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-surface p-2.5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex shrink-0 gap-1 rounded-lg bg-surface-raised p-1" role="group" aria-label="趨勢檢視">
               <TabButton
                 active={tab === "portfolio"}
                 onClick={() => setTab("portfolio")}
@@ -153,7 +159,7 @@ export default function TrendsPage() {
                   </button>
                 </div>
                 {(historyMessage || batchMessage) && tab === "portfolio" && (
-                  <p className="mb-3 text-sm text-accent">
+                  <p role="status" className={`mb-3 text-sm ${batchStatus === "error" && !historyMessage ? "text-rose-700 dark:text-rose-300" : "text-accent"}`}>
                     {historyMessage ?? batchMessage}
                   </p>
                 )}
@@ -246,7 +252,7 @@ export default function TrendsPage() {
               )}
 
               {historyMessage && (
-                <p className="text-sm text-accent">{historyMessage}</p>
+                <p role="status" className="text-sm text-accent">{historyMessage}</p>
               )}
               {historyError && (
                 <ErrorAlert
@@ -293,6 +299,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`rounded-md px-3 py-2.5 text-sm font-medium transition touch-target sm:px-4 ${
         active
           ? "bg-accent-dim text-accent"

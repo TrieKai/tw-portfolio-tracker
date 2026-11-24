@@ -8,6 +8,7 @@ import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
 import { PortfolioDataPanel } from "@/components/portfolio/PortfolioDataPanel";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { AmountVisibilityToggle } from "@/components/ui/AmountVisibilityToggle";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export default function HoldingsPage() {
@@ -20,13 +21,16 @@ export default function HoldingsPage() {
       <PageHeader
         title="持倉列表"
         action={
-          <Link href="/holdings/new" className="btn-primary w-full sm:w-auto touch-target">
-            新增持倉
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <AmountVisibilityToggle />
+            <Link href="/holdings/new" className="btn-primary flex-1 sm:flex-none">
+              新增持倉
+            </Link>
+          </div>
         }
       />
-      <CorporateActionsPanel />
       <HoldingsTable holdings={holdings} />
+      <CorporateActionsPanel />
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">月度損益</h2>
@@ -43,7 +47,7 @@ export default function HoldingsPage() {
         <SaleHistoryTable sales={sales} />
       </section>
 
-      <PortfolioDataPanel />
+      <div id="portfolio-backup"><PortfolioDataPanel /></div>
     </div>
   );
 }

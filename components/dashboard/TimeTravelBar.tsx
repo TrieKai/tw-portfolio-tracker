@@ -42,13 +42,16 @@ export function TimeTravelBar({
   return (
     <section className={`overflow-hidden rounded-2xl border p-4 transition ${
       active
-        ? "border-accent/50 bg-accent-dim/40 shadow-lg shadow-accent/5"
+        ? "border-accent/50 bg-accent-dim/40"
         : "border-border bg-surface"
     }`} aria-label="資產時間旅行">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <span className={`flex h-10 w-10 items-center justify-center rounded-xl text-xl ${active ? "bg-accent-button text-white" : "bg-surface-raised text-muted"}`} aria-hidden>
-            ◷
+          <span className="flex size-9 items-center justify-center rounded-lg bg-surface-raised text-muted" aria-hidden="true">
+            <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M12 7v5h4" />
+            </svg>
           </span>
           <div>
             <p className="font-semibold">時間旅行</p>
@@ -58,26 +61,26 @@ export function TimeTravelBar({
           </div>
         </div>
         {active && (
-          <button type="button" onClick={() => onSelectDate(null)} className="rounded-lg bg-accent-button px-3 py-2 text-xs font-semibold text-white">
+          <button type="button" onClick={() => onSelectDate(null)} className="btn-secondary">
             回到現在
           </button>
         )}
       </div>
 
-      <div className="mt-4 flex items-start gap-3">
-        <span className="text-xs text-muted" aria-hidden>過去</span>
-        <div className="min-w-0 flex-1">
+      <div className="mt-3 flex items-start gap-3">
+        <span className="py-1.5 text-xs text-muted" aria-hidden>過去</span>
+        <div className="min-w-0 flex-1 [container-type:inline-size]">
           <input
             type="range"
             min={0}
             max={Math.max(0, dates.length - 1)}
             value={activeIndex}
             onChange={(event) => onSelectDate(dates[Number(event.target.value)])}
-            className="block h-2 w-full cursor-pointer accent-[var(--accent)]"
+            className="block h-6 w-full cursor-pointer accent-[var(--accent)]"
             aria-label="選擇歷史日期"
             aria-valuetext={formatDate(dates[activeIndex])}
           />
-          <div className={`relative mt-1 h-8 ${view === "compact" ? "hidden" : ""}`} aria-label="歷史日期刻度">
+          <div className={`history-ticks relative h-7 ${view === "compact" ? "hidden" : ""}`} aria-label="歷史日期刻度">
             {tickIndexes.map((index) => {
               const position = dates.length > 1 ? (index / (dates.length - 1)) * 100 : 0;
               const align = index === 0
@@ -90,9 +93,11 @@ export function TimeTravelBar({
                   key={`${dates[index]}-${index}`}
                   type="button"
                   onClick={() => onSelectDate(dates[index])}
-                  className={`absolute top-0 flex flex-col text-[10px] text-muted transition hover:text-accent ${align}`}
+                  className={`absolute top-0 flex min-h-6 flex-col text-xs text-muted transition hover:text-accent ${align} ${
+                    index > 0 && index < dates.length - 1 ? "history-tick-intermediate" : ""
+                  }`}
                   style={{ left: `${position}%` }}
-                  title={formatDate(dates[index])}
+                  aria-label={formatDate(dates[index])}
                 >
                   <span className="mb-0.5 h-2 w-px bg-border" aria-hidden />
                   <span className="whitespace-nowrap">
@@ -108,7 +113,7 @@ export function TimeTravelBar({
         <button
           type="button"
           onClick={() => onSelectDate(dates[dates.length - 1])}
-          className="text-xs font-medium text-accent hover:underline"
+          className="min-h-6 text-xs font-medium text-accent hover:underline"
         >
           最近
         </button>

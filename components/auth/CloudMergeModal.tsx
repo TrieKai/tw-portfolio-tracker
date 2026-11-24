@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import type { PortfolioStorage } from "@/lib/types/holding";
 
 interface CloudMergeModalProps {
@@ -18,12 +19,7 @@ export function CloudMergeModal({
   onDismiss,
 }: CloudMergeModalProps) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="merge-title"
-    >
+    <Modal labelledBy="merge-title" onClose={onDismiss}>
       <div className="w-full max-w-md rounded-2xl border border-border bg-page p-5 shadow-xl">
         <h2 id="merge-title" className="text-lg font-semibold">
           選擇要使用的資料
@@ -65,7 +61,7 @@ export function CloudMergeModal({
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

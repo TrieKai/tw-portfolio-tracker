@@ -4,19 +4,25 @@ import { useId } from "react";
 
 export function DatePicker({
   value,
+  defaultValue,
   onChange,
+  name,
   min,
   max,
   disabled,
+  required,
   id: idProp,
   className = "",
   "aria-label": ariaLabel,
 }: {
-  value: string;
-  onChange: (iso: string) => void;
+  value?: string;
+  defaultValue?: string;
+  onChange?: (iso: string) => void;
+  name?: string;
   min?: string;
   max?: string;
   disabled?: boolean;
+  required?: boolean;
   id?: string;
   className?: string;
   "aria-label"?: string;
@@ -28,12 +34,15 @@ export function DatePicker({
     <input
       type="date"
       id={id}
+      name={name}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      defaultValue={defaultValue}
+      onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       min={min}
       max={max}
       disabled={disabled}
-      aria-label={ariaLabel ?? "選擇日期"}
+      required={required}
+      aria-label={ariaLabel}
       className={`input-field tabular-nums ${className}`}
     />
   );

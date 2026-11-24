@@ -19,21 +19,21 @@ import {
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   palette: "emerald",
   density: "comfortable",
-  cardStyle: "glass",
+  cardStyle: "outlined",
   dashboardLayout: [
     { section: "timeTravel", width: "full", hidden: false, view: "standard" },
+    { section: "summary", width: "full", hidden: false, view: "standard" },
+    { section: "allocation", width: "half", hidden: false, view: "visual" },
+    { section: "quickStats", width: "half", hidden: false, view: "compact" },
+    { section: "trend", width: "full", hidden: false, view: "visual" },
+    { section: "monthlyPnl", width: "full", hidden: false, view: "standard" },
+    { section: "holdings", width: "full", hidden: false, view: "standard" },
     { section: "insights", width: "full", hidden: false, view: "standard" },
+    { section: "exposure", width: "full", hidden: false, view: "standard" },
     { section: "weeklyReport", width: "full", hidden: false, view: "standard" },
     { section: "stressTest", width: "half", hidden: false, view: "standard" },
     { section: "rebalance", width: "half", hidden: false, view: "standard" },
     { section: "parallelUniverse", width: "full", hidden: false, view: "standard" },
-    { section: "summary", width: "full", hidden: false, view: "standard" },
-    { section: "allocation", width: "half", hidden: false, view: "visual" },
-    { section: "quickStats", width: "half", hidden: false, view: "compact" },
-    { section: "exposure", width: "full", hidden: false, view: "standard" },
-    { section: "monthlyPnl", width: "full", hidden: false, view: "standard" },
-    { section: "trend", width: "full", hidden: false, view: "visual" },
-    { section: "holdings", width: "full", hidden: false, view: "standard" },
   ],
 };
 
@@ -147,7 +147,7 @@ function migrateLegacyDashboardLayout(raw: Record<string, unknown>) {
     }
   }
 
-  return normalizeDashboardLayout(migrated);
+  return migrated.length ? normalizeDashboardLayout(migrated) : DEFAULT_UI_PREFERENCES.dashboardLayout;
 }
 
 export function normalizeUiPreferences(raw: unknown): UiPreferences {

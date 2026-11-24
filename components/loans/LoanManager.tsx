@@ -6,6 +6,7 @@ import { LoanBalanceModal } from "@/components/loans/LoanBalanceModal";
 import { LoanPaymentModal } from "@/components/loans/LoanPaymentModal";
 import { LoanRateModal } from "@/components/loans/LoanRateModal";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { todayIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot } from "@/lib/loans/calculations";
@@ -89,10 +90,11 @@ export function LoanManager() {
       <PageHeader
         title="貸款管理"
         description="本金影響淨資產；利息與費用才會影響扣息後損益"
-        action={<button type="button" className="btn-primary w-full sm:w-auto" onClick={() => setFormOpen(true)}>新增貸款</button>}
+        action={loans.length > 0 ? <button type="button" className="btn-primary w-full sm:w-auto" onClick={() => setFormOpen(true)}>新增貸款</button> : undefined}
       />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {loans.length > 0 && <section className="metric-grid-container" aria-label="貸款摘要">
+        <div className="metric-grid">
         <Metric label="貸款總額" value={formatCurrency(loanSummary.totalDebt)} />
         <Metric label="投資用途本金" value={formatCurrency(loanSummary.investmentDebt)} />
         <Metric label="本月融資成本" value={formatCurrency(loanSummary.monthlyInvestmentFinancingCost)} />
@@ -101,7 +103,8 @@ export function LoanManager() {
           value={loanSummary.nextPaymentDate ? formatCurrency(loanSummary.nextPaymentAmount) : "—"}
           sub={loanSummary.nextPaymentDate ?? "尚無還款預估"}
         />
-      </section>
+        </div>
+      </section>}
 
       {loanSummary.hasIncompleteData ? (
         <p className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-700 dark:text-amber-300">
@@ -142,15 +145,15 @@ export function LoanManager() {
       ) : null}
 
       <section className="space-y-4">
-        <h2 className="text-lg font-semibold">進行中的貸款</h2>
         {activeSnapshots.length === 0 ? (
-          <div className="glass-card p-10 text-center">
-            <p className="font-medium">尚無貸款資料</p>
-            <p className="mt-2 text-sm text-muted">新增後即可查看還款預估與扣息後投資損益。</p>
-            <button type="button" className="btn-primary mt-5" onClick={() => setFormOpen(true)}>新增第一筆貸款</button>
-          </div>
+          <EmptyState
+            title={loans.length ? "目前沒有進行中的貸款" : "尚無貸款資料"}
+            description="新增貸款後，即可查看還款預估與扣息後投資損益。"
+            action={loans.length === 0 ? <button type="button" className="btn-primary" onClick={() => setFormOpen(true)}>新增第一筆貸款</button> : undefined}
+          />
         ) : (
           <div className="space-y-4">
+            <h2 className="text-lg font-semibold">進行中的貸款</h2>
             {activeSnapshots.map((snapshot) => (
               <LoanCard
                 key={snapshot.loan.id}
@@ -337,7 +340,7 @@ function LoanCard({
 }
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return <div className="glass-card p-4"><p className="text-xs text-muted">{label}</p><p className="mt-2 text-xl font-semibold tabular-nums sm:text-2xl">{value}</p>{sub ? <p className="mt-1 text-xs text-muted">{sub}</p> : null}</div>;
+  return <div><p className="text-sm text-muted">{label}</p><p className="mt-2 text-xl font-semibold tabular-nums sm:text-2xl">{value}</p>{sub ? <p className="mt-1 text-xs text-muted">{sub}</p> : null}</div>;
 }
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {

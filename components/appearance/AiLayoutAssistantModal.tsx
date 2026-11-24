@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { type DragEvent, useEffect, useRef, useState } from "react";
 import { requestAiLayout } from "@/lib/client/ai-layout-api";
 import type {
@@ -159,24 +160,6 @@ export function AiLayoutAssistantModal({
     previewSuggestion(currentLayout);
   }, [preferences, previewSuggestion, theme]);
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        clearPreview();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [clearPreview, onClose]);
-
   async function generate() {
     const text = prompt.trim();
     if (text.length < 3) {
@@ -324,32 +307,11 @@ export function AiLayoutAssistantModal({
     : false;
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) close();
-      }}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="ai-layout-title"
-        className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-border bg-surface shadow-2xl sm:max-w-2xl sm:rounded-3xl"
-      >
+    <Modal labelledBy="ai-layout-title" onClose={loading ? undefined : close} dismissOnBackdrop>
+      <section className="max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl border border-border bg-surface sm:max-w-2xl sm:rounded-2xl">
         <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-border bg-surface/95 px-5 py-4 backdrop-blur sm:px-6">
           <div>
-            <div className="mb-1 flex items-center gap-2">
-              <span
-                className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-accent-dim text-sm text-accent"
-                aria-hidden
-              >
-                ▦
-              </span>
-              <h2 id="ai-layout-title" className="text-lg font-bold">
-                版面設定
-              </h2>
-            </div>
+            <h2 id="ai-layout-title" className="mb-1 text-lg font-bold">版面設定</h2>
             <p className="text-sm text-muted">
               直接調整外觀與拖曳版面，也可以選擇讓 AI 協助排版。
             </p>
@@ -661,6 +623,6 @@ export function AiLayoutAssistantModal({
           </div>
         </div>
       </section>
-    </div>
+    </Modal>
   );
 }

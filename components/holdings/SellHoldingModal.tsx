@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -92,12 +93,7 @@ export function SellHoldingModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
-      role="dialog"
-      aria-modal
-      aria-labelledby="sell-holding-title"
-    >
+    <Modal labelledBy="sell-holding-title" onClose={onClose}>
       <form
         onSubmit={handleSubmit}
         className="glass-card max-h-[90dvh] w-full max-w-lg space-y-4 overflow-y-auto rounded-b-none p-4 sm:rounded-2xl sm:p-6"
@@ -224,6 +220,6 @@ export function SellHoldingModal({
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

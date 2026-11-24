@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AssetAllocationChart } from "@/components/dashboard/AssetAllocationChart";
@@ -16,6 +16,7 @@ import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTren
 import { HoldingsTable } from "@/components/holdings/HoldingsTable";
 import { MonthlyPnlTable } from "@/components/portfolio/MonthlyPnlTable";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { AmountVisibilityToggle } from "@/components/ui/AmountVisibilityToggle";
 import {
   currentYearMonthPrefix,
@@ -52,14 +53,14 @@ export default function DashboardPage() {
   const { preferences } = useUiPreferences();
   const { formatAmount } = useAmountPrivacy();
   const [travelDate, setTravelDate] = useState<string | null>(null);
-  const currentPnlCalendar = useMemo(
+  const pnlCalendar = useMemo(
     () =>
       buildPnlCalendar(storage, {
-        month: currentYearMonthPrefix(),
-        asOfDate: todayIsoDate(),
+        month: travelDate?.slice(0, 7) ?? currentYearMonthPrefix(),
+        asOfDate: travelDate ?? todayIsoDate(),
         filter: { kind: "investment" },
       }),
-    [storage]
+    [storage, travelDate]
   );
 
   const historyDates = useMemo(
@@ -148,6 +149,15 @@ export default function DashboardPage() {
     shownSummary,
     shownBreakdowns.dailyUnrealized
   );
+  const hasPortfolio = holdings.length > 0 || sales.length > 0;
+  const visibleLayout = preferences.dashboardLayout.filter(
+    (item) => !item.hidden && (item.section !== "timeTravel" || historyDates.length > 0)
+  );
+  const loanPanel = shownLoanSummary.activeLoanCount > 0 ? (
+    <div data-grid-width="full">
+      <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} reminders={shownLoanReminders} />
+    </div>
+  ) : null;
 
   const sections: Record<DashboardSectionId, ReactNode> = {
     timeTravel: (
@@ -197,7 +207,10 @@ export default function DashboardPage() {
       />
     ),
     summary: (
-      <PortfolioSummaryCards summary={shownSummary} pnlBreakdowns={shownBreakdowns} view={viewFor("summary")} asOfDate={travelDate ?? undefined} />
+      <section className="metric-grid-container space-y-3" aria-labelledby="portfolio-summary-title">
+        <h2 id="portfolio-summary-title" className="text-lg font-semibold">資產概況</h2>
+        <PortfolioSummaryCards summary={shownSummary} pnlBreakdowns={shownBreakdowns} view={viewFor("summary")} asOfDate={travelDate ?? undefined} />
+      </section>
     ),
     allocation: (
       <AssetAllocationChart
@@ -322,13 +335,13 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-lg font-semibold">月度損益</h2>
             <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span className={`text-2xl font-semibold tabular-nums ${currentPnlCalendar.summary.pnl >= 0 ? "text-gain" : "text-loss"}`}>
-                {currentPnlCalendar.summary.pnl > 0 ? "+" : ""}
-                {formatAmount(currentPnlCalendar.summary.pnl)}
+              <span className={`text-2xl font-semibold tabular-nums ${pnlCalendar.summary.pnl >= 0 ? "text-gain" : "text-loss"}`}>
+                {pnlCalendar.summary.pnl > 0 ? "+" : ""}
+                {formatAmount(pnlCalendar.summary.pnl)}
               </span>
-              <span className={`text-sm tabular-nums ${currentPnlCalendar.summary.returnRate >= 0 ? "text-gain" : "text-loss"}`}>
-                本月複利 {currentPnlCalendar.summary.returnRate > 0 ? "+" : ""}
-                {currentPnlCalendar.summary.returnRate.toFixed(2)}%
+              <span className={`text-sm tabular-nums ${pnlCalendar.summary.returnRate >= 0 ? "text-gain" : "text-loss"}`}>
+                {travelDate ? `${shownMonthLabel}複利` : "本月複利"} {pnlCalendar.summary.returnRate > 0 ? "+" : ""}
+                {pnlCalendar.summary.returnRate.toFixed(2)}%
               </span>
             </div>
           </div>
@@ -374,46 +387,56 @@ export default function DashboardPage() {
     ),
   };
 
+  const dashboard = (
+    <div className="dashboard-grid">
+      {hasPortfolio && !visibleLayout.some((item) => item.section === "summary") && loanPanel}
+      {visibleLayout.map((item) => (
+        <Fragment key={item.section}>
+          <div
+            data-dashboard-section={item.section}
+            data-grid-width={item.width}
+            className="min-w-0"
+          >
+            {sections[item.section]}
+          </div>
+          {hasPortfolio && item.section === "summary" && loanPanel}
+        </Fragment>
+      ))}
+    </div>
+  );
+
   return (
     <div className="ui-dashboard">
       <PageHeader
         title="投資總覽"
-        description="台股、境內基金與房子持倉 · 本機儲存"
-        action={
+        description="掌握台股、境內基金與房產的市值及損益。"
+        action={hasPortfolio ? (
           <div className="flex w-full gap-2 sm:w-auto">
             <AmountVisibilityToggle />
-            <Link
-              href="/holdings/new"
-              className="btn-primary min-w-0 flex-1 sm:w-auto sm:flex-none touch-target"
-            >
-              新增持倉
-            </Link>
+            <Link href="/holdings/new" className="btn-primary min-w-0 flex-1 sm:flex-none">新增持倉</Link>
           </div>
-        }
+        ) : undefined}
       />
 
-      <div className="mt-6">
-        <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} reminders={shownLoanReminders} />
-      </div>
-
-      <div className="dashboard-grid">
-        {preferences.dashboardLayout
-          .filter(
-            (item) =>
-              !item.hidden &&
-              (item.section !== "timeTravel" || historyDates.length > 0)
-          )
-          .map((item) => (
-            <div
-              key={item.section}
-              data-dashboard-section={item.section}
-              data-grid-width={item.width}
-              className="min-w-0"
-            >
-              {sections[item.section]}
-            </div>
-          ))}
-      </div>
+      {hasPortfolio ? dashboard : (
+        <>
+          <EmptyState
+            title="建立第一筆持倉"
+            description="輸入買入日期、價格與數量，即可開始追蹤市值和損益。已有備份可直接匯入。"
+            action={
+              <>
+                <Link href="/holdings/new" className="btn-primary">新增持倉</Link>
+                <Link href="/holdings#portfolio-backup" className="btn-secondary">匯入備份</Link>
+              </>
+            }
+          />
+          {loanPanel}
+          <details className="rounded-xl border border-border bg-surface">
+            <summary className="cursor-pointer rounded-xl px-5 py-3.5 text-sm font-medium">展開總覽與分析工具</summary>
+            <div className="border-t border-border p-4 sm:p-5">{dashboard}</div>
+          </details>
+        </>
+      )}
     </div>
   );
 }

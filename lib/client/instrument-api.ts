@@ -31,12 +31,20 @@ export async function lookupInstrument(
     market?: StockMarket;
   }
 ): Promise<InstrumentLookupResponse> {
-  const res = await fetch("/api/instruments/lookup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  return res.json() as Promise<InstrumentLookupResponse>;
+  try {
+    const res = await fetch("/api/instruments/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    return (await res.json()) as InstrumentLookupResponse;
+  } catch {
+    return {
+      success: false,
+      code: "LOOKUP_UNAVAILABLE",
+      error: "暫時無法查詢標的。請檢查網路連線後再試一次。",
+    };
+  }
 }
 
 export function isLookupError(

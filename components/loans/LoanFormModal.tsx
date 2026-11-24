@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
@@ -376,28 +377,24 @@ export function LoanFormModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="loan-form-title"
-    >
+    <Modal labelledBy="loan-form-title" onClose={onClose}>
       <form
         onSubmit={handleSubmit}
-        className="glass-card max-h-[92dvh] w-full max-w-2xl space-y-5 overflow-y-auto rounded-b-none p-4 sm:rounded-2xl sm:p-6"
+        className="glass-card max-h-[92dvh] w-full max-w-2xl space-y-5 overflow-y-auto overscroll-contain rounded-b-none p-4 sm:rounded-2xl sm:p-6"
         style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
       >
-        <div>
-          <p className="text-xs text-muted">一般貸款、融資與質押</p>
-          <h2 id="loan-form-title" className="mt-1 text-lg font-semibold">
+        <div className="sticky top-0 z-10 -mx-4 -mt-4 flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2 sm:-mx-6 sm:-mt-6 sm:px-6">
+          <h2 id="loan-form-title" className="text-lg font-semibold">
             {loan ? "更正貸款資料" : "新增貸款"}
           </h2>
+          <button type="button" onClick={onClose} className="btn-secondary shrink-0">關閉</button>
         </div>
 
-        {!flexibleLoan ? <div className="grid grid-cols-2 gap-2">
+        {!flexibleLoan ? <div className="grid grid-cols-2 gap-2" role="group" aria-label="貸款建立方式">
           <button
             type="button"
             onClick={() => setEntryMode("complete")}
+            aria-pressed={entryMode === "complete"}
             className={entryMode === "complete" ? "btn-primary" : "btn-secondary"}
           >
             完整建立
@@ -405,6 +402,7 @@ export function LoanFormModal({
           <button
             type="button"
             onClick={() => setEntryMode("quick")}
+            aria-pressed={entryMode === "quick"}
             className={entryMode === "quick" ? "btn-primary" : "btn-secondary"}
           >
             既有貸款快速建立
@@ -559,7 +557,7 @@ export function LoanFormModal({
           <button type="submit" className="btn-primary">儲存貸款</button>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AiLayoutAssistantModal } from "@/components/appearance/AiLayoutAssistantModal";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 import {
   UiPreferencesProvider,
@@ -12,15 +12,13 @@ import {
 import { AuthMenu } from "./AuthMenu";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { ThemeToggle } from "./ThemeToggle";
+import { isActiveRoute, NAVIGATION } from "./navigation";
 
-const NAV = [
-  { href: "/", label: "總覽" },
-  { href: "/holdings", label: "持倉" },
-  { href: "/holdings/new", label: "新增" },
-  { href: "/calendar", label: "日曆" },
-  { href: "/loans", label: "貸款" },
-  { href: "/trends", label: "趨勢" },
-] as const;
+const AiLayoutAssistantModal = dynamic(() =>
+  import("@/components/appearance/AiLayoutAssistantModal").then(
+    (module) => module.AiLayoutAssistantModal
+  )
+);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -32,44 +30,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function AppShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { updateAll, batchStatus, batchMessage, storageMode } = usePortfolio();
+  const { ready, holdings, updateAll, batchStatus, batchMessage, storageMode } = usePortfolio();
   const { preferences } = useUiPreferences();
   const [aiLayoutOpen, setAiLayoutOpen] = useState(false);
-  const closeAiLayout = useCallback(() => setAiLayoutOpen(false), []);
-
+  const settings = useRef<HTMLDivElement>(null);
+  const settingsButton = useRef<HTMLButtonElement>(null);
   const isUpdating = batchStatus === "loading";
 
   return (
     <div
-      className="min-h-screen bg-page text-foreground"
+      className="flex min-h-screen flex-col bg-page text-foreground"
       data-ui-palette={preferences.palette}
       data-ui-density={preferences.density}
       data-ui-card-style={preferences.cardStyle}
     >
-      <header className="sticky top-0 z-40 border-b border-border bg-page/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-4 py-3 sm:gap-3 sm:px-6">
-          <Link
-            href="/"
-            className="shrink-0 text-base font-bold tracking-tight sm:text-lg"
-          >
-            資產<span className="text-accent">追蹤</span>
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-4 focus:py-3">
+        跳至主要內容
+      </a>
+      <header className="sticky top-0 z-40 border-b border-border bg-surface pt-[env(safe-area-inset-top)]">
+        <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6">
+          <Link href="/" className="flex shrink-0 items-center gap-2.5 rounded-md text-base font-bold tracking-tight">
+            <span className="grid size-8 place-items-center rounded-lg bg-accent-dim text-accent" aria-hidden="true">
+              <svg viewBox="0 0 24 24" className="size-[19px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 19v-4m7 4v-7m7 7V9M5 10l7-5 4 2 3-3" />
+              </svg>
+            </span>
+            資產追蹤
           </Link>
 
-          {/* 桌面導覽 */}
-          <nav className="hidden flex-1 justify-center gap-1 text-sm md:flex">
-            {NAV.map(({ href, label }) => {
-              const active =
-                href === "/"
-                  ? pathname === "/"
-                  : pathname.startsWith(href);
+          <nav className="hidden items-center gap-1 md:flex" aria-label="主要導覽">
+            {NAVIGATION.map(({ href, label }) => {
+              const active = isActiveRoute(pathname, href);
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`rounded-lg px-3 py-1.5 transition ${
-                    active
-                      ? "bg-accent-dim font-medium text-accent"
-                      : "text-muted hover:bg-surface-raised hover:text-foreground"
+                  aria-current={active ? (pathname === href ? "page" : "location") : undefined}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium lg:px-4 ${
+                    active ? "bg-accent-dim text-accent" : "text-muted hover:bg-surface-raised hover:text-foreground"
                   }`}
                 >
                   {label}
@@ -78,68 +76,74 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              onClick={() => setAiLayoutOpen(true)}
-              className="touch-target rounded-lg border border-accent/30 bg-accent-dim px-2.5 py-2 text-xs font-semibold text-accent transition hover:border-accent sm:px-3 sm:text-sm"
-              title="手動調整版面，或使用 AI 協助排版"
+              onClick={() => void updateAll()}
+              disabled={!ready || holdings.length === 0 || isUpdating}
+              aria-label={isUpdating ? "正在更新全部資產" : "更新全部資產"}
+              className="btn-secondary px-2.5 sm:px-3"
             >
-              <span aria-hidden className="mr-1">▦</span>
-              <span className="hidden sm:inline">版面設定</span>
-              <span className="sm:hidden">版面</span>
+              <svg aria-hidden="true" viewBox="0 0 24 24" className={`size-4 ${isUpdating ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 10a8 8 0 0 0-14-4l-2 2m0-5v5h5m-5 6a8 8 0 0 0 14 4l2-2m0 5v-5h-5" />
+              </svg>
+              <span>{isUpdating ? "更新中…" : "更新"}<span className="hidden lg:inline">{!isUpdating && "全部資產"}</span></span>
             </button>
             <button
+              ref={settingsButton}
               type="button"
-              onClick={() => updateAll()}
-              disabled={isUpdating}
-              className="flex items-center gap-1.5 rounded-lg bg-accent-button px-2.5 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-60 sm:gap-2 sm:px-3 sm:text-sm touch-target"
+              popoverTarget="app-settings"
+              className="btn-secondary"
             >
-              {isUpdating ? (
-                <>
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                  <span className="sr-only sm:not-sr-only sm:static">
-                    更新中…
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="hidden sm:inline">更新全部資產</span>
-                  <span className="sm:hidden">更新</span>
-                </>
-              )}
+              設定
             </button>
-            <AuthMenu />
-            <ThemeToggle />
+            <div ref={settings} id="app-settings" popover="auto" className="app-settings space-y-4 overflow-y-auto rounded-xl border border-border bg-surface p-4 text-foreground shadow-lg">
+              <AuthMenu />
+              <div className="grid grid-cols-2 gap-2 border-t border-border pt-4">
+                <ThemeToggle />
+                <button
+                  type="button"
+                  onClick={() => {
+                    settings.current?.hidePopover();
+                    settingsButton.current?.focus();
+                    setAiLayoutOpen(true);
+                  }}
+                  className="btn-secondary"
+                >
+                  版面設定
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-        {batchMessage && batchStatus !== "idle" && batchStatus !== "loading" && (
-          <p
-            className={`mx-auto max-w-6xl px-4 pb-2 text-xs sm:px-6 ${
+        <div role="status" className="mx-auto max-w-7xl px-4 text-sm sm:px-6">
+          {isUpdating ? (
+            <p className="sr-only">正在更新資產價格</p>
+          ) : batchMessage && batchStatus !== "idle" ? (
+            <p className={`pb-2 ${
               batchStatus === "error"
-                ? "text-rose-500"
+                ? "text-rose-700 dark:text-rose-300"
                 : batchStatus === "partial"
-                  ? "text-amber-600 dark:text-amber-400"
+                  ? "text-amber-700 dark:text-amber-300"
                   : "text-accent"
-            }`}
-          >
-            {batchMessage}
-          </p>
-        )}
+            }`}>
+              {batchMessage}
+            </p>
+          ) : null}
+        </div>
       </header>
 
-      <main className="app-main main-with-bottom-nav mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <main id="main-content" tabIndex={-1} className="app-main main-with-bottom-nav mx-auto w-full max-w-7xl flex-1 px-4 pt-6 sm:px-6 sm:pt-8">
         {children}
       </main>
 
-      <footer className="footer-with-bottom-nav mx-auto max-w-6xl px-4 pb-6 text-center text-xs text-muted sm:px-6 sm:pb-8">
-        {storageMode === "cloud"
-          ? "已登入 Google · 持倉同步至雲端 · 價格來源 TWSE / 集保中心"
-          : "匿名模式 · 資料僅存於本機瀏覽器 · 價格來源 TWSE / 集保中心"}
+      <footer className="footer-with-bottom-nav mx-auto flex w-full max-w-7xl flex-wrap justify-between gap-x-6 gap-y-2 px-4 text-xs text-muted sm:px-6">
+        <span>{storageMode === "cloud" ? "Google 雲端同步" : "資料儲存於此瀏覽器"}</span>
+        <span>價格來源 TWSE／集保中心</span>
       </footer>
 
       <MobileBottomNav />
-      {aiLayoutOpen && <AiLayoutAssistantModal onClose={closeAiLayout} />}
+      {aiLayoutOpen && <AiLayoutAssistantModal onClose={() => setAiLayoutOpen(false)} />}
     </div>
   );
 }

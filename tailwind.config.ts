@@ -1,5 +1,9 @@
 import type { Config } from "tailwindcss";
 
+function themeColor(token: string) {
+  return `color-mix(in srgb, var(--${token}) calc(<alpha-value> * 100%), transparent)`;
+}
+
 const config: Config = {
   darkMode: "class",
   content: [
@@ -10,22 +14,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        page: "var(--page)",
-        foreground: "var(--foreground)",
-        muted: "var(--muted)",
+        page: themeColor("page"),
+        foreground: themeColor("foreground"),
+        muted: themeColor("muted"),
         surface: {
-          DEFAULT: "var(--surface)",
-          raised: "var(--surface-raised)",
+          DEFAULT: themeColor("surface"),
+          raised: themeColor("surface-raised"),
         },
-        border: "var(--border)",
+        border: themeColor("border"),
         accent: {
-          DEFAULT: "var(--accent)",
-          muted: "var(--accent-muted)",
-          dim: "var(--accent-dim)",
-          button: "var(--accent-button)",
+          DEFAULT: themeColor("accent"),
+          muted: themeColor("accent-muted"),
+          dim: themeColor("accent-dim"),
+          button: themeColor("accent-button"),
         },
-        gain: "var(--gain)",
-        loss: "var(--loss)",
+        gain: themeColor("gain"),
+        loss: themeColor("loss"),
       },
       fontFamily: {
         sans: [

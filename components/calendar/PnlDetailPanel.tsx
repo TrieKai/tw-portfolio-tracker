@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { Modal } from "@/components/ui/Modal";
 import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
 import { formatFinancingCostImpact } from "@/lib/loans/format";
 import { formatIsoDateZh } from "@/lib/date/iso-date";
@@ -248,42 +247,15 @@ export function PnlDetailPanel({
   transactions: PortfolioTransaction[];
   onClose: () => void;
 }) {
-  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const isDay = selection.kind === "day";
   const title = isDay
     ? formatIsoDateZh(selection.day.date)
     : `${selection.week.startDate.slice(5).replace("-", "/")}–${selection.week.endDate.slice(5).replace("-", "/")} 週損益`;
 
-  useEffect(() => {
-    setPortalRoot(document.body);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose]);
-
-  if (!portalRoot) return null;
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[100] flex h-[100dvh] w-screen items-end bg-black/60 sm:items-stretch sm:justify-end"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="pnl-detail-title"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+  return (
+    <Modal labelledBy="pnl-detail-title" onClose={onClose} dismissOnBackdrop placement="side">
       <aside
-        className="h-[88dvh] w-full overflow-y-auto rounded-t-2xl bg-surface shadow-2xl sm:h-[100dvh] sm:max-w-md sm:rounded-none sm:border-l sm:border-border"
+        className="h-[88dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl bg-surface shadow-2xl sm:h-[100dvh] sm:max-w-md sm:rounded-none sm:border-l sm:border-border"
       >
         <div className="sticky top-0 z-20 flex items-center justify-between gap-4 rounded-t-2xl border-b border-border bg-surface px-5 py-4 sm:rounded-none sm:px-6">
           <div>
@@ -321,7 +293,6 @@ export function PnlDetailPanel({
           )}
         </div>
       </aside>
-    </div>,
-    portalRoot
+    </Modal>
   );
 }

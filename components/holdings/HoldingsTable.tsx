@@ -22,6 +22,7 @@ import { ManualPriceModal } from "./ManualPriceModal";
 import { SellGroupHoldingModal } from "./SellGroupHoldingModal";
 import { SellHoldingModal } from "./SellHoldingModal";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 type SortKey = "name" | "value" | "pnl" | "returnRate";
 
@@ -123,78 +124,93 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
 
   if (holdings.length === 0) {
     return (
-      <p className="text-center text-muted py-12">
-        尚無持倉，請至「新增」建立第一筆
-      </p>
+      <EmptyState
+        title="尚無持倉"
+        description="新增一筆台股、境內基金或房產，或從資料備份匯入既有持倉。"
+      />
     );
   }
 
   return (
     <>
-      <div className="mb-4">
-        <input
-          type="search"
-          placeholder="搜尋名稱或代號…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="input-field w-full sm:max-w-xs"
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <label className="block w-full sm:max-w-xs">
+          <span className="sr-only">搜尋持倉名稱或代號</span>
+          <input
+            type="search"
+            placeholder="搜尋名稱或代號…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="input-field"
+          />
+        </label>
+        <p role="status" className="text-sm text-muted sm:pb-2">{filteredGroups.length} 個標的</p>
+      </div>
+
+      {filteredGroups.length === 0 ? (
+        <EmptyState
+          title="找不到符合的持倉"
+          description="試試其他名稱或代號。"
+          action={<button type="button" className="btn-secondary" onClick={() => setSearch("")}>清除搜尋</button>}
         />
-      </div>
+      ) : (
+        <>
+          <HoldingsMobileList
+            groups={filteredGroups}
+            updatingId={updatingId}
+            onRefresh={handleRefresh}
+            onEdit={setEditId}
+            onSell={setSellId}
+            onSellGroup={setSellGroupKey}
+            onManual={setManualId}
+            onRemove={handleRemove}
+            onRefreshGroup={handleRefreshGroup}
+          />
 
-      <HoldingsMobileList
-        groups={filteredGroups}
-        updatingId={updatingId}
-        onRefresh={handleRefresh}
-        onEdit={setEditId}
-        onSell={setSellId}
-        onSellGroup={setSellGroupKey}
-        onManual={setManualId}
-        onRemove={handleRemove}
-        onRefreshGroup={handleRefreshGroup}
-      />
+          <div className="glass-card hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-muted">
+                  <th className="w-8 px-2 py-3" aria-label="展開" />
+                  <ThSort label="標的" active={sortKey === "name"} ascending={sortAsc} onClick={() => toggleSort("name")} />
+                  <th className="px-4 py-3">類型</th>
+                  <th className="px-4 py-3">均價 / 現價</th>
+                  <th className="px-4 py-3">數量</th>
+                  <ThSort label="市值" active={sortKey === "value"} ascending={sortAsc} onClick={() => toggleSort("value")} />
+                  <ThSort label="損益" active={sortKey === "pnl"} ascending={sortAsc} onClick={() => toggleSort("pnl")} />
+                  <ThSort label="報酬率" active={sortKey === "returnRate"} ascending={sortAsc} onClick={() => toggleSort("returnRate")} />
+                  <th className="px-4 py-3">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredGroups.map((g) => {
+                  const isOpen = g.isMerged && expanded.has(g.groupKey);
+                  const pnlClass = g.pnl >= 0 ? "text-gain" : "text-loss";
 
-      <div className="glass-card hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[760px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-muted">
-              <th className="w-8 px-2 py-3" aria-label="展開" />
-              <ThSort label="標的" active={sortKey === "name"} onClick={() => toggleSort("name")} />
-              <th className="px-4 py-3">類型</th>
-              <th className="px-4 py-3">均價 / 現價</th>
-              <th className="px-4 py-3">數量</th>
-              <ThSort label="市值" active={sortKey === "value"} onClick={() => toggleSort("value")} />
-              <ThSort label="損益" active={sortKey === "pnl"} onClick={() => toggleSort("pnl")} />
-              <ThSort label="報酬率" active={sortKey === "returnRate"} onClick={() => toggleSort("returnRate")} />
-              <th className="px-4 py-3">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredGroups.map((g) => {
-              const isOpen = g.isMerged && expanded.has(g.groupKey);
-              const pnlClass = g.pnl >= 0 ? "text-gain" : "text-loss";
-
-              return (
-                <GroupRows
-                  key={g.groupKey}
-                  g={g}
-                  isOpen={isOpen}
-                  pnlClass={pnlClass}
-                  groupUpdating={groupUpdating(g)}
-                  updatingId={updatingId}
-                  onToggle={() => toggleExpanded(g.groupKey)}
-                  onRefreshGroup={() => handleRefreshGroup(g)}
-                  onRefresh={handleRefresh}
-                  onEdit={setEditId}
-                  onSell={setSellId}
-                  onSellGroup={setSellGroupKey}
-                  onManual={setManualId}
-                  onRemove={handleRemove}
-                />
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                  return (
+                    <GroupRows
+                      key={g.groupKey}
+                      g={g}
+                      isOpen={isOpen}
+                      pnlClass={pnlClass}
+                      groupUpdating={groupUpdating(g)}
+                      updatingId={updatingId}
+                      onToggle={() => toggleExpanded(g.groupKey)}
+                      onRefreshGroup={() => handleRefreshGroup(g)}
+                      onRefresh={handleRefresh}
+                      onEdit={setEditId}
+                      onSell={setSellId}
+                      onSellGroup={setSellGroupKey}
+                      onManual={setManualId}
+                      onRemove={handleRemove}
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       {editHoldingRow && (
         <EditHoldingModal
@@ -478,20 +494,27 @@ function LotActionButtons({
 function ThSort({
   label,
   active,
+  ascending,
   onClick,
 }: {
   label: string;
   active: boolean;
+  ascending: boolean;
   onClick: () => void;
 }) {
   return (
-    <th className="px-4 py-3">
+    <th className="whitespace-nowrap px-4 py-3" aria-sort={active ? (ascending ? "ascending" : "descending") : undefined}>
       <button
         type="button"
         onClick={onClick}
         className={`hover:text-foreground ${active ? "text-accent" : "text-muted"}`}
       >
-        {label} {active ? "▼" : ""}
+        {label}
+        {active && (
+          <svg aria-hidden="true" viewBox="0 0 16 16" className={`ml-1 inline size-3 ${ascending ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 6l4 4 4-4" />
+          </svg>
+        )}
       </button>
     </th>
   );
