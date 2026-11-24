@@ -23,7 +23,8 @@ export interface InvestmentWeather {
 /** 將當日整體市值變動轉成容易掃讀的天氣，不預測未來走勢。 */
 export function computeInvestmentWeather(
   summary: PortfolioSummary,
-  dailyBreakdown: PeriodPnlBreakdown | null
+  dailyBreakdown: PeriodPnlBreakdown | null,
+  formatAmount: (value: number) => string = formatCurrency,
 ): InvestmentWeather {
   if (summary.holdingCount === 0) {
     return {
@@ -56,7 +57,7 @@ export function computeInvestmentWeather(
     ? `，主要受${dominant.name || dominant.symbol}影響`
     : "";
   const periodLabel = summary.dailyValuationUsesPreviousDate ? "最近估值日" : "今日";
-  const summaryText = `${periodLabel}資產約${direction} ${formatCurrency(Math.abs(summary.dailyUnrealizedPnl))}${driver}。`;
+  const summaryText = `${periodLabel}資產約${direction} ${formatAmount(Math.abs(summary.dailyUnrealizedPnl))}${driver}。`;
   const titlePrefix = summary.dailyValuationUsesPreviousDate ? "最近行情" : "今日";
 
   const base = changeRate >= 0.75

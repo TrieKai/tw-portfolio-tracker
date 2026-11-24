@@ -1,10 +1,10 @@
 "use client";
 
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
-import { formatCurrency } from "@/lib/portfolio/calculations";
 import type { Loan } from "@/lib/types/loan";
 
 export function LoanBalanceModal({
@@ -18,6 +18,7 @@ export function LoanBalanceModal({
   onSave: (balance: number, effectiveDate: string) => void;
   onClose: () => void;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   const [balance, setBalance] = useState(String(Math.round(currentPrincipal)));
   const [effectiveDate, setEffectiveDate] = useState(todayIsoDate());
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +39,7 @@ export function LoanBalanceModal({
         <div>
           <p className="text-xs text-muted">{loan.name}</p>
           <h2 id="loan-balance-title" className="mt-1 text-lg font-semibold">更新目前本金</h2>
-          <p className="mt-2 text-sm text-muted">更新前 {formatCurrency(currentPrincipal)}；新金額會自生效日起影響利息與維持率，不會回寫更早期間。</p>
+          <p className="mt-2 text-sm text-muted">更新前 {formatAmount(currentPrincipal)}；新金額會自生效日起影響利息與維持率，不會回寫更早期間。</p>
         </div>
         <label className="block text-sm">
           <span className="text-muted">生效日 *</span>

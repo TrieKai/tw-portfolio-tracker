@@ -223,5 +223,6 @@ export interface LoanReminder {
   kind: LoanReminderKind;
   severity: "info" | "warning" | "critical";
   date?: string;
+  amount?: number;
   message: string;
 }

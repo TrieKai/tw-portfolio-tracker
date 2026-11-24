@@ -12,9 +12,10 @@ import { AmountVisibilityToggle } from "@/components/ui/AmountVisibilityToggle";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export default function HoldingsPage() {
-  const { ready, holdings, sales, storage } = usePortfolio();
+  const { ready, holdings, sales, storage, latestAddedHoldingId, dismissAddedHolding } = usePortfolio();
 
   if (!ready) return <LoadingSpinner />;
+  const added = holdings.find((holding) => holding.id === latestAddedHoldingId);
 
   return (
     <div className="space-y-6">
@@ -29,6 +30,23 @@ export default function HoldingsPage() {
           </div>
         }
       />
+      {added && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-surface px-4 py-3">
+          <div role="status">
+            <p className="text-sm font-medium">已儲存 {added.name}</p>
+            {added.assetType !== "property" && (
+              <p className="mt-1 text-sm text-muted">
+                {added.hasLivePrice
+                  ? "現價已更新。"
+                  : added.lastError
+                    ? "現價尚未更新，可在該筆持倉重試，或在更多操作中手動輸入。"
+                    : "正在取得現價…"}
+              </p>
+            )}
+          </div>
+          <button type="button" className="btn-secondary" onClick={dismissAddedHolding}>關閉提示</button>
+        </div>
+      )}
       <HoldingsTable holdings={holdings} />
       <CorporateActionsPanel />
 

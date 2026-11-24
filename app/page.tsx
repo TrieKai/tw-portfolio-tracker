@@ -21,6 +21,7 @@ import { AmountVisibilityToggle } from "@/components/ui/AmountVisibilityToggle";
 import {
   currentYearMonthPrefix,
   formatCurrentMonthZh,
+  formatIsoDateZh,
 } from "@/lib/date/iso-date";
 import {
   computePortfolioSummary,
@@ -43,16 +44,22 @@ import {
 } from "@/lib/portfolio/time-travel";
 import { PnlValueWithBreakdown } from "@/components/ui/PnlBreakdownTooltip";
 import type { DashboardSectionId } from "@/lib/types/ui-preferences";
+import { DEFAULT_UI_PREFERENCES } from "@/lib/ui/preferences";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 import { useUiPreferences } from "@/providers/UiPreferencesProvider";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
+
+const ANALYSIS_SECTIONS = new Set<DashboardSectionId>([
+  "insights", "exposure", "weeklyReport", "stressTest", "rebalance", "parallelUniverse",
+]);
 
 export default function DashboardPage() {
   const { ready, holdings, summary, exposure, loanSummary, loanRiskSummary, loanReminders, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
   const { preferences } = useUiPreferences();
   const { formatAmount } = useAmountPrivacy();
   const [travelDate, setTravelDate] = useState<string | null>(null);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
   const pnlCalendar = useMemo(
     () =>
       buildPnlCalendar(storage, {
@@ -147,12 +154,25 @@ export default function DashboardPage() {
   );
   const shownWeather = computeInvestmentWeather(
     shownSummary,
-    shownBreakdowns.dailyUnrealized
+    shownBreakdowns.dailyUnrealized,
+    formatAmount,
   );
   const hasPortfolio = holdings.length > 0 || sales.length > 0;
   const visibleLayout = preferences.dashboardLayout.filter(
     (item) => !item.hidden && (item.section !== "timeTravel" || historyDates.length > 0)
   );
+  const defaultLayout = DEFAULT_UI_PREFERENCES.dashboardLayout;
+  const usesDefaultLayout = preferences.dashboardLayout.every((item, index) => {
+    const defaults = defaultLayout[index];
+    return defaults && item.section === defaults.section && item.width === defaults.width &&
+      item.hidden === defaults.hidden && item.view === defaults.view;
+  });
+  const analysisLayout = hasPortfolio && usesDefaultLayout
+    ? visibleLayout.filter((item) => ANALYSIS_SECTIONS.has(item.section))
+    : [];
+  const mainLayout = analysisLayout.length > 0
+    ? visibleLayout.filter((item) => !ANALYSIS_SECTIONS.has(item.section))
+    : visibleLayout;
   const loanPanel = shownLoanSummary.activeLoanCount > 0 ? (
     <div data-grid-width="full">
       <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} reminders={shownLoanReminders} />
@@ -209,6 +229,11 @@ export default function DashboardPage() {
     summary: (
       <section className="metric-grid-container space-y-3" aria-labelledby="portfolio-summary-title">
         <h2 id="portfolio-summary-title" className="text-lg font-semibold">資產概況</h2>
+        <p className="text-sm text-muted">
+          {travelDate
+            ? `回看 ${formatIsoDateZh(travelDate)} · 依目前仍持有的部位與當時可用價格重建`
+            : `截至 ${formatIsoDateZh(todayIsoDate())} · 各筆採最新可用估值`}
+        </p>
         <PortfolioSummaryCards summary={shownSummary} pnlBreakdowns={shownBreakdowns} view={viewFor("summary")} asOfDate={travelDate ?? undefined} />
       </section>
     ),
@@ -362,7 +387,7 @@ export default function DashboardPage() {
       <section className="glass-card p-4 sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-base font-semibold sm:text-lg">
-            資產趨勢（今年度）
+            持倉市值回推（{travelDate ? `截至 ${formatIsoDateZh(travelDate)}` : "今年度"}）
           </h2>
           <Link href="/trends" className="text-sm text-accent hover:underline">
             查看完整趨勢 →
@@ -387,21 +412,25 @@ export default function DashboardPage() {
     ),
   };
 
+  function renderSections(layout: typeof visibleLayout) {
+    return layout.map((item) => (
+      <Fragment key={item.section}>
+        <div
+          data-dashboard-section={item.section}
+          data-grid-width={item.width}
+          className="min-w-0"
+        >
+          {sections[item.section]}
+        </div>
+        {hasPortfolio && item.section === "summary" && loanPanel}
+      </Fragment>
+    ));
+  }
+
   const dashboard = (
     <div className="dashboard-grid">
       {hasPortfolio && !visibleLayout.some((item) => item.section === "summary") && loanPanel}
-      {visibleLayout.map((item) => (
-        <Fragment key={item.section}>
-          <div
-            data-dashboard-section={item.section}
-            data-grid-width={item.width}
-            className="min-w-0"
-          >
-            {sections[item.section]}
-          </div>
-          {hasPortfolio && item.section === "summary" && loanPanel}
-        </Fragment>
-      ))}
+      {renderSections(mainLayout)}
     </div>
   );
 
@@ -418,7 +447,24 @@ export default function DashboardPage() {
         ) : undefined}
       />
 
-      {hasPortfolio ? dashboard : (
+      {hasPortfolio ? (
+        <>
+          {dashboard}
+          {analysisLayout.length > 0 && (
+            <details
+              className="rounded-xl border border-border bg-surface"
+              onToggle={(event) => setAnalysisOpen(event.currentTarget.open)}
+            >
+              <summary className="cursor-pointer rounded-xl px-5 py-4 text-sm font-semibold">
+                進階分析與規劃
+              </summary>
+              {analysisOpen && (
+                <div className="dashboard-grid border-t border-border p-4 sm:p-5">{renderSections(analysisLayout)}</div>
+              )}
+            </details>
+          )}
+        </>
+      ) : (
         <>
           <EmptyState
             title="建立第一筆持倉"

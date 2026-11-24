@@ -1,15 +1,15 @@
 "use client";
 
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import {
-  formatCurrency,
   formatPercent,
-  formatQuotePrice,
   sortSalesByDateDesc,
 } from "@/lib/portfolio/calculations";
 import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import type { SaleTransaction } from "@/lib/types/holding";
 
 export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
+  const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
   const sorted = sortSalesByDateDesc(sales);
 
   if (sorted.length === 0) {
@@ -29,7 +29,7 @@ export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
           totalRealized >= 0 ? "text-gain" : "text-loss"
         }`}
       >
-        本頁合計已實現損益：{formatCurrency(totalRealized)}
+        本頁合計已實現損益：{formatAmount(totalRealized)}
       </p>
 
       <ul className="space-y-3 md:hidden">
@@ -45,13 +45,13 @@ export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
                   s.realizedPnl >= 0 ? "text-gain" : "text-loss"
                 }`}
               >
-                {formatCurrency(s.realizedPnl)}
+                {formatAmount(s.realizedPnl)}
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs text-muted">
               <span>賣出日 {s.sellDate}</span>
               <span className="text-right">
-                {s.quantity} × {formatQuotePrice(s.sellPrice, s.assetType)}
+                {s.quantity} × {formatQuoteAmount(s.sellPrice, s.assetType)}
               </span>
             </div>
           </li>
@@ -93,17 +93,17 @@ export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
                   </td>
                   <td className="px-4 py-3 tabular-nums">{s.quantity}</td>
                   <td className="px-4 py-3 tabular-nums">
-                    {formatQuotePrice(s.sellPrice, s.assetType)}
+                    {formatQuoteAmount(s.sellPrice, s.assetType)}
                   </td>
                   <td className="px-4 py-3 tabular-nums">
-                    {formatCurrency(s.proceeds)}
+                    {formatAmount(s.proceeds)}
                   </td>
                   <td
                     className={`px-4 py-3 tabular-nums font-medium ${
                       s.realizedPnl >= 0 ? "text-gain" : "text-loss"
                     }`}
                   >
-                    {formatCurrency(s.realizedPnl)}
+                    {formatAmount(s.realizedPnl)}
                   </td>
                   <td
                     className={`px-4 py-3 tabular-nums ${

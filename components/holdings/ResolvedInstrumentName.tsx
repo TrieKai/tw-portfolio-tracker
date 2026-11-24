@@ -137,7 +137,7 @@ export function ResolvedInstrumentName({
   return null;
 }
 
-/** 供表單送出前強制查詢一次 */
+/** 表單送出時沿用相同標的的查詢結果。 */
 export async function resolveInstrumentName(
   assetType: AssetType,
   symbol: string

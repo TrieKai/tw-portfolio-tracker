@@ -39,7 +39,7 @@ export function CloudUploadPromptModal({
             onClick={onKeepLocalOnly}
             className="touch-target rounded-lg border border-border px-4 py-2.5 text-sm text-muted hover:bg-surface-raised"
           >
-            暫不上傳
+            只存本機
           </button>
         </div>
       </div>

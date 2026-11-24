@@ -1,11 +1,21 @@
 import { createElement } from "react";
+import { AmountPrivacyProvider } from "@/providers/AmountPrivacyProvider";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CalendarGrid } from "@/components/calendar/PnlCalendarPage";
+import { CalendarGrid, calendarHistoryRange } from "@/components/calendar/PnlCalendarPage";
 import type { TradingCalendarRow } from "@/lib/date/trading-calendar";
 import type { PnlCalendarResult } from "@/lib/portfolio/pnl-calendar";
 
 describe("CalendarGrid", () => {
+  it("補齊所選月份和前一個月的估值基準", () => {
+    expect(calendarHistoryRange("2024-02", "2026-11-25")).toEqual({
+      startDate: "2024-01-01", endDate: "2024-02-29",
+    });
+    expect(calendarHistoryRange("2026-11", "2026-11-25")).toEqual({
+      startDate: "2026-10-01", endDate: "2026-11-25",
+    });
+  });
+
   it("renders each mobile week summary before that week's trading days", () => {
     const rows: TradingCalendarRow[] = [
       {
@@ -50,13 +60,13 @@ describe("CalendarGrid", () => {
     };
 
     const html = renderToStaticMarkup(
-      createElement(CalendarGrid, {
+      createElement(AmountPrivacyProvider, { children: createElement(CalendarGrid, {
         rows,
         calendar,
         weekendEvents: new Map(),
         onSelectDay: () => undefined,
         onSelectWeek: () => undefined,
-      })
+      }) })
     );
 
     expect(html.indexOf("第 1 週損益")).toBeLessThan(

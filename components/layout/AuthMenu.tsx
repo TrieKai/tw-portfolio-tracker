@@ -23,13 +23,9 @@ export function AuthMenu() {
   }
 
   const name = session.user.name ?? session.user.email ?? "已登入 Google";
-  const syncHint = syncStatus === "syncing"
+  const syncHint = syncMessage ?? (syncStatus === "syncing"
     ? "同步中…"
-    : syncStatus === "error" && syncMessage
-      ? syncMessage
-      : storageMode === "cloud"
-        ? "已同步"
-        : "使用本機資料";
+    : storageMode === "cloud" ? "雲端同步已開啟" : "目前只存本機");
 
   return (
     <div className="space-y-3">
@@ -46,7 +42,7 @@ export function AuthMenu() {
           disabled={syncStatus === "syncing"}
           className="btn-secondary"
         >
-          雲端載入
+          {storageMode === "cloud" ? "查看雲端版本" : "啟用雲端同步"}
         </button>
         <button type="button" onClick={() => void signOut({ callbackUrl: "/" })} className="btn-secondary">
           登出

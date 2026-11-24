@@ -1,10 +1,10 @@
 "use client";
 
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
-import { formatCurrency } from "@/lib/portfolio/calculations";
 import type { CreateLoanPaymentInput, Loan } from "@/lib/types/loan";
 
 function optionalAmount(value: string): number {
@@ -22,6 +22,7 @@ export function LoanPaymentModal({
   onSave: (input: CreateLoanPaymentInput) => void;
   onClose: () => void;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   const today = todayIsoDate();
   const [paymentDate, setPaymentDate] = useState(today);
   const [principalPaid, setPrincipalPaid] = useState("");
@@ -103,7 +104,7 @@ export function LoanPaymentModal({
         <div>
           <p className="text-xs text-muted">{loan.name}</p>
           <h2 id="loan-payment-title" className="mt-1 text-lg font-semibold">記錄實際繳款</h2>
-          <p className="mt-2 text-sm text-muted">目前本金 {formatCurrency(currentPrincipal)}。本金只降低負債；利息、費用與補貼才影響融資成本。</p>
+          <p className="mt-2 text-sm text-muted">目前本金 {formatAmount(currentPrincipal)}。本金只降低負債；利息、費用與補貼才影響融資成本。</p>
         </div>
 
         <label className="block text-sm">

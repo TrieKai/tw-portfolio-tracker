@@ -1,10 +1,10 @@
 "use client";
 
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
-import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import type { HoldingWithMetrics, SellHoldingInput } from "@/lib/types/holding";
 
@@ -17,6 +17,7 @@ export function SellHoldingModal({
   onSave: (input: SellHoldingInput) => void;
   onClose: () => void;
 }) {
+  const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
   const unitLabel = getSellUnitLabel(holding.assetType);
   const [quantity, setQuantity] = useState(String(holding.quantity));
   const [sellPrice, setSellPrice] = useState(
@@ -105,7 +106,7 @@ export function SellHoldingModal({
         <p className="text-sm text-muted">
           {holding.name}（{holding.symbol}）· 持有 {holding.quantity}{" "}
           {unitLabel} · 成本均價{" "}
-          {formatQuotePrice(holding.buyPrice, holding.assetType)}
+          {formatQuoteAmount(holding.buyPrice, holding.assetType)}
         </p>
 
         <label className="block text-sm">
@@ -192,14 +193,14 @@ export function SellHoldingModal({
         {preview && (
           <div className="rounded-lg border border-border/80 bg-surface-raised/40 p-3 text-sm">
             <p className="tabular-nums">
-              預估成交金額：{formatCurrency(preview.proceeds)}
+              預估成交金額：{formatAmount(preview.proceeds)}
             </p>
             <p
               className={`mt-1 tabular-nums font-medium ${
                 preview.realizedPnl >= 0 ? "text-gain" : "text-loss"
               }`}
             >
-              預估實現損益：{formatCurrency(preview.realizedPnl)}
+              預估實現損益：{formatAmount(preview.realizedPnl)}
             </p>
             {preview.isFullSell && (
               <p className="mt-2 text-xs text-muted">

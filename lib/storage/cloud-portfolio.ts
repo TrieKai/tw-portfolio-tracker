@@ -66,33 +66,51 @@ export async function getCloudPortfolio(
   return best;
 }
 
-/** 寫入所有可能 key，確保不同裝置／環境都能讀到同一份資料 */
-export async function setCloudPortfolio(
+const WRITE_IF_CURRENT = `
+local latestVersion = ''
+for _, key in ipairs(KEYS) do
+  local raw = redis.call('GET', key)
+  if raw then
+    local ok, envelope = pcall(cjson.decode, raw)
+    if ok and type(envelope) == 'table' and type(envelope.portfolio) == 'table'
+        and type(envelope.updatedAt) == 'string' and envelope.updatedAt > latestVersion then
+      latestVersion = envelope.updatedAt
+    end
+  end
+end
+if latestVersion ~= ARGV[1] then return 0 end
+local entries = {}
+for _, key in ipairs(KEYS) do
+  table.insert(entries, key)
+  table.insert(entries, ARGV[2])
+end
+redis.call('MSET', unpack(entries))
+return 1
+`;
+
+/** 版本比對與相容鍵寫入一起執行，避免兩台裝置同時覆蓋彼此。 */
+export async function writeCloudPortfolioIfCurrent(
   userId: string,
   envelope: CloudPortfolioEnvelope,
+  expectedVersion: string | null,
   email?: string | null
-): Promise<void> {
-  const portfolio = normalizePortfolioStorage(envelope.portfolio);
-  if (!portfolio) {
-    throw new Error("INVALID_PORTFOLIO");
-  }
-
-  const payload = {
-    updatedAt: envelope.updatedAt,
-    portfolio,
-  };
-
+): Promise<boolean> {
   const kv = getKvClient();
-  await Promise.all(
-    portfolioKvKeys(userId, email).map((key) => kv.set(key, payload))
+  const result = await kv.eval<string[], number>(
+    WRITE_IF_CURRENT,
+    portfolioKvKeys(userId, email),
+    [expectedVersion ?? "", JSON.stringify(envelope)]
   );
+  return result === 1;
 }
 
 export function createCloudEnvelope(
-  portfolio: CloudPortfolioEnvelope["portfolio"]
+  portfolio: CloudPortfolioEnvelope["portfolio"],
+  previousVersion?: string | null,
 ): CloudPortfolioEnvelope {
+  const previousTime = previousVersion ? Date.parse(previousVersion) : NaN;
   return {
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : 0)).toISOString(),
     portfolio: normalizePortfolioStorage(portfolio) ?? defaultPortfolioStorage(),
   };
 }

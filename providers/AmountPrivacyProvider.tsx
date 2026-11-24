@@ -8,7 +8,8 @@ import {
   useMemo,
   useState,
 } from "react";
-import { formatCurrency } from "@/lib/portfolio/calculations";
+import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
+import type { AssetType } from "@/lib/types/holding";
 
 const AMOUNT_PRIVACY_STORAGE_KEY = "portfolio-hide-amounts-v1";
 const HIDDEN_AMOUNT = "••••";
@@ -18,6 +19,8 @@ interface AmountPrivacyContextValue {
   toggleAmountsHidden: () => void;
   maskAmount: (value: string) => string;
   formatAmount: (value: number) => string;
+  formatSignedAmount: (value: number) => string;
+  formatQuoteAmount: (value: number, assetType?: AssetType) => string;
 }
 
 const AmountPrivacyContext = createContext<AmountPrivacyContextValue | null>(
@@ -64,10 +67,18 @@ export function AmountPrivacyProvider({
     (value: number) => maskAmount(formatCurrency(value)),
     [maskAmount]
   );
+  const formatSignedAmount = useCallback((value: number) => {
+    const prefix = value > 0 ? "+" : value < 0 ? "−" : "";
+    return maskAmount(prefix + formatCurrency(Math.abs(value)));
+  }, [maskAmount]);
+  const formatQuoteAmount = useCallback(
+    (value: number, assetType?: AssetType) => maskAmount(formatQuotePrice(value, assetType)),
+    [maskAmount],
+  );
 
   const value = useMemo(
-    () => ({ amountsHidden, toggleAmountsHidden, maskAmount, formatAmount }),
-    [amountsHidden, toggleAmountsHidden, maskAmount, formatAmount]
+    () => ({ amountsHidden, toggleAmountsHidden, maskAmount, formatAmount, formatSignedAmount, formatQuoteAmount }),
+    [amountsHidden, toggleAmountsHidden, maskAmount, formatAmount, formatSignedAmount, formatQuoteAmount]
   );
 
   return (

@@ -11,6 +11,7 @@ export type PortfolioSyncErrorCode =
   | "INVALID_BODY"
   | "KV_NOT_CONFIGURED"
   | "KV_ERROR"
+  | "NETWORK_ERROR"
   | "NOT_FOUND";
 
 export interface PortfolioSyncGetResponse {

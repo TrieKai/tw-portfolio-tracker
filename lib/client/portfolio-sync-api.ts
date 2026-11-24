@@ -21,13 +21,33 @@ function isError(
   );
 }
 
-export async function fetchCloudPortfolio(): Promise<
+type CloudReadResult =
   | { ok: true; data: CloudPortfolioEnvelope | null }
-  | { ok: false; error: string; code?: string; status: number }
-> {
+  | { ok: false; error: string; code?: string; status: number };
+
+type CloudWriteResult =
+  | { ok: true; updatedAt: string }
+  | {
+      ok: false;
+      error: string;
+      code?: string;
+      status: number;
+      remote?: CloudPortfolioEnvelope | null;
+    };
+
+export async function fetchCloudPortfolio(): Promise<CloudReadResult> {
+  try {
+    return await readCloudPortfolio();
+  } catch {
+    return { ok: false, code: "NETWORK_ERROR", status: 0, error: "無法讀取雲端資料，請檢查網路後重試。" };
+  }
+}
+
+async function readCloudPortfolio(): Promise<CloudReadResult> {
   const res = await fetch("/api/portfolio/sync", {
     method: "GET",
     credentials: "same-origin",
+    signal: AbortSignal.timeout(25_000),
   });
   const body = await parseJson<PortfolioSyncGetResponse | PortfolioSyncErrorResponse>(
     res
@@ -47,20 +67,20 @@ export async function fetchCloudPortfolio(): Promise<
 
 export async function pushCloudPortfolio(
   portfolio: PortfolioStorage,
-  updatedAt?: string
-): Promise<
-  | { ok: true; updatedAt: string }
-  | {
-      ok: false;
-      error: string;
-      code?: string;
-      status: number;
-      remote?: CloudPortfolioEnvelope | null;
-    }
-> {
+  updatedAt: string | null,
+): Promise<CloudWriteResult> {
+  try {
+    return await writeCloudPortfolio(portfolio, updatedAt);
+  } catch {
+    return { ok: false, code: "NETWORK_ERROR", status: 0, error: "無法同步至雲端，變更已保存在本機。" };
+  }
+}
+
+async function writeCloudPortfolio(portfolio: PortfolioStorage, updatedAt: string | null): Promise<CloudWriteResult> {
   const res = await fetch("/api/portfolio/sync", {
     method: "PUT",
     credentials: "same-origin",
+    signal: AbortSignal.timeout(25_000),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ portfolio, updatedAt }),
   });

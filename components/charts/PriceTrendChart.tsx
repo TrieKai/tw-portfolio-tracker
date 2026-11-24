@@ -1,5 +1,6 @@
 "use client";
 
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import {
   CartesianGrid,
   Line,
@@ -12,7 +13,6 @@ import {
 import type { ChartRange } from "@/lib/portfolio/calculations";
 import {
   filterHistoryByRange,
-  formatQuotePrice,
   getMergedSortedHistory,
 } from "@/lib/portfolio/calculations";
 import type { AssetType, PriceHistoryMap } from "@/lib/types/holding";
@@ -33,6 +33,7 @@ export function PriceTrendChart({
   range,
   assetType = "stock",
 }: PriceTrendChartProps) {
+  const { formatQuoteAmount, amountsHidden } = useAmountPrivacy();
   const points = filterHistoryByRange(
     getMergedSortedHistory(priceHistory, holdingIds),
     range
@@ -54,14 +55,17 @@ export function PriceTrendChart({
 
   return (
     <div>
-      <p className="mb-2 text-sm font-medium">{title}</p>
+      <p className="text-sm font-medium">{title}</p>
+      <p className="mb-3 mt-1 text-xs text-muted">
+        可用價格 {chartData[0].fullDate}～{chartData.at(-1)?.fullDate} · {chartData.length} 筆
+      </p>
       <ChartFrame className="h-[200px] sm:h-[220px]">
         <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
           <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="var(--muted)" />
           <YAxis
-            tick={{ fontSize: 11 }}
+            tick={amountsHidden ? false : { fontSize: 11 }}
             stroke="var(--muted)"
             domain={["auto", "auto"]}
             tickFormatter={(v) => String(v)}
@@ -72,7 +76,7 @@ export function PriceTrendChart({
             }
             formatter={(v) =>
               [
-                formatQuotePrice(Number(v ?? 0), assetType),
+                formatQuoteAmount(Number(v ?? 0), assetType),
                 "價格",
               ] as [string, string]
             }

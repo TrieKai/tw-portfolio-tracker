@@ -3,7 +3,7 @@ import {
   createCloudEnvelope,
   getCloudPortfolio,
   isKvConfigured,
-  setCloudPortfolio,
+  writeCloudPortfolioIfCurrent,
 } from "@/lib/storage/cloud-portfolio";
 import { normalizePortfolioStorage } from "@/lib/storage/parse-portfolio";
 import type {
@@ -83,30 +83,32 @@ export async function PUT(request: Request) {
     return error(400, "INVALID_BODY", "投資組合資料格式無效");
   }
 
-  const clientUpdatedAt =
+  const suppliedVersion =
     body &&
     typeof body === "object" &&
-    "updatedAt" in body &&
-    typeof (body as { updatedAt: unknown }).updatedAt === "string"
-      ? (body as { updatedAt: string }).updatedAt
+    "updatedAt" in body
+      ? body.updatedAt
       : undefined;
+  if (suppliedVersion !== undefined && suppliedVersion !== null && typeof suppliedVersion !== "string") {
+    return error(400, "INVALID_BODY", "雲端資料版本格式無效");
+  }
 
   try {
     const existing = await getCloudPortfolio(user.id, user.email);
-    if (
-      existing &&
-      clientUpdatedAt &&
-      clientUpdatedAt < existing.updatedAt
-    ) {
+    const currentVersion = existing?.updatedAt ?? null;
+    const expectedVersion = suppliedVersion === undefined ? currentVersion : suppliedVersion;
+    const envelope = createCloudEnvelope(portfolio, currentVersion);
+    if (expectedVersion !== currentVersion ||
+        !await writeCloudPortfolioIfCurrent(user.id, envelope, expectedVersion, user.email)) {
       const conflict: PortfolioSyncGetResponse = {
         success: true,
-        data: existing,
+        data: expectedVersion !== currentVersion
+          ? existing
+          : await getCloudPortfolio(user.id, user.email),
       };
       return NextResponse.json(conflict, { status: 409 });
     }
 
-    const envelope = createCloudEnvelope(portfolio);
-    await setCloudPortfolio(user.id, envelope, user.email);
     const res: PortfolioSyncPutResponse = {
       success: true,
       updatedAt: envelope.updatedAt,

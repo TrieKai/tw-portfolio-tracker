@@ -390,14 +390,15 @@ export function LoanFormModal({
           <button type="button" onClick={onClose} className="btn-secondary shrink-0">關閉</button>
         </div>
 
-        {!flexibleLoan ? <div className="grid grid-cols-2 gap-2" role="group" aria-label="貸款建立方式">
+        {!flexibleLoan ? <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2" role="group" aria-label="貸款建立方式">
           <button
             type="button"
             onClick={() => setEntryMode("complete")}
             aria-pressed={entryMode === "complete"}
             className={entryMode === "complete" ? "btn-primary" : "btn-secondary"}
           >
-            完整建立
+            依原始契約
           </button>
           <button
             type="button"
@@ -405,8 +406,14 @@ export function LoanFormModal({
             aria-pressed={entryMode === "quick"}
             className={entryMode === "quick" ? "btn-primary" : "btn-secondary"}
           >
-            既有貸款快速建立
+            從目前餘額
           </button>
+          </div>
+          <p className="text-sm leading-relaxed text-muted">
+            {entryMode === "complete"
+              ? "用原始借款金額、起始日與總期數推算還款。適合手邊有契約時使用。"
+              : "用剩餘本金和目前利率開始追蹤。填寫剩餘期數後即可預估還款日期與金額。"}
+          </p>
         </div> : (
           <p className="rounded-lg border border-accent/30 bg-accent-dim p-3 text-sm text-muted">
             融資、質押與循環額度以目前動用本金為基準，不套用一般分期貸款的完整契約回推。

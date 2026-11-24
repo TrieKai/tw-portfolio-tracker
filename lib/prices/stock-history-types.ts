@@ -11,3 +11,4 @@ export interface StockPriceHistoryData {
   endDate: string;
   points: StockPriceHistoryPoint[];
 }
+export const MAX_STOCK_HISTORY_MONTHS = 14;

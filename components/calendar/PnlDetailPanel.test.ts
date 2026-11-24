@@ -1,4 +1,5 @@
 import { createElement } from "react";
+import { AmountPrivacyProvider } from "@/providers/AmountPrivacyProvider";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { PnlWeekDetail } from "@/components/calendar/PnlDetailPanel";
@@ -44,11 +45,11 @@ const day: PnlCalendarDay = {
 describe("PnlWeekDetail", () => {
   it("keeps each day's holding detail collapsed by default", () => {
     const html = renderToStaticMarkup(
-      createElement(PnlWeekDetail, {
+      createElement(AmountPrivacyProvider, { children: createElement(PnlWeekDetail, {
         week,
         days: [day],
         transactions: [],
-      })
+      }) })
     );
 
     expect(html).toMatch(

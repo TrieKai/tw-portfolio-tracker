@@ -87,6 +87,9 @@ export function PortfolioValueTrendChart({
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-muted">
+        顯示期間 {timeline[0].date}～{timeline.at(-1)?.date} · {timeline.length} 個估值日
+      </p>
       {summary && (
         <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="期初市值" value={formatAmount(summary.startValue)} />
@@ -120,13 +123,11 @@ export function PortfolioValueTrendChart({
             stroke="var(--muted)"
           />
           <YAxis
-            tick={{ fontSize: 11 }}
+            tick={amountsHidden ? false : { fontSize: 11 }}
             stroke="var(--muted)"
             domain={["auto", "auto"]}
             tickFormatter={(v) =>
-              amountsHidden
-                ? "••"
-                : v >= 10000
+              v >= 10000
                   ? `${Math.round(Number(v) / 10000)}萬`
                   : String(v)
             }

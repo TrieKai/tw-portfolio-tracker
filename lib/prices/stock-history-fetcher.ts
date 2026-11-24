@@ -26,6 +26,7 @@ import type {
   StockPriceHistoryData,
   StockPriceHistoryPoint,
 } from "./stock-history-types";
+import { MAX_STOCK_HISTORY_MONTHS } from "./stock-history-types";
 
 const TWSE_STOCK_DAY_URL =
   "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY";
@@ -43,7 +44,6 @@ const COL = { DATE: 0, CLOSE: 6 } as const;
 
 const REQUEST_TIMEOUT_MS = 10_000;
 /** 單次請求最多抓幾個月（一年約 12～13 個月） */
-const MAX_MONTHS_PER_REQUEST = 14;
 /** TWSE 回傳空資料時的重試次數 */
 const EMPTY_MONTH_RETRIES = 4;
 
@@ -203,7 +203,7 @@ export async function fetchStockPriceHistory(
 
   const { startDate, endDate } = params;
   const months = listMonthFirstDaysIso(startDate, endDate).slice(
-    -MAX_MONTHS_PER_REQUEST
+    -MAX_STOCK_HISTORY_MONTHS
   );
 
   if (months.length === 0) {

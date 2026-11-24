@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AssetType } from "@/lib/types/holding";
@@ -10,10 +10,11 @@ import {
   getBuyPriceLabel,
   getQuantityLabel,
 } from "@/lib/portfolio/asset-labels";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { ErrorAlert } from "@/components/ui/ErrorAlert";
-import { todayIsoDate } from "@/lib/date/iso-date";
+import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import {
   ResolvedInstrumentName,
   resolveInstrumentName,
@@ -21,41 +22,76 @@ import {
 
 const ASSET_TYPES = ["stock", "fund", "property"] as const satisfies readonly AssetType[];
 
+interface HoldingDraft {
+  symbol: string;
+  propertyName: string;
+  buyPrice: string;
+  buyFee: string;
+  currentEstimate: string;
+  mortgageBalance: string;
+  quantity: string;
+  buyDate: string;
+}
+
+function emptyDraft(): HoldingDraft {
+  return {
+    symbol: "",
+    propertyName: "",
+    buyPrice: "",
+    buyFee: "",
+    currentEstimate: "",
+    mortgageBalance: "",
+    quantity: "1",
+    buyDate: todayIsoDate(),
+  };
+}
+
 export function AddHoldingForm() {
   const router = useRouter();
   const { ready, add, updateOne } = usePortfolio();
 
   const [assetType, setAssetType] = useState<AssetType>("stock");
-  const [symbol, setSymbol] = useState("");
-  const [propertyName, setPropertyName] = useState("");
-  const [buyPrice, setBuyPrice] = useState("");
-  const [buyFee, setBuyFee] = useState("");
-  const [currentEstimate, setCurrentEstimate] = useState("");
-  const [mortgageBalance, setMortgageBalance] = useState("");
-  const [quantity, setQuantity] = useState("1");
+  const { formatAmount } = useAmountPrivacy();
+  const [drafts, setDrafts] = useState(() => ({
+    stock: emptyDraft(),
+    fund: emptyDraft(),
+    property: emptyDraft(),
+  }));
+  const draft = drafts[assetType];
+  const { symbol, propertyName, buyPrice, buyFee, currentEstimate, mortgageBalance, quantity } = draft;
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
+  const submittingRef = useRef(false);
   const isProperty = assetType === "property";
+  const fee = isProperty ? 0 : Number(buyFee);
+  const cost = Number(buyPrice) * Number(quantity) + fee;
+  const canPreview = Number(buyPrice) > 0 && Number(quantity) > 0 && fee >= 0 && Number.isFinite(cost);
 
-  function handleAssetTypeChange(t: AssetType) {
-    if (t === assetType) return;
-    setAssetType(t);
-    setSymbol("");
-    setPropertyName("");
-    setCurrentEstimate("");
-    setBuyFee("");
-    setMortgageBalance("");
-    setQuantity(t === "property" ? "1" : "");
+  function patchDraft(patch: Partial<HoldingDraft>) {
+    setDrafts((current) => ({
+      ...current,
+      [assetType]: { ...current[assetType], ...patch },
+    }));
+  }
+
+  function handleAssetTypeChange(next: AssetType, form: HTMLFormElement | null) {
+    if (next === assetType) return;
+    if (form) patchDraft({ buyDate: String(new FormData(form).get("buyDate") ?? "") });
+    setAssetType(next);
     setError(null);
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (submitting || !ready) return;
+    if (submittingRef.current || !ready) return;
     setError(null);
 
-    const buyDate = String(new FormData(e.currentTarget).get("buyDate") ?? "");
+    const form = e.currentTarget;
+    const buyDate = String(new FormData(form).get("buyDate") ?? "");
+    if (!parseIsoDate(buyDate) || buyDate > todayIsoDate()) {
+      setError("請選擇有效的買入日期。");
+      return;
+    }
     const price = Number.parseFloat(buyPrice);
     const qty = Number.parseFloat(quantity);
     const fee = buyFee.trim() ? Number.parseFloat(buyFee) : 0;
@@ -109,12 +145,18 @@ export function AddHoldingForm() {
       return;
     }
 
+    if (!canPreview) {
+      setError("投入成本超出可計算範圍，請檢查金額與數量。");
+      return;
+    }
+
+    submittingRef.current = true;
     setSubmitting(true);
 
     if (isProperty) {
       const value =
         !Number.isNaN(estimate) && estimate > 0 ? estimate : price;
-      add(
+      const id = add(
         {
           assetType: "property",
           name: propertyName.trim(),
@@ -129,15 +171,22 @@ export function AddHoldingForm() {
         { initialPrice: value, initialPriceDate: todayIsoDate() }
       );
 
+      if (id) {
+        router.push("/holdings");
+        return;
+      }
+      submittingRef.current = false;
       setSubmitting(false);
-      router.push("/holdings");
+      setError("資料尚未就緒，請重試儲存。");
       return;
     }
 
     const lookup = await resolveInstrumentName(assetType, symbol);
+    if (!form.isConnected) return;
 
     if (!lookup.ok) {
       setError(lookup.error);
+      submittingRef.current = false;
       setSubmitting(false);
       return;
     }
@@ -153,12 +202,14 @@ export function AddHoldingForm() {
       fee,
     });
 
-    if (newId) {
-      await updateOne(newId);
+    if (!newId) {
+      submittingRef.current = false;
+      setSubmitting(false);
+      setError("資料尚未就緒，請重試儲存。");
+      return;
     }
-
-    setSubmitting(false);
     router.push("/holdings");
+    void updateOne(newId);
   }
 
   return (
@@ -171,7 +222,7 @@ export function AddHoldingForm() {
               <button
                 key={t}
                 type="button"
-                onClick={() => handleAssetTypeChange(t)}
+                onClick={(event) => handleAssetTypeChange(t, event.currentTarget.form)}
                 aria-pressed={assetType === t}
                 className={`min-h-11 rounded-lg border px-1 py-2 text-sm font-medium transition-colors ${
                   assetType === t
@@ -190,7 +241,7 @@ export function AddHoldingForm() {
             <Field label="房產名稱或地址" required>
               <input
                 value={propertyName}
-                onChange={(e) => setPropertyName(e.target.value)}
+                onChange={(e) => patchDraft({ propertyName: e.target.value })}
                 placeholder="例：台北市大安區…"
                 className="input-field"
                 required
@@ -199,7 +250,7 @@ export function AddHoldingForm() {
             <Field label="代號（選填）">
               <input
                 value={symbol}
-                onChange={(e) => setSymbol(e.target.value)}
+                onChange={(e) => patchDraft({ symbol: e.target.value })}
                 placeholder="自訂簡稱，留空則自動產生"
                 className="input-field font-mono"
               />
@@ -213,7 +264,7 @@ export function AddHoldingForm() {
             >
               <input
                 value={symbol}
-                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                onChange={(e) => patchDraft({ symbol: e.target.value.toUpperCase() })}
                 placeholder={assetType === "stock" ? "2330、00878、00631L" : "18480065"}
                 className="input-field font-mono"
                 inputMode={assetType === "fund" ? "numeric" : "text"}
@@ -236,7 +287,7 @@ export function AddHoldingForm() {
               step="any"
               min="0"
               value={buyPrice}
-              onChange={(e) => setBuyPrice(e.target.value)}
+              onChange={(e) => patchDraft({ buyPrice: e.target.value })}
               className="input-field"
               inputMode="decimal"
               required
@@ -248,7 +299,7 @@ export function AddHoldingForm() {
               step="any"
               min="0"
               value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
+              onChange={(e) => patchDraft({ quantity: e.target.value })}
               className="input-field"
               inputMode="decimal"
               required
@@ -264,7 +315,7 @@ export function AddHoldingForm() {
                 step="any"
                 min="0"
                 value={currentEstimate}
-                onChange={(e) => setCurrentEstimate(e.target.value)}
+                onChange={(e) => patchDraft({ currentEstimate: e.target.value })}
                 className="input-field"
               />
             </Field>
@@ -274,7 +325,7 @@ export function AddHoldingForm() {
                 step="any"
                 min="0"
                 value={mortgageBalance}
-                onChange={(e) => setMortgageBalance(e.target.value)}
+                onChange={(e) => patchDraft({ mortgageBalance: e.target.value })}
                 className="input-field"
               />
             </Field>
@@ -283,8 +334,9 @@ export function AddHoldingForm() {
 
         <Field label="買入日期" required>
           <DatePicker
+            key={assetType}
             name="buyDate"
-            defaultValue={todayIsoDate()}
+            defaultValue={draft.buyDate}
             max={todayIsoDate()}
             required
           />
@@ -297,7 +349,7 @@ export function AddHoldingForm() {
               step="any"
               min="0"
               value={buyFee}
-              onChange={(e) => setBuyFee(e.target.value)}
+              onChange={(e) => patchDraft({ buyFee: e.target.value })}
               placeholder="留空視為 0"
               className="input-field"
             />
@@ -310,9 +362,14 @@ export function AddHoldingForm() {
           </p>
         )}
         {error && <ErrorAlert message={error} />}
-        <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <div className="text-sm text-muted">
+            預估投入成本 <span className="ml-1 font-semibold tabular-nums text-foreground">{canPreview ? formatAmount(cost) : "—"}</span>
+          </div>
+          <div className="ml-auto flex flex-wrap gap-2">
           {!submitting && <Link href="/holdings" className="btn-secondary">取消</Link>}
-          <button type="submit" className="btn-primary" disabled={!ready}>{submitting ? "儲存中…" : "儲存持倉"}</button>
+            <button type="submit" className="btn-primary" disabled={!ready}>{submitting ? "儲存中…" : "儲存持倉"}</button>
+          </div>
         </div>
       </fieldset>
       <span className="sr-only" role="status">{submitting ? "正在儲存持倉" : ""}</span>

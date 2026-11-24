@@ -1,5 +1,6 @@
 "use client";
 
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { useMemo } from "react";
 import {
   Area,
@@ -12,7 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import type { ChartRange } from "@/lib/portfolio/calculations";
-import { formatCurrency, formatPercent } from "@/lib/portfolio/calculations";
+import { formatPercent } from "@/lib/portfolio/calculations";
 import {
   buildPortfolioTimeline,
   periodPnlFromTimeline,
@@ -30,6 +31,7 @@ export function PortfolioReturnChart({
   priceHistory: PriceHistoryMap;
   range: ChartRange;
 }) {
+  const { formatAmount, amountsHidden } = useAmountPrivacy();
   const timeline = useMemo(
     () => buildPortfolioTimeline(holdings, priceHistory, range),
     [holdings, priceHistory, range]
@@ -73,7 +75,7 @@ export function PortfolioReturnChart({
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
           <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="var(--muted)" />
           <YAxis
-            tick={{ fontSize: 11 }}
+            tick={amountsHidden ? false : { fontSize: 11 }}
             stroke="var(--muted)"
             tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`}
           />
@@ -90,7 +92,7 @@ export function PortfolioReturnChart({
               };
               if (!row) return ["", ""];
               return [
-                `${formatCurrency(row.pnl)} (${formatPercent(row.returnRate)}) · 總損益 ${formatCurrency(row.absolutePnl)}`,
+                `${formatAmount(row.pnl)} (${formatPercent(row.returnRate)}) · 總損益 ${formatAmount(row.absolutePnl)}`,
                 "區間累積",
               ];
             }}

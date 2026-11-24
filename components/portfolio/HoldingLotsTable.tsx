@@ -1,10 +1,11 @@
 "use client";
 
-import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import type { HoldingLotSummary } from "@/lib/portfolio/portfolio-timeline";
 
 export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
+  const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
   if (lots.length === 0) return null;
 
   const totalCost = lots.reduce((sum, l) => sum + l.costBasis, 0);
@@ -31,13 +32,13 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
               <dd className="text-right tabular-nums">{lot.buyDate}</dd>
               <dt className="text-muted">買入價</dt>
               <dd className="text-right tabular-nums">
-                {formatQuotePrice(lot.buyPrice, lot.assetType)}
+                {formatQuoteAmount(lot.buyPrice, lot.assetType)}
               </dd>
               <dt className="text-muted">數量</dt>
               <dd className="text-right tabular-nums">{lot.quantity}</dd>
               <dt className="text-muted">投入成本</dt>
               <dd className="text-right font-medium tabular-nums">
-                {formatCurrency(lot.costBasis)}
+                {formatAmount(lot.costBasis)}
               </dd>
             </dl>
           </li>
@@ -45,7 +46,7 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
         <li className="flex justify-between rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm">
           <span className="text-muted">合計投入</span>
           <span className="font-semibold tabular-nums">
-            {formatCurrency(totalCost)}
+            {formatAmount(totalCost)}
           </span>
         </li>
       </ul>
@@ -77,11 +78,11 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
                 </td>
                 <td className="px-3 py-2 tabular-nums">{lot.buyDate}</td>
                 <td className="px-3 py-2 tabular-nums">
-                  {formatQuotePrice(lot.buyPrice, lot.assetType)}
+                  {formatQuoteAmount(lot.buyPrice, lot.assetType)}
                 </td>
                 <td className="px-3 py-2 tabular-nums">{lot.quantity}</td>
                 <td className="px-3 py-2 tabular-nums font-medium">
-                  {formatCurrency(lot.costBasis)}
+                  {formatAmount(lot.costBasis)}
                 </td>
               </tr>
             ))}
@@ -92,7 +93,7 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
                 合計投入
               </td>
               <td className="px-3 py-2 tabular-nums font-semibold text-foreground">
-                {formatCurrency(totalCost)}
+                {formatAmount(totalCost)}
               </td>
             </tr>
           </tfoot>

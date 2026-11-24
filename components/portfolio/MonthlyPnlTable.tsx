@@ -143,7 +143,7 @@ export function MonthlyPnlTable({
       </p>
 
       {rows.length === 0 ? (
-        <p className="text-center text-sm text-muted py-8 glass-card">
+        <p className="glass-card px-4 py-8 text-center text-sm leading-relaxed text-muted">
           尚無可彙總的月度資料。請先新增持倉，並於
           <a href="/trends" className="text-accent hover:underline mx-1">
             趨勢頁

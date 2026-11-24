@@ -1,10 +1,10 @@
 "use client";
 
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { todayIsoDate } from "@/lib/date/iso-date";
-import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import { allocateFifoSell } from "@/lib/portfolio/holding-groups";
 import type { HoldingGroupWithMetrics } from "@/lib/portfolio/holding-groups";
@@ -20,6 +20,7 @@ export function SellGroupHoldingModal({
   onSave: (inputs: SellHoldingInput[]) => void;
   onClose: () => void;
 }) {
+  const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
   const unitLabel = getSellUnitLabel(group.assetType);
   const totalQty = group.quantity;
 
@@ -140,7 +141,7 @@ export function SellGroupHoldingModal({
         <p className="text-sm text-muted">
           {group.name}（{group.symbol}）· 共 {group.lots.length} 筆買入 · 合計{" "}
           {totalQty} {unitLabel} · 加權均價{" "}
-          {formatQuotePrice(group.avgBuyPrice, group.assetType)}
+          {formatQuoteAmount(group.avgBuyPrice, group.assetType)}
         </p>
         <p className="text-xs text-muted">
           賣出時依買入日先進先出（FIFO）從較早買入分攤。
@@ -177,7 +178,7 @@ export function SellGroupHoldingModal({
               <li key={a.id} className="flex justify-between gap-2 tabular-nums">
                 <span>
                   {a.buyDate} · 成本{" "}
-                  {formatQuotePrice(a.buyPrice, group.assetType)}
+                  {formatQuoteAmount(a.buyPrice, group.assetType)}
                 </span>
                 <span>
                   賣 {a.quantity} {unitLabel}
@@ -246,14 +247,14 @@ export function SellGroupHoldingModal({
         {preview && (
           <div className="rounded-lg border border-border/80 bg-surface-raised/40 p-3 text-sm">
             <p className="tabular-nums">
-              預估成交金額：{formatCurrency(preview.proceeds)}
+              預估成交金額：{formatAmount(preview.proceeds)}
             </p>
             <p
               className={`mt-1 tabular-nums font-medium ${
                 preview.realizedPnl >= 0 ? "text-gain" : "text-loss"
               }`}
             >
-              預估實現損益：{formatCurrency(preview.realizedPnl)}
+              預估實現損益：{formatAmount(preview.realizedPnl)}
             </p>
             {preview.isFullSell && (
               <p className="mt-2 text-xs text-muted">

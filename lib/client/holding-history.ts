@@ -4,6 +4,7 @@
  */
 
 import type { ChartRange } from "@/lib/portfolio/chart-date-range";
+import { toFundclearDate } from "@/lib/fund-nav/date-utils";
 import type { Holding, PricePoint } from "@/lib/types/holding";
 import {
   fetchFundNavHistory,
@@ -11,6 +12,8 @@ import {
   isHistoryError,
   isStockHistoryError,
 } from "./price-api";
+
+export type PriceHistoryRange = ChartRange | { startDate: string; endDate: string };
 
 /** 是否可自動載入歷史（上櫃股票、房子除外） */
 export function canImportHistory(holding: Holding): boolean {
@@ -22,15 +25,16 @@ export function canImportHistory(holding: Holding): boolean {
 /** 歷史抓取分組 key（同 key 共用一次 API 結果） */
 export function historyFetchGroupKey(
   holding: Holding,
-  range: ChartRange
+  range: PriceHistoryRange
 ): string {
   const market = holding.market ?? "tse";
-  return `${holding.assetType}:${holding.symbol}:${market}:${range}`;
+  const window = typeof range === "string" ? range : `${range.startDate}:${range.endDate}`;
+  return `${holding.assetType}:${holding.symbol}:${market}:${window}`;
 }
 
 function groupHoldingsForHistoryFetch(
   holdings: Holding[],
-  range: ChartRange
+  range: PriceHistoryRange
 ): Map<string, Holding[]> {
   const groups = new Map<string, Holding[]>();
   for (const h of holdings) {
@@ -52,7 +56,7 @@ function earliestBuyDate(holdings: Holding[]): string {
 
 async function fetchHistoryPointsForGroup(
   holdings: Holding[],
-  range: ChartRange
+  range: PriceHistoryRange
 ): Promise<PricePoint[]> {
   const representative = holdings[0]!;
   const buyDate =
@@ -61,8 +65,10 @@ async function fetchHistoryPointsForGroup(
   if (representative.assetType === "fund") {
     const res = await fetchFundNavHistory({
       fundCode: representative.symbol,
-      range,
-      buyDate,
+      ...(typeof range === "string" ? { range, buyDate } : {
+        startDate: toFundclearDate(range.startDate),
+        endDate: toFundclearDate(range.endDate),
+      }),
     });
     if (isHistoryError(res)) {
       throw new Error(res.error);
@@ -81,8 +87,7 @@ async function fetchHistoryPointsForGroup(
   const res = await fetchStockPriceHistory({
     symbol: representative.symbol,
     market: representative.market ?? "tse",
-    range,
-    buyDate,
+    ...(typeof range === "string" ? { range, buyDate } : range),
   });
 
   if (isStockHistoryError(res)) {
@@ -111,7 +116,7 @@ function sleep(ms: number): Promise<void> {
  */
 export async function fetchHistoryForHoldings(
   holdings: Holding[],
-  range: ChartRange
+  range: PriceHistoryRange
 ): Promise<HoldingHistoryImportResult[]> {
   const groups = groupHoldingsForHistoryFetch(holdings, range);
   const results: HoldingHistoryImportResult[] = [];

@@ -52,10 +52,8 @@ export function buildLoanReminders(
           kind: "payment_due",
           severity: days <= 1 ? "warning" : "info",
           date: upcomingPayment.paymentDate,
-          message:
-            days === 0
-              ? `今天預計繳款 ${Math.round(upcomingPayment.payment).toLocaleString("zh-TW")} 元`
-              : `${days} 天後預計繳款 ${Math.round(upcomingPayment.payment).toLocaleString("zh-TW")} 元`,
+          amount: upcomingPayment.payment,
+          message: days === 0 ? "今天預計繳款" : `${days} 天後預計繳款`,
         });
       }
     }

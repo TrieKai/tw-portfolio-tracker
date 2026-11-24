@@ -1,19 +1,31 @@
-/** 使用者曾選擇「暫不上傳」時記於 localStorage，避免每次重整都跳出詢問 */
+/** 使用者選擇「只存本機」後，保留原有鍵名以延續既有選擇。 */
 function dismissKey(userId: string): string {
   return `portfolio-upload-dismissed:${userId}`;
 }
 
 export function isUploadPromptDismissed(userId: string): boolean {
   if (typeof window === "undefined") return false;
-  return localStorage.getItem(dismissKey(userId)) === "1";
+  try {
+    return localStorage.getItem(dismissKey(userId)) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function setUploadPromptDismissed(userId: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(dismissKey(userId), "1");
+  try {
+    localStorage.setItem(dismissKey(userId), "1");
+  } catch {
+    // 無法寫入時，同一登入階段仍由記憶體維持本機模式。
+  }
 }
 
 export function clearUploadPromptDismissed(userId: string): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(dismissKey(userId));
+  try {
+    localStorage.removeItem(dismissKey(userId));
+  } catch {
+    // 已確認的同步仍可在目前登入階段執行。
+  }
 }

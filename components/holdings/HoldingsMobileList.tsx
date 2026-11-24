@@ -156,6 +156,7 @@ export function HoldingsMobileList({
                   <button
                     type="button"
                     onClick={() => toggleExpanded(g.groupKey)}
+                    aria-expanded={isOpen}
                     className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
                   >
                     {isOpen ? "收合明細" : "展開明細"}
@@ -180,27 +181,26 @@ export function HoldingsMobileList({
                   >
                     編輯
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => onSell(g.lots[0].id)}
-                    className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
-                  >
-                    賣出
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onManual(g.lots[0].id)}
-                    className="btn-secondary flex-1 text-xs sm:flex-none touch-target"
-                  >
-                    {g.lots[0].assetType === "property" ? "估價" : "手動"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onRemove(g.lots[0].id)}
-                    className="flex-1 px-2 py-2 text-xs text-rose-500 sm:flex-none touch-target"
-                  >
-                    刪除
-                  </button>
+                  {(!g.hasLivePrice || g.assetType === "property") && (
+                    <button type="button" onClick={() => onManual(g.lots[0].id)} className="btn-secondary flex-1 text-xs">
+                      {g.assetType === "property" ? "估價" : "手動輸入價格"}
+                    </button>
+                  )}
+                  <details className="min-w-0 flex-1 open:basis-full">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium text-muted hover:bg-surface-raised [&::-webkit-details-marker]:hidden">
+                      更多操作
+                      <svg aria-hidden="true" viewBox="0 0 16 16" className="size-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                        <path d="m4 6 4 4 4-4" />
+                      </svg>
+                    </summary>
+                    <div className="mt-1 flex flex-wrap gap-2 border-t border-border pt-2">
+                      <button type="button" onClick={() => onSell(g.lots[0].id)} className="btn-secondary text-xs">賣出</button>
+                      {g.hasLivePrice && g.assetType !== "property" && (
+                        <button type="button" onClick={() => onManual(g.lots[0].id)} className="btn-secondary text-xs">手動輸入價格</button>
+                      )}
+                      <button type="button" onClick={() => onRemove(g.lots[0].id)} className="btn-secondary text-xs text-rose-700 dark:text-rose-300">移除持倉</button>
+                    </div>
+                  </details>
                 </>
               )}
             </div>

@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePortfolio } from "@/providers/PortfolioProvider";
+import { AmountVisibilityToggle } from "@/components/ui/AmountVisibilityToggle";
 import {
   UiPreferencesProvider,
   useUiPreferences,
@@ -30,7 +31,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function AppShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { ready, holdings, updateAll, batchStatus, batchMessage, storageMode } = usePortfolio();
+  const { ready, holdings, updateAll, batchStatus, batchMessage, storageMode, syncStatus } = usePortfolio();
   const { preferences } = useUiPreferences();
   const [aiLayoutOpen, setAiLayoutOpen] = useState(false);
   const settings = useRef<HTMLDivElement>(null);
@@ -99,6 +100,10 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
             </button>
             <div ref={settings} id="app-settings" popover="auto" className="app-settings space-y-4 overflow-y-auto rounded-xl border border-border bg-surface p-4 text-foreground shadow-lg">
               <AuthMenu />
+              <div className="border-t border-border pt-4">
+                <AmountVisibilityToggle />
+                <p className="mt-2 text-xs leading-relaxed text-muted">列表、圖表與明細可隱藏金額。填寫表單時可照常核對輸入。</p>
+              </div>
               <div className="grid grid-cols-2 gap-2 border-t border-border pt-4">
                 <ThemeToggle />
                 <button
@@ -138,7 +143,9 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
       </main>
 
       <footer className="footer-with-bottom-nav mx-auto flex w-full max-w-7xl flex-wrap justify-between gap-x-6 gap-y-2 px-4 text-xs text-muted sm:px-6">
-        <span>{storageMode === "cloud" ? "Google 雲端同步" : "資料儲存於此瀏覽器"}</span>
+        <span>{syncStatus === "error"
+          ? "雲端同步異常 · 變更存於此瀏覽器"
+          : storageMode === "cloud" ? "雲端同步已開啟" : "資料儲存於此瀏覽器"}</span>
         <span>價格來源 TWSE／集保中心</span>
       </footer>
 

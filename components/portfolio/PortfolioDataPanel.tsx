@@ -19,7 +19,7 @@ interface ImportConfirmState {
 }
 
 export function PortfolioDataPanel() {
-  const { storage, storageMode, importPortfolio, refreshFromCloud } =
+  const { storage, storageMode, syncStatus, importPortfolio, refreshFromCloud } =
     usePortfolio();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{
@@ -53,7 +53,7 @@ export function PortfolioDataPanel() {
 
       const hasCurrent = hasPortfolioData(storage);
       if (!hasCurrent) {
-        importPortfolio(parsed.portfolio, "replace");
+        importPortfolio(parsed.portfolio, "merge");
         setMessage({
           type: "ok",
           text: `已匯入：${describePortfolioStorage(parsed.portfolio)}`,
@@ -64,7 +64,7 @@ export function PortfolioDataPanel() {
       setConfirm({
         portfolio: parsed.portfolio,
         summary: describePortfolioStorage(parsed.portfolio),
-        mode: "replace",
+        mode: "merge",
       });
     },
     [storage, importPortfolio]
@@ -90,7 +90,7 @@ export function PortfolioDataPanel() {
         <p className="mt-1 text-sm text-muted">
           匯出／匯入 JSON 備份，可在裝置間搬移或還原持倉。
           {storageMode === "cloud"
-            ? " 登入 Google 時，匯入後也會同步至雲端。"
+            ? " 雲端同步已開啟，匯入後的變更也會同步。"
             : " 僅影響本機瀏覽器儲存。"}
         </p>
 
@@ -109,13 +109,14 @@ export function PortfolioDataPanel() {
           >
             匯入 JSON
           </button>
-          {storageMode === "cloud" && (
+          {storageMode !== "anonymous" && (
             <button
               type="button"
               onClick={() => void refreshFromCloud()}
+              disabled={syncStatus === "syncing"}
               className="touch-target rounded-lg border border-accent/40 bg-accent-dim/20 px-4 py-2.5 text-sm font-medium text-accent hover:bg-accent-dim/40"
             >
-              從雲端載入
+              {storageMode === "cloud" ? "查看雲端版本" : "啟用雲端同步"}
             </button>
           )}
           <input
@@ -132,7 +133,7 @@ export function PortfolioDataPanel() {
         </p>
 
         {message && (
-          <p
+          <p role={message.type === "error" ? "alert" : "status"}
             className={`mt-2 text-sm ${
               message.type === "error" ? "text-rose-500" : "text-accent"
             }`}

@@ -1072,11 +1072,19 @@ export function applyImportedPriceHistory(
   holdingId: string,
   points: PricePoint[]
 ): PortfolioStorage {
-  if (points.length === 0) return state;
+  const holding = state.holdings.find((item) => item.id === holdingId);
+  if (!holding || points.length === 0) return state;
+  const retainedDates = new Set(
+    (state.priceHistory[holdingId] ?? [])
+      .filter((point) => point.source === "manual" || point.date === holding.priceDate)
+      .map((point) => point.date)
+  );
 
   const sorted = points
+    .filter((point) => !retainedDates.has(point.date))
     .map((point) => adjustPointForCorporateActions(state, holdingId, point))
     .sort((a, b) => a.date.localeCompare(b.date));
+  if (sorted.length === 0) return state;
   const latest = sorted[sorted.length - 1];
 
   let next: PortfolioStorage = {
@@ -1084,13 +1092,15 @@ export function applyImportedPriceHistory(
     priceHistory: mergePriceHistory(state.priceHistory, holdingId, sorted),
   };
 
-  next = updateHolding(next, holdingId, {
-    currentPrice: latest.price,
-    priceDate: latest.date,
-    priceSource: "api",
-    lastUpdatedAt: new Date().toISOString(),
-    lastError: undefined,
-  });
+  if (!holding.priceDate || latest.date > holding.priceDate) {
+    next = updateHolding(next, holdingId, {
+      currentPrice: latest.price,
+      priceDate: latest.date,
+      priceSource: "api",
+      lastUpdatedAt: new Date().toISOString(),
+      lastError: undefined,
+    });
+  }
 
   return persistPnlSummariesForDates(
     next,

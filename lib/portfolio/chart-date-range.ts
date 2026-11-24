@@ -15,11 +15,11 @@ export const CHART_RANGE_OPTIONS: { key: ChartRange; label: string }[] = [
   { key: "7d", label: "7 天" },
   { key: "30d", label: "30 天" },
   { key: "2m", label: "2 個月" },
-  { key: "3m", label: "3 個月" },
-  { key: "1q", label: "一季" },
+  { key: "3m", label: "近 90 天" },
+  { key: "1q", label: "當季" },
   { key: "1y", label: "一年" },
   { key: "ytd", label: "今年度" },
-  { key: "all", label: "全部" },
+  { key: "all", label: "全部可用" },
 ];
 
 export const CHART_RANGE_VALUES = CHART_RANGE_OPTIONS.map((o) => o.key);

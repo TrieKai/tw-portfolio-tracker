@@ -37,6 +37,7 @@ export async function fetchPriceUpdate(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
+    signal: AbortSignal.timeout(27_000),
   });
   return res.json() as Promise<UpdatePriceResponse>;
 }

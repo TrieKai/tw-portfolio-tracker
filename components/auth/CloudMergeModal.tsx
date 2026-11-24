@@ -1,19 +1,20 @@
 "use client";
 
 import { Modal } from "@/components/ui/Modal";
+import { describePortfolioStorage } from "@/lib/storage/portfolio-export";
 import type { PortfolioStorage } from "@/lib/types/holding";
 
 interface CloudMergeModalProps {
-  localCount: number;
-  cloudCount: number;
+  local: PortfolioStorage;
+  cloud: PortfolioStorage;
   onChooseLocal: () => void;
   onChooseCloud: () => void;
   onDismiss: () => void;
 }
 
 export function CloudMergeModal({
-  localCount,
-  cloudCount,
+  local,
+  cloud,
   onChooseLocal,
   onChooseCloud,
   onDismiss,
@@ -25,16 +26,14 @@ export function CloudMergeModal({
           選擇要使用的資料
         </h2>
         <p className="mt-2 text-sm text-muted">
-          此裝置與雲端都有投資組合紀錄，請選擇要以哪一份為準。另一份不會自動刪除，但登入期間僅會同步您選擇的版本。
+          本機與雲端的資料不同。請選擇一份作為同步版本，或先維持只存本機。取代前可在持倉頁匯出本機備份。
         </p>
         <ul className="mt-4 space-y-2 text-sm">
           <li>
-            本機：<span className="font-medium text-foreground">{localCount}</span>{" "}
-            筆持倉相關資料
+            本機：<span className="font-medium text-foreground">{describePortfolioStorage(local)}</span>
           </li>
           <li>
-            雲端：<span className="font-medium text-foreground">{cloudCount}</span>{" "}
-            筆持倉相關資料
+            雲端：<span className="font-medium text-foreground">{describePortfolioStorage(cloud)}</span>
           </li>
         </ul>
         <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
@@ -43,29 +42,24 @@ export function CloudMergeModal({
             onClick={onChooseLocal}
             className="touch-target rounded-lg bg-accent-button px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110"
           >
-            使用本機並上傳雲端
+            用本機資料取代雲端
           </button>
           <button
             type="button"
             onClick={onChooseCloud}
             className="touch-target rounded-lg border border-border bg-surface-raised px-4 py-2.5 text-sm font-medium hover:bg-surface"
           >
-            使用雲端資料
+            用雲端資料取代本機
           </button>
           <button
             type="button"
             onClick={onDismiss}
             className="touch-target rounded-lg px-4 py-2.5 text-sm text-muted hover:text-foreground sm:mr-auto"
           >
-            稍後再說
+            繼續只存本機
           </button>
         </div>
       </div>
     </Modal>
   );
-}
-
-/** 供合併提示用的持倉＋賣出筆數概覽 */
-export function portfolioItemCount(state: PortfolioStorage): number {
-  return state.holdings.length + state.sales.length;
 }

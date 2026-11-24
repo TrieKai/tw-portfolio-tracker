@@ -14,11 +14,13 @@ import type { ChartRange } from "@/lib/portfolio/calculations";
 import { ChartRangePicker } from "@/components/ui/ChartRangePicker";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
+import { MAX_STOCK_HISTORY_MONTHS } from "@/lib/prices/stock-history-types";
 import { canImportHistory } from "@/lib/client/holding-history";
 import { groupHoldings } from "@/lib/portfolio/holding-groups";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 type TrendTab = "portfolio" | "holding";
+type HistoryNotice = { scope: string; text: string; error: boolean };
 
 export default function TrendsPage() {
   const {
@@ -28,14 +30,13 @@ export default function TrendsPage() {
     importPriceHistory,
     refreshPortfolioForRange,
     batchStatus,
-    batchMessage,
   } = usePortfolio();
   const [tab, setTab] = useState<TrendTab>("portfolio");
   const [selectedGroupKey, setSelectedGroupKey] = useState<string>("");
   const [range, setRange] = useState<ChartRange>("30d");
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [historyMessage, setHistoryMessage] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [portfolioNotice, setPortfolioNotice] = useState<HistoryNotice | null>(null);
+  const [holdingNotice, setHoldingNotice] = useState<HistoryNotice | null>(null);
 
   const holdingLots = useMemo(
     () => buildHoldingLotSummaries(storage.holdings),
@@ -65,38 +66,44 @@ export default function TrendsPage() {
   const priceSeriesLabel = isProperty ? "估價" : isFund ? "淨值" : "股價";
 
   const isPortfolioLoading = batchStatus === "loading";
+  const scope = tab === "portfolio" ? `portfolio:${range}` : `holding:${activeGroup?.groupKey}:${range}`;
+  const historyNotice = tab === "portfolio" ? portfolioNotice : holdingNotice;
+  const notice = historyNotice?.scope === scope ? historyNotice : null;
 
   async function handlePortfolioRefresh() {
-    setHistoryError(null);
-    setHistoryMessage(null);
+    setPortfolioNotice(null);
     const result = await refreshPortfolioForRange(range);
-    if (result.ok) {
-      setHistoryMessage(
-        result.message ??
-          `已更新現價並載入「${getChartRangeLabel(range)}」歷史資料`
-      );
-    } else {
-      setHistoryError(result.error ?? "更新失敗");
-    }
+    setPortfolioNotice({
+      scope,
+      text: (result.ok ? result.message : result.error) ?? "更新失敗，請再試一次。",
+      error: !result.ok,
+    });
   }
 
   async function handleImportHistory() {
-    if (!active) return;
+    if (!activeGroup || loadingHistory) return;
     setLoadingHistory(true);
-    setHistoryError(null);
-    setHistoryMessage(null);
-
-    const result = await importPriceHistory(activeGroup!.groupKey, range);
-    setLoadingHistory(false);
-
-    if (result.ok) {
-      setHistoryMessage(
-        `已載入 ${result.count ?? 0} 筆歷史${isFund ? "淨值" : "收盤價"}並合併至本機趨勢`
-      );
-    } else {
-      setHistoryError(result.error ?? "載入歷史資料失敗，請稍後再試");
+    setHoldingNotice(null);
+    try {
+      const result = await importPriceHistory(activeGroup.groupKey, range);
+      const coverage = result.startDate && result.endDate
+        ? `（${result.startDate}～${result.endDate}）`
+        : "";
+      setHoldingNotice({
+        scope,
+        text: result.ok
+          ? `已取得 ${result.count ?? 0} 筆歷史${isFund ? "淨值" : "收盤價"}${coverage}。`
+          : result.error ?? "載入歷史資料失敗，請稍後再試。",
+        error: !result.ok,
+      });
+    } finally {
+      setLoadingHistory(false);
     }
   }
+
+  const status = notice && (notice.error ? (
+    <ErrorAlert message={notice.text} onDismiss={() => tab === "portfolio" ? setPortfolioNotice(null) : setHoldingNotice(null)} />
+  ) : <p role="status" className="text-sm text-accent">{notice.text}</p>);
 
   return (
     <div className="space-y-6">
@@ -139,12 +146,12 @@ export default function TrendsPage() {
               <div className="glass-card p-4 sm:p-5">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <h2 className="font-semibold">資產市值趨勢</h2>
+                    <h2 className="font-semibold">以目前持倉回推的市值</h2>
                     <p className="mt-1 text-xs text-muted">
-                      每筆依各自買入日／買入價納入；新買入日成本階梯上升
+                      每筆持倉自買入日起計入，成本隨新買入增加。
                     </p>
                     <p className="mt-1 text-xs text-muted">
-                      依目前持倉回推；賣出前股數、已結清部位及已實現損益未納入。
+                      到 <Link href="/calendar" className="font-medium text-accent hover:underline">損益日曆</Link> 查看逐日損益及交易歸因。
                     </p>
                   </div>
                   <button
@@ -155,22 +162,10 @@ export default function TrendsPage() {
                   >
                     {isPortfolioLoading
                       ? "更新中…"
-                      : `更新現價並載入${getChartRangeLabel(range)}歷史`}
+                      : range === "all" ? "更新現價並載入歷史" : `更新現價並載入${getChartRangeLabel(range)}歷史`}
                   </button>
                 </div>
-                {(historyMessage || batchMessage) && tab === "portfolio" && (
-                  <p role="status" className={`mb-3 text-sm ${batchStatus === "error" && !historyMessage ? "text-rose-700 dark:text-rose-300" : "text-accent"}`}>
-                    {historyMessage ?? batchMessage}
-                  </p>
-                )}
-                {historyError && tab === "portfolio" && (
-                  <div className="mb-3">
-                    <ErrorAlert
-                      message={historyError}
-                      onDismiss={() => setHistoryError(null)}
-                    />
-                  </div>
-                )}
+                {status && <div className="mb-3">{status}</div>}
                 <PortfolioValueTrendChart
                   holdings={storage.holdings}
                   priceHistory={storage.priceHistory}
@@ -189,7 +184,7 @@ export default function TrendsPage() {
               <div className="glass-card p-4 sm:p-5">
                 <h2 className="mb-1 font-semibold">持倉建倉明細</h2>
                 <p className="mb-4 text-xs text-muted">
-                  各筆基金／股票可不同時間、不同價格買入；趨勢圖僅在買入日後計入該筆
+                  各筆持倉自買入日起計入趨勢圖。
                 </p>
                 <HoldingLotsTable lots={holdingLots} />
               </div>
@@ -206,11 +201,7 @@ export default function TrendsPage() {
                   <span className="text-muted">選擇標的</span>
                   <select
                     value={activeGroup?.groupKey ?? ""}
-                    onChange={(e) => {
-                      setSelectedGroupKey(e.target.value);
-                      setHistoryMessage(null);
-                      setHistoryError(null);
-                    }}
+                    onChange={(e) => setSelectedGroupKey(e.target.value)}
                     className="input-field mt-1 w-full"
                   >
                     {symbolGroups.map((g) => (
@@ -251,14 +242,9 @@ export default function TrendsPage() {
                 </p>
               )}
 
-              {historyMessage && (
-                <p role="status" className="text-sm text-accent">{historyMessage}</p>
-              )}
-              {historyError && (
-                <ErrorAlert
-                  message={historyError}
-                  onDismiss={() => setHistoryError(null)}
-                />
+              {status}
+              {range === "all" && canImport && !isFund && (
+                <p className="text-sm text-muted">單次上市股價查詢最多涵蓋 {MAX_STOCK_HISTORY_MONTHS} 個月。圖表顯示此標的已保存的可用資料。</p>
               )}
 
               <div className="glass-card p-4 sm:p-5">

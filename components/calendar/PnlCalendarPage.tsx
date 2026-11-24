@@ -20,6 +20,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import {
   addDaysToIsoDate,
   currentYearMonthPrefix,
+  endOfMonthIsoFromPrefix,
   formatYearMonthZh,
   parseIsoDate,
   todayIsoDate,
@@ -29,7 +30,9 @@ import {
   buildTradingCalendarGrid,
   type TradingCalendarRow,
 } from "@/lib/date/trading-calendar";
-import { formatCurrency } from "@/lib/portfolio/calculations";
+import { canImportHistory } from "@/lib/client/holding-history";
+import { MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { formatFinancingCostImpact } from "@/lib/loans/format";
 import {
   buildPnlCalendar,
@@ -38,7 +41,6 @@ import {
   type PnlCalendarResult,
   type PnlCalendarWeek,
 } from "@/lib/portfolio/pnl-calendar";
-import type { ChartRange } from "@/lib/portfolio/chart-date-range";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 const WEEKDAY_LABELS = ["一", "二", "三", "四", "五"] as const;
@@ -48,13 +50,6 @@ function shiftMonth(month: string, amount: number): string {
   if (!year || !monthNumber) return month;
   const next = new Date(year, monthNumber - 1 + amount, 1);
   return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function signedCurrency(value: number): string {
-  const formatted = formatCurrency(Math.abs(value));
-  if (value > 0) return `+${formatted}`;
-  if (value < 0) return `−${formatted}`;
-  return formatted;
 }
 
 function compactPnl(value: number): string {
@@ -124,6 +119,7 @@ function CalendarDayCell({
   maximum: number;
   onSelect: (day: PnlCalendarDay) => void;
 }) {
+  const { amountsHidden, maskAmount, formatSignedAmount } = useAmountPrivacy();
   if (!date) {
     return <div className="min-h-20 rounded-xl border border-border/50 bg-surface/30 sm:min-h-28" />;
   }
@@ -134,10 +130,10 @@ function CalendarDayCell({
       disabled={!day}
       onClick={() => day && onSelect(day)}
       className="relative min-h-20 min-w-0 rounded-xl border border-border bg-surface p-1.5 text-left transition hover:border-accent/50 disabled:cursor-default disabled:hover:border-border sm:min-h-28 sm:p-3"
-      style={day ? heatStyle(day, maximum) : undefined}
+      style={day && !amountsHidden ? heatStyle(day, maximum) : undefined}
       aria-label={
         day
-          ? `${date}，損益 ${signedCurrency(day.pnl)}，報酬 ${day.returnRate.toFixed(2)}%`
+          ? `${date}，損益 ${amountsHidden ? "金額已隱藏" : formatSignedAmount(day.pnl)}，報酬 ${day.returnRate.toFixed(2)}%`
           : `${date}，無損益資料`
       }
     >
@@ -151,7 +147,7 @@ function CalendarDayCell({
       {day ? (
         <span className="mt-2 block min-w-0 sm:mt-5">
           <span className="block truncate text-center text-[11px] font-semibold tabular-nums text-foreground sm:text-base">
-            {compactPnl(day.pnl)}
+            {maskAmount(compactPnl(day.pnl))}
           </span>
           <span className="mt-1 hidden text-center text-sm tabular-nums text-foreground md:block">
             {day.returnRate > 0 ? "+" : ""}
@@ -183,6 +179,7 @@ export function CalendarGrid({
   onSelectDay: (day: PnlCalendarDay) => void;
   onSelectWeek: (week: PnlCalendarWeek) => void;
 }) {
+  const { maskAmount } = useAmountPrivacy();
   const dayByDate = new Map(calendar.days.map((day) => [day.date, day]));
   const weekByStart = new Map(calendar.weeks.map((week) => [week.startDate, week]));
   const maximum = calendar.days.reduce(
@@ -229,7 +226,7 @@ export function CalendarGrid({
             >
               <span className="text-xs text-muted md:mb-2">第 {index + 1} 週</span>
               <span className={`font-semibold tabular-nums ${week ? pnlClass(week.pnl) : "text-muted"}`}>
-                {week ? compactPnl(week.pnl) : "—"}
+                {week ? maskAmount(compactPnl(week.pnl)) : "—"}
               </span>
               {week ? (
                 <span className={`hidden text-xs tabular-nums md:block ${pnlClass(week.returnRate)}`}>
@@ -281,10 +278,16 @@ function SummaryCard({
   );
 }
 
-function dataRangeForMonth(month: string, currentMonth: string): ChartRange {
-  if (month === currentMonth) return "30d";
-  if (month.slice(0, 4) === currentMonth.slice(0, 4)) return "ytd";
-  return "all";
+export function calendarHistoryRange(month: string, today: string) {
+  const monthEnd = endOfMonthIsoFromPrefix(month);
+  // 保留上月底的估值基準，首個交易日也能計算日損益。
+  const previousMonth = shiftMonth(month, -1);
+  const earliest = addDaysToIsoDate(today, -MAX_PRICE_HISTORY_DAYS);
+  const startDate = `${previousMonth}-01`;
+  return {
+    startDate: startDate < earliest ? earliest : startDate,
+    endDate: monthEnd < today ? monthEnd : today,
+  };
 }
 
 export function PnlCalendarPage() {
@@ -295,15 +298,17 @@ export function PnlCalendarPage() {
     addDividend,
     refreshPortfolioForRange,
     batchStatus,
-    batchMessage,
   } = usePortfolio();
   const currentMonth = currentYearMonthPrefix();
   const today = todayIsoDate();
+  const { maskAmount, formatSignedAmount } = useAmountPrivacy();
   const [month, setMonth] = useState(currentMonth);
   const [filterValue, setFilterValue] = useState("investment");
   const [performanceView, setPerformanceView] = useState<"gross" | "net">("gross");
   const [selection, setSelection] = useState<PnlDetailSelection | null>(null);
   const [dividendOpen, setDividendOpen] = useState(false);
+  const [historyNotice, setHistoryNotice] = useState<{ month: string; text: string; error: boolean } | null>(null);
+  const [loadingMonth, setLoadingMonth] = useState<string | null>(null);
   const autoLoadedRef = useRef(new Set<string>());
   const closeDetail = useCallback(() => setSelection(null), []);
 
@@ -330,16 +335,16 @@ export function PnlCalendarPage() {
     return Array.from(options.values());
   }, [investmentHoldings, storage.transactions]);
   const filter = useMemo(() => filterFromValue(filterValue), [filterValue]);
+  const showNetPerformance = performanceView === "net" && filter.kind === "investment";
   const calendar = useMemo(
     () =>
       buildPnlCalendar(storage, {
         month,
         asOfDate: today,
         filter,
-        includeFinancingCosts:
-          performanceView === "net" && filter.kind === "investment",
+        includeFinancingCosts: showNetPerformance,
       }),
-    [storage, month, today, filter, performanceView]
+    [storage, month, today, filter, showNetPerformance]
   );
   const rows = useMemo(() => buildTradingCalendarGrid(month), [month]);
   const hasSelectedMonthPrices = useMemo(
@@ -368,31 +373,52 @@ export function PnlCalendarPage() {
     return counts;
   }, [calendar.days, storage.transactions, month]);
 
+  const historyRange = useMemo(() => calendarHistoryRange(month, today), [month, today]);
+  const hasHoldingsForMonth = investmentHoldings.some((holding) => holding.buyDate <= historyRange.endDate);
+  const canBackfill = investmentHoldings.some((holding) =>
+    holding.buyDate <= historyRange.endDate && canImportHistory(holding)
+  ) && historyRange.startDate <= historyRange.endDate;
+  const batchPending = batchStatus === "loading";
+  const loadMonthHistory = useCallback(async () => {
+    setLoadingMonth(month);
+    setHistoryNotice(null);
+    const result = await refreshPortfolioForRange(historyRange);
+    setLoadingMonth(null);
+    setHistoryNotice({
+      month,
+      error: !result.ok,
+      text: (result.ok ? result.message : result.error) ?? "無法載入所選月份的價格",
+    });
+  }, [historyRange, month, refreshPortfolioForRange]);
+
   useEffect(() => {
-    if (!ready || month !== currentMonth || hasSelectedMonthPrices) return;
-    if (investmentHoldings.length === 0) return;
-    const key = `${month}:${investmentHoldings.length}`;
-    if (autoLoadedRef.current.has(key)) return;
-    autoLoadedRef.current.add(key);
-    void refreshPortfolioForRange("30d");
-  }, [
-    ready,
-    month,
-    currentMonth,
-    hasSelectedMonthPrices,
-    investmentHoldings.length,
-    refreshPortfolioForRange,
-  ]);
+    if (!ready || month !== currentMonth || hasSelectedMonthPrices || !canBackfill || batchPending) return;
+    if (autoLoadedRef.current.has(month)) return;
+    autoLoadedRef.current.add(month);
+    void loadMonthHistory();
+  }, [batchPending, canBackfill, currentMonth, hasSelectedMonthPrices, loadMonthHistory, month, ready]);
 
   if (!ready) return <LoadingSpinner />;
 
-  const loading = batchStatus === "loading";
-  const completeness =
-    calendar.summary.dataDayCount > 0
-      ? (calendar.summary.completeDayCount / calendar.summary.dataDayCount) * 100
-      : 0;
-  const isEstimatedMonth =
-    !storage.pnlTracking.startedAt || month < storage.pnlTracking.startedAt.slice(0, 7);
+  if (investmentHoldings.length === 0 && storage.transactions.length === 0) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="損益日曆" description="查看每日投資損益，也可切換至扣息後績效。" />
+        <EmptyState
+          title="尚無股票或基金"
+          description="新增股票或基金後，即可在日曆查看每日投資損益。"
+          action={<Link href="/holdings/new" className="btn-primary">新增投資資產</Link>}
+        />
+      </div>
+    );
+  }
+
+  const hasValuations = calendar.summary.dataDayCount > 0;
+  const completeness = hasValuations
+    ? (calendar.summary.completeDayCount / calendar.summary.dataDayCount) * 100
+    : 0;
+  const isEstimatedMonth = hasValuations &&
+    (!storage.pnlTracking.startedAt || month < storage.pnlTracking.startedAt.slice(0, 7));
 
   function chooseMonth(next: string) {
     if (!next || next > currentMonth) return;
@@ -415,7 +441,7 @@ export function PnlCalendarPage() {
     <div className="space-y-6">
       <PageHeader
         title="損益日曆"
-        description="保留資產本身的投資損益，也可切換查看扣除融資成本後的結果"
+        description="查看每日投資損益，也可切換至扣息後績效。"
         action={
           <div className="flex w-full gap-2 sm:w-auto">
             <button
@@ -428,13 +454,11 @@ export function PnlCalendarPage() {
             </button>
             <button
               type="button"
-              onClick={() =>
-                void refreshPortfolioForRange(dataRangeForMonth(month, currentMonth))
-              }
-              disabled={loading || investmentHoldings.length === 0}
+              onClick={() => void loadMonthHistory()}
+              disabled={batchPending || loadingMonth !== null || !canBackfill}
               className="btn-primary flex-1 sm:flex-none"
             >
-              {loading ? "載入中…" : "補齊資料"}
+              {loadingMonth === month ? "載入中…" : "補齊所選月份"}
             </button>
           </div>
         }
@@ -471,13 +495,15 @@ export function PnlCalendarPage() {
             >
               →
             </button>
-            <button
-              type="button"
-              onClick={() => chooseMonth(currentMonth)}
-              className="btn-secondary col-span-3 sm:col-auto"
-            >
-              回到本月
-            </button>
+            {month !== currentMonth && (
+              <button
+                type="button"
+                onClick={() => chooseMonth(currentMonth)}
+                className="btn-secondary col-span-3 sm:col-auto"
+              >
+                回到本月
+              </button>
+            )}
             <select
               value={filterValue}
               onChange={(event) => {
@@ -507,62 +533,66 @@ export function PnlCalendarPage() {
         ) : null}
 
         {isEstimatedMonth ? (
-          <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <p className="border-t border-border pt-3 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
             這個月份早於完整追蹤起點，數字僅依目前仍可重建的持倉估算；已結清舊部位不會捏造日損益。
           </p>
         ) : null}
-        {batchMessage ? <p className="text-xs text-muted">{batchMessage}</p> : null}
+        {historyNotice?.month === month && (
+          <p role="status" className={`text-sm ${historyNotice.error ? "text-rose-700 dark:text-rose-300" : "text-muted"}`}>
+            {historyNotice.text}
+          </p>
+        )}
       </section>
 
-      <section className="metric-grid-container" aria-label="本月損益摘要">
-        <div className="metric-grid">
-        <SummaryCard
-          label={performanceView === "net" && filter.kind === "investment" ? "本月扣息後淨損益" : "本月投資損益"}
-          value={signedCurrency(calendar.summary.pnl)}
-          className={pnlClass(calendar.summary.pnl)}
-          description={performanceView === "net" ? `投資損益 ${signedCurrency(calendar.summary.grossPnl ?? calendar.summary.pnl)}` : undefined}
-        />
-        <SummaryCard
-          label={performanceView === "net" ? "估算淨報酬率" : "複利報酬率"}
-          value={`${calendar.summary.returnRate > 0 ? "+" : ""}${calendar.summary.returnRate.toFixed(2)}%`}
-          className={pnlClass(calendar.summary.returnRate)}
-        />
-        <SummaryCard
-          label={performanceView === "net" ? "本月融資成本" : "獲利／虧損日"}
-          value={performanceView === "net" ? formatFinancingCostImpact(calendar.summary.financingCost ?? 0) : `${calendar.summary.gainDayCount}／${calendar.summary.lossDayCount}`}
-          className={performanceView === "net" ? "text-loss" : ""}
-          description={performanceView === "net" ? "每日按本金與年利率估算" : `共 ${calendar.summary.dataDayCount} 個估值日`}
-        />
-        <SummaryCard
-          label="資料完整度"
-          value={`${completeness.toFixed(0)}%`}
-          description={`${calendar.summary.completeDayCount}/${calendar.summary.dataDayCount || 0} 日完整`}
-        />
-        </div>
-      </section>
-
-      {investmentHoldings.length === 0 && storage.transactions.length === 0 ? (
-        <EmptyState
-          title="尚無股票或基金"
-          description="新增股票或基金後，即可在日曆查看每日投資損益。"
-          action={<Link href="/holdings/new" className="btn-primary">新增投資資產</Link>}
-        />
-      ) : (
-        <section className="glass-card overflow-hidden p-2 sm:p-4">
-          {!hasSelectedMonthPrices && calendar.days.length === 0 ? (
-            <div className="m-2 rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted">
-              這個月份尚無價格歷史。可按「補齊資料」，或保留空白而不把休市日誤算為零。
-            </div>
-          ) : null}
-          <CalendarGrid
-            rows={rows}
-            calendar={calendar}
-            weekendEvents={weekendEvents}
-            onSelectDay={(day) => setSelection({ kind: "day", day })}
-            onSelectWeek={selectWeek}
-          />
+      {hasValuations ? (
+        <section className="metric-grid-container" aria-label="所選月份損益摘要">
+          <div className="metric-grid">
+            <SummaryCard
+              label={showNetPerformance ? "扣息後淨損益" : "投資損益"}
+              value={formatSignedAmount(calendar.summary.pnl)}
+              className={pnlClass(calendar.summary.pnl)}
+              description={showNetPerformance ? `投資損益 ${formatSignedAmount(calendar.summary.grossPnl ?? calendar.summary.pnl)}` : undefined}
+            />
+            <SummaryCard
+              label={showNetPerformance ? "估算淨報酬率" : "複利報酬率"}
+              value={`${calendar.summary.returnRate > 0 ? "+" : ""}${calendar.summary.returnRate.toFixed(2)}%`}
+              className={pnlClass(calendar.summary.returnRate)}
+            />
+            <SummaryCard
+              label={showNetPerformance ? "融資成本影響" : "獲利／虧損日"}
+              value={showNetPerformance
+                ? maskAmount(formatFinancingCostImpact(calendar.summary.financingCost ?? 0))
+                : `${calendar.summary.gainDayCount}／${calendar.summary.lossDayCount}`}
+              className={showNetPerformance ? "text-loss" : undefined}
+              description={showNetPerformance ? "依貸款本金、利息與繳款紀錄計算" : `共 ${calendar.summary.dataDayCount} 個估值日`}
+            />
+            <SummaryCard
+              label="估值日完整度"
+              value={`${completeness.toFixed(0)}%`}
+              description={`${calendar.summary.completeDayCount}／${calendar.summary.dataDayCount} 日完整`}
+            />
+          </div>
         </section>
+      ) : (
+        <EmptyState
+          title={loadingMonth === month ? "正在載入所選月份的資料" : "所選範圍尚無損益資料"}
+          description={canBackfill
+            ? "可補齊所選月份和上月底的估值價格，再查看日、週與月損益。"
+            : hasHoldingsForMonth
+              ? "可在持倉頁手動補入價格。自動歷史查詢支援上市股票和境內基金，價格保留近三年。"
+              : "所選月份沒有可自動補齊的現有持倉，可切換月份查看其他紀錄。"}
+        />
       )}
+
+      <section className="glass-card p-2 sm:p-4" aria-label="交易週日曆">
+        <CalendarGrid
+          rows={rows}
+          calendar={calendar}
+          weekendEvents={weekendEvents}
+          onSelectDay={(day) => setSelection({ kind: "day", day })}
+          onSelectWeek={selectWeek}
+        />
+      </section>
 
       <p className="text-xs leading-5 text-muted">
         已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」包含舊資料回算或融資成本估算，比例標籤代表只有部分資產更新。非交易日的利息會計入週與月合計。

@@ -25,6 +25,12 @@ import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 type SortKey = "name" | "value" | "pnl" | "returnRate";
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "value", label: "市值" },
+  { value: "pnl", label: "損益" },
+  { value: "returnRate", label: "報酬率" },
+  { value: "name", label: "標的名稱" },
+];
 
 export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) {
   const { updateOne, edit, sell, remove, setManualPrice } = usePortfolio();
@@ -77,7 +83,7 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
     if (sortKey === key) setSortAsc((v) => !v);
     else {
       setSortKey(key);
-      setSortAsc(false);
+      setSortAsc(key === "name");
     }
   }
 
@@ -106,7 +112,7 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
 
   function handleRemove(id: string) {
     const h = holdings.find((x) => x.id === id);
-    if (h && confirm(`確定刪除 ${h.name}（${h.buyDate} 買入）？`)) remove(id);
+    if (h && confirm(`移除 ${h.name}（${h.buyDate} 買入）的持倉？已記錄的交易與損益歷史仍會保留。`)) remove(id);
   }
 
   const manualHolding = holdings.find((h) => h.id === manualId);
@@ -144,7 +150,30 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
             className="input-field"
           />
         </label>
-        <p role="status" className="text-sm text-muted sm:pb-2">{filteredGroups.length} 個標的</p>
+        <div className="flex w-full items-center justify-between gap-3 sm:w-auto">
+          <p role="status" className="shrink-0 text-sm text-muted sm:pb-2">{filteredGroups.length} 個標的</p>
+          <div className="flex min-w-0 gap-2 md:hidden">
+            <select
+              aria-label="按欄位排序"
+              className="input-field min-w-0"
+              value={sortKey}
+              onChange={(event) => {
+                const option = SORT_OPTIONS.find(({ value }) => value === event.target.value);
+                if (option) toggleSort(option.value);
+              }}
+            >
+              {SORT_OPTIONS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <button
+              type="button"
+              className="btn-secondary shrink-0"
+              aria-label={sortAsc ? "目前升冪，切換為降冪" : "目前降冪，切換為升冪"}
+              onClick={() => setSortAsc(!sortAsc)}
+            >
+              {sortAsc ? "升冪" : "降冪"}
+            </button>
+          </div>
+        </div>
       </div>
 
       {filteredGroups.length === 0 ? (
@@ -388,7 +417,6 @@ function GroupRows({
           ) : (
             <LotActionButtons
               lotId={lot.id}
-              lotName={g.name}
               assetType={lot.assetType}
               updatingId={updatingId}
               onRefresh={onRefresh}
@@ -426,7 +454,6 @@ function GroupRows({
 
 function LotActionButtons({
   lotId,
-  lotName,
   assetType,
   updatingId,
   onRefresh,
@@ -436,7 +463,6 @@ function LotActionButtons({
   onRemove,
 }: {
   lotId: string;
-  lotName: string;
   assetType: HoldingWithMetrics["assetType"];
   updatingId: string | null;
   onRefresh: (id: string) => void;
@@ -480,9 +506,7 @@ function LotActionButtons({
       </button>
       <button
         type="button"
-        onClick={() => {
-          if (confirm(`確定刪除 ${lotName}？`)) onRemove(lotId);
-        }}
+        onClick={() => onRemove(lotId)}
         className="text-xs text-rose-500 hover:underline px-2"
       >
         刪除

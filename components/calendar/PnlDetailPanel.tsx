@@ -1,7 +1,7 @@
 "use client";
 
 import { Modal } from "@/components/ui/Modal";
-import { formatCurrency, formatQuotePrice } from "@/lib/portfolio/calculations";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { formatFinancingCostImpact } from "@/lib/loans/format";
 import { formatIsoDateZh } from "@/lib/date/iso-date";
 import type {
@@ -18,13 +18,6 @@ function pnlClass(value: number): string {
   if (value > 0) return "text-gain";
   if (value < 0) return "text-loss";
   return "text-muted";
-}
-
-function signedCurrency(value: number): string {
-  const formatted = formatCurrency(Math.abs(value));
-  if (value > 0) return `+${formatted}`;
-  if (value < 0) return `−${formatted}`;
-  return formatted;
 }
 
 function signedRate(value: number): string {
@@ -50,6 +43,7 @@ function DayDetail({
   transactions: PortfolioTransaction[];
   showSummary?: boolean;
 }) {
+  const { formatSignedAmount, formatQuoteAmount, maskAmount } = useAmountPrivacy();
   return (
     <section className="space-y-4">
       {showSummary ? (
@@ -57,7 +51,7 @@ function DayDetail({
           <p className="text-xs text-muted">{qualityLabel(day)}</p>
           <div className="mt-2 flex items-end justify-between gap-3">
             <p className={`text-2xl font-semibold tabular-nums ${pnlClass(day.pnl)}`}>
-              {signedCurrency(day.pnl)}
+              {formatSignedAmount(day.pnl)}
             </p>
             <p className={`font-medium tabular-nums ${pnlClass(day.returnRate)}`}>
               {signedRate(day.returnRate)}
@@ -65,7 +59,7 @@ function DayDetail({
           </div>
           {day.financingCost && Math.abs(day.financingCost) > 1e-9 ? (
             <p className="mt-2 text-xs text-muted">
-              投資損益 {signedCurrency(day.grossPnl ?? day.pnl)} · 融資成本影響 {formatFinancingCostImpact(day.financingCost)}
+              投資損益 {formatSignedAmount(day.grossPnl ?? day.pnl)} · 融資成本影響 {maskAmount(formatFinancingCostImpact(day.financingCost))}
             </p>
           ) : null}
         </div>
@@ -74,7 +68,7 @@ function DayDetail({
       {day.contributions.length === 0 ? (
         <p className="rounded-xl border border-border p-4 text-sm text-muted">
           {day.financingCost && Math.abs(day.financingCost) > 1e-9
-            ? `這一天只有融資成本調整 ${formatFinancingCostImpact(day.financingCost)}。`
+            ? `這一天只有融資成本調整 ${maskAmount(formatFinancingCostImpact(day.financingCost))}。`
             : "這一天只有已保存的總額，逐資產明細已超過保存期限。"}
         </p>
       ) : (
@@ -102,7 +96,7 @@ function DayDetail({
                     </p>
                   </div>
                   <p className={`shrink-0 font-semibold tabular-nums ${pnlClass(contribution.pnl)}`}>
-                    {signedCurrency(contribution.pnl)}
+                    {formatSignedAmount(contribution.pnl)}
                   </p>
                 </div>
 
@@ -110,27 +104,25 @@ function DayDetail({
                   <div>
                     <dt className="text-xs text-muted">價格變動</dt>
                     <dd className={`mt-0.5 tabular-nums ${pnlClass(contribution.marketPnl)}`}>
-                      {signedCurrency(contribution.marketPnl)}
+                      {formatSignedAmount(contribution.marketPnl)}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-xs text-muted">賣出日歸因</dt>
                     <dd className={`mt-0.5 tabular-nums ${pnlClass(contribution.tradePnl)}`}>
-                      {signedCurrency(contribution.tradePnl)}
+                      {formatSignedAmount(contribution.tradePnl)}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-xs text-muted">股利／配息</dt>
                     <dd className={`mt-0.5 tabular-nums ${pnlClass(contribution.dividend)}`}>
-                      {signedCurrency(contribution.dividend)}
+                      {formatSignedAmount(contribution.dividend)}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-xs text-muted">費用與稅</dt>
                     <dd className="mt-0.5 tabular-nums text-loss">
-                      {contribution.fee + contribution.tax > 0
-                        ? `−${formatCurrency(contribution.fee + contribution.tax)}`
-                        : formatCurrency(0)}
+                      {formatSignedAmount(-(contribution.fee + contribution.tax))}
                     </dd>
                   </div>
                 </dl>
@@ -138,9 +130,9 @@ function DayDetail({
                 {contribution.previousPrice !== undefined &&
                 contribution.currentPrice !== undefined ? (
                   <p className="mt-3 border-t border-border/70 pt-3 text-xs text-muted">
-                    {formatQuotePrice(contribution.previousPrice, contribution.assetType)}
+                    {formatQuoteAmount(contribution.previousPrice, contribution.assetType)}
                     {" → "}
-                    {formatQuotePrice(contribution.currentPrice, contribution.assetType)}
+                    {formatQuoteAmount(contribution.currentPrice, contribution.assetType)}
                   </p>
                 ) : null}
 
@@ -170,6 +162,7 @@ export function PnlWeekDetail({
   days: PnlCalendarDay[];
   transactions: PortfolioTransaction[];
 }) {
+  const { formatSignedAmount, maskAmount } = useAmountPrivacy();
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-surface-raised/60 p-4">
@@ -178,7 +171,7 @@ export function PnlWeekDetail({
           <div>
             <p className="text-xs text-muted">總損益</p>
             <p className={`mt-1 text-2xl font-semibold tabular-nums ${pnlClass(week.pnl)}`}>
-              {signedCurrency(week.pnl)}
+              {formatSignedAmount(week.pnl)}
             </p>
           </div>
           <div className="text-right">
@@ -191,7 +184,7 @@ export function PnlWeekDetail({
         <p className="mt-2 text-xs text-muted">{week.dataDayCount} 個損益日</p>
         {week.financingCost && Math.abs(week.financingCost) > 1e-9 ? (
           <p className="mt-1 text-xs text-muted">
-            投資損益 {signedCurrency(week.grossPnl ?? week.pnl)} · 融資成本影響 {formatFinancingCostImpact(week.financingCost)}
+            投資損益 {formatSignedAmount(week.grossPnl ?? week.pnl)} · 融資成本影響 {maskAmount(formatFinancingCostImpact(week.financingCost))}
           </p>
         ) : null}
       </div>
@@ -210,7 +203,7 @@ export function PnlWeekDetail({
               <div className="flex shrink-0 items-center gap-3 text-right">
                 <div>
                   <p className={`font-semibold tabular-nums ${pnlClass(day.pnl)}`}>
-                    {signedCurrency(day.pnl)}
+                    {formatSignedAmount(day.pnl)}
                   </p>
                   <p className={`text-xs tabular-nums ${pnlClass(day.returnRate)}`}>
                     {signedRate(day.returnRate)}

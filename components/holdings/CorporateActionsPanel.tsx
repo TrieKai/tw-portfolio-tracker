@@ -1,10 +1,9 @@
 "use client";
 
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { useMemo, useState, type FormEvent } from "react";
 import { corporateActionLabel } from "@/lib/client/corporate-actions-api";
 import {
-  formatCurrency,
-  formatQuotePrice,
 } from "@/lib/portfolio/calculations";
 import {
   groupHoldingsWithMetrics,
@@ -63,18 +62,18 @@ function formatMultiplier(value: number): string {
   return value.toFixed(4).replace(/\.?0+$/, "");
 }
 
-function eventDescription(event: CorporateActionEvent): string {
+function eventDescription(event: CorporateActionEvent, formatAmount: (value: number) => string, formatQuoteAmount: (value: number, assetType: "stock") => string): string {
   const parts: string[] = [];
   if (event.stockDividendRatio > 0) {
     parts.push(`股票股利 ${formatRatio(event.stockDividendRatio)}`);
   }
   if (event.cashDividend !== undefined && event.cashDividend > 0) {
-    parts.push(`現金股利 ${formatCurrency(event.cashDividend)}/股`);
+    parts.push(`現金股利 ${formatAmount(event.cashDividend)}/股`);
   }
   if (event.subscriptionRatio > 0) {
     const price =
       event.subscriptionPrice !== undefined
-        ? `，認購價 ${formatQuotePrice(event.subscriptionPrice, "stock")}`
+        ? `，認購價 ${formatQuoteAmount(event.subscriptionPrice, "stock")}`
         : "";
     parts.push(`現金增資配股率 ${formatRatio(event.subscriptionRatio)}${price}`);
   }
@@ -170,6 +169,7 @@ function todayIso(): string {
 }
 
 export function CorporateActionsPanel() {
+  const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
   const {
     holdings,
     corporateActionStatus,
@@ -467,12 +467,12 @@ export function CorporateActionsPanel() {
             <p className="mt-3 text-sm text-muted tabular-nums">
               預覽：{formatMultiplier(selectedGroup.quantity)} 股 →{" "}
               {formatMultiplier(preview.quantityAfter)} 股，均價{" "}
-              {formatQuotePrice(selectedGroup.avgBuyPrice, "stock")} →{" "}
+              {formatQuoteAmount(selectedGroup.avgBuyPrice, "stock")} →{" "}
               {previewBuyPrice !== null
-                ? formatQuotePrice(previewBuyPrice, "stock")
+                ? formatQuoteAmount(previewBuyPrice, "stock")
                 : "-"}
-              ，成本 {formatCurrency(preview.totalCostBefore)} →{" "}
-              {formatCurrency(preview.totalCostAfter)}
+              ，成本 {formatAmount(preview.totalCostBefore)} →{" "}
+              {formatAmount(preview.totalCostAfter)}
               {selectedGroup.lots.length > 1 ? `（套用至 ${selectedGroup.lots.length} 筆買入）` : ""}
             </p>
           )}
@@ -520,9 +520,9 @@ export function CorporateActionsPanel() {
                     </p>
                     <p className="mt-1 text-sm text-muted tabular-nums">
                       {row.previousDate}{" "}
-                      {formatQuotePrice(row.previousPrice, "stock")} →{" "}
+                      {formatQuoteAmount(row.previousPrice, "stock")} →{" "}
                       {row.currentDate}{" "}
-                      {formatQuotePrice(row.currentPrice, "stock")}，下跌{" "}
+                      {formatQuoteAmount(row.currentPrice, "stock")}，下跌{" "}
                       {formatRatio(row.dropRate)}
                     </p>
                     <p className="mt-1 text-xs text-muted tabular-nums">
@@ -575,13 +575,13 @@ export function CorporateActionsPanel() {
                       {corporateActionLabel(event)}
                     </p>
                     <p className="mt-1 text-sm text-muted">
-                      {event.effectiveDate} · {eventDescription(event)}
+                      {event.effectiveDate} · {eventDescription(event, formatAmount, formatQuoteAmount)}
                     </p>
                     {lot && (
                       <p className="mt-1 text-xs text-muted tabular-nums">
                         {group?.lots.length ?? events.length} 筆買入 · 合計{" "}
                         {formatMultiplier(group?.quantity ?? lot.quantity)} 股 · 均價{" "}
-                        {formatQuotePrice(group?.avgBuyPrice ?? lot.buyPrice, "stock")}
+                        {formatQuoteAmount(group?.avgBuyPrice ?? lot.buyPrice, "stock")}
                       </p>
                     )}
                     {event.note && (
@@ -636,8 +636,8 @@ export function CorporateActionsPanel() {
                 <p className="mt-1 text-xs text-muted tabular-nums">
                   {action.effectiveDate} · {formatMultiplier(action.quantityBefore)} 股 →{" "}
                   {formatMultiplier(action.quantityAfter)} 股，均價{" "}
-                  {formatQuotePrice(action.buyPriceBefore, "stock")} →{" "}
-                  {formatQuotePrice(action.buyPriceAfter, "stock")}
+                  {formatQuoteAmount(action.buyPriceBefore, "stock")} →{" "}
+                  {formatQuoteAmount(action.buyPriceAfter, "stock")}
                 </p>
               </li>
             ))}

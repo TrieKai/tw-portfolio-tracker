@@ -11,14 +11,17 @@ import {
 } from "react";
 import { useSession } from "next-auth/react";
 import { todayIsoDate } from "@/lib/date/iso-date";
+import { CloudMergeModal } from "@/components/auth/CloudMergeModal";
 import { CloudUploadPromptModal } from "@/components/auth/CloudUploadPromptModal";
 import {
+  clearUploadPromptDismissed,
   isUploadPromptDismissed,
   setUploadPromptDismissed,
 } from "@/lib/client/upload-prompt-storage";
 import {
   canImportHistory,
   fetchHistoryForHoldings,
+  type PriceHistoryRange,
 } from "@/lib/client/holding-history";
 import { fetchCorporateActions } from "@/lib/client/corporate-actions-api";
 import type { CorporateActionEvent } from "@/lib/corporate-actions/types";
@@ -33,7 +36,6 @@ import {
   pushCloudPortfolio,
 } from "@/lib/client/portfolio-sync-api";
 import type { ChartRange } from "@/lib/portfolio/chart-date-range";
-import { getChartRangeLabel } from "@/lib/portfolio/chart-date-range";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import { supportsAutoPriceUpdate } from "@/lib/portfolio/asset-labels";
 import {
@@ -57,12 +59,12 @@ import type { PortfolioImportMode } from "@/lib/storage/portfolio-export";
 import {
   defaultPortfolioStorage,
   hasPortfolioData,
+  normalizePortfolioStorage,
 } from "@/lib/storage/parse-portfolio";
 import {
   addCashDividend,
   addHolding,
   applyCorporateAction,
-  applyImportedPriceHistory,
   applyManualCorporateAction,
   applyManualCorporateActionToGroup,
   applyPriceUpdate,
@@ -75,6 +77,7 @@ import {
   updateHolding,
   updateSettings,
 } from "@/lib/storage/portfolio-store";
+import { applyHistoryResults, applyQuoteResults, hasUnchangedQuote, isSamePriceTarget } from "@/lib/storage/portfolio-price-results";
 import {
   addLoan as addLoanToStorage,
   editLoan as editLoanInStorage,
@@ -113,8 +116,10 @@ import type {
   UiTheme,
 } from "@/lib/types/ui-preferences";
 
+import type { CloudPortfolioEnvelope } from "@/lib/types/portfolio-sync";
+
 type UpdateStatus = "idle" | "loading" | "partial" | "done" | "error";
-export type StorageMode = "anonymous" | "cloud";
+export type StorageMode = "anonymous" | "local" | "cloud";
 export type SyncStatus = "idle" | "syncing" | "synced" | "error";
 export type CorporateActionStatus = UpdateStatus;
 
@@ -146,6 +151,12 @@ function preserveNewerUiPreferences(
   };
 }
 
+function comparablePortfolio(portfolio: PortfolioStorage): string {
+  const normalized = normalizePortfolioStorage(portfolio) ?? portfolio;
+  const settings = { ...normalized.settings, theme: undefined, uiPreferences: undefined };
+  return JSON.stringify({ ...normalized, settings });
+}
+
 interface PortfolioContextValue {
   ready: boolean;
   storageMode: StorageMode;
@@ -166,6 +177,8 @@ interface PortfolioContextValue {
   corporateActionStatus: CorporateActionStatus;
   corporateActionMessage: string | null;
   pendingCorporateActions: CorporateActionEvent[];
+  latestAddedHoldingId: string | null;
+  dismissAddedHolding: () => void;
   add: (
     input: CreateHoldingInput,
     options?: { initialPrice?: number; initialPriceDate?: string }
@@ -198,7 +211,7 @@ interface PortfolioContextValue {
     groupKey: string,
     input: Omit<ManualCorporateActionInput, "holdingId">
   ) => void;
-  refreshPortfolioForRange: (range: ChartRange) => Promise<{
+  refreshPortfolioForRange: (range: PriceHistoryRange) => Promise<{
     ok: boolean;
     message?: string;
     error?: string;
@@ -206,11 +219,11 @@ interface PortfolioContextValue {
   importPriceHistory: (
     groupKey: string,
     range: ChartRange
-  ) => Promise<{ ok: boolean; count?: number; error?: string }>;
+  ) => Promise<{ ok: boolean; count?: number; startDate?: string; endDate?: string; error?: string }>;
   importFundHistory: (
     groupKey: string,
     range: ChartRange
-  ) => Promise<{ ok: boolean; count?: number; error?: string }>;
+  ) => Promise<{ ok: boolean; count?: number; startDate?: string; endDate?: string; error?: string }>;
   setAutoUpdate: (enabled: boolean) => void;
   setExposureSettings: (
     patch: Pick<PortfolioSettings, "netAssets">
@@ -227,12 +240,18 @@ interface PortfolioContextValue {
   refreshFromCloud: () => Promise<boolean>;
 }
 
+type CloudChoice = { version: string | null; remote: PortfolioStorage | null };
+
+interface CloudSyncQueue {
+  version: string | null;
+  pending: PortfolioStorage | null;
+  inFlight: boolean;
+}
+
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
 
 export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status: authStatus } = useSession();
-  const isAuthenticated =
-    authStatus === "authenticated" && !!session?.user?.id;
 
   const [storage, setStorageState] = useState<PortfolioStorage | null>(null);
   const storageRef = useRef<PortfolioStorage | null>(null);
@@ -253,165 +272,159 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const [detectedCorporateActions, setDetectedCorporateActions] = useState<
     CorporateActionEvent[]
   >([]);
-  const [uploadPrompt, setUploadPrompt] = useState<PortfolioStorage | null>(
-    null
-  );
+  const [cloudChoice, setCloudChoice] = useState<CloudChoice | null>(null);
+  const [latestAddedHoldingId, setLatestAddedHoldingId] = useState<string | null>(null);
+  const dismissAddedHolding = useCallback(() => setLatestAddedHoldingId(null), []);
+  const [initializedAccount, setInitializedAccount] = useState<string | null>(null);
 
-  const sessionUserId = session?.user?.id;
-  const cloudUpdatedAtRef = useRef<string | undefined>(undefined);
-  const cloudSyncInFlightRef = useRef(false);
-  const cloudSyncPendingRef = useRef<PortfolioStorage | null>(null);
+  const sessionUserId = authStatus === "authenticated" ? session?.user?.id : undefined;
+  const account = sessionUserId ?? "";
+  const cloudQueueRef = useRef<CloudSyncQueue | null>(null);
+  const cloudReadRef = useRef<symbol | null>(null);
   const initGenerationRef = useRef(0);
+  const priceBatchRef = useRef<symbol | null>(null);
+  const priceGenerationRef = useRef(0);
+  const invalidatePriceRequests = useCallback(() => {
+    priceGenerationRef.current++;
+    priceBatchRef.current = null;
+    setBatchStatus("idle");
+    setBatchMessage(null);
+  }, []);
 
-  const flushCloudSync = useCallback(async (next: PortfolioStorage) => {
+  const pushCloudSync = useCallback(async (next: PortfolioStorage) => {
+    const queue = cloudQueueRef.current;
+    if (!queue) return;
+    queue.pending = next;
+    if (queue.inFlight) return;
+
+    queue.inFlight = true;
     setSyncStatus("syncing");
     setSyncMessage(null);
-    const res = await pushCloudPortfolio(next, cloudUpdatedAtRef.current);
-    if (res.ok) {
-      cloudUpdatedAtRef.current = res.updatedAt;
-      setSyncStatus("synced");
-      return;
-    }
-    if (res.status === 409 && res.remote) {
-      cloudUpdatedAtRef.current = res.remote.updatedAt;
-      const reconciled = preserveNewerUiPreferences(
-        res.remote.portfolio,
-        next
-      );
-      setStorage(reconciled);
-      savePortfolio(reconciled);
-      if (reconciled !== res.remote.portfolio) {
-        cloudSyncPendingRef.current = reconciled;
-      }
-      setSyncStatus("synced");
-      setSyncMessage(
-        reconciled === res.remote.portfolio
-          ? "已套用雲端較新版本"
-          : "已合併新版面設定，正在同步至雲端"
-      );
-      return;
-    }
-    setSyncStatus("error");
-    setSyncMessage(res.error);
-  }, [setStorage]);
+    try {
+      while (queue.pending && cloudQueueRef.current === queue) {
+        const pending = queue.pending;
+        queue.pending = null;
+        const result = await pushCloudPortfolio(pending, queue.version);
+        if (cloudQueueRef.current !== queue) return;
 
-  /** 登入後每次變更立即寫入雲端；若前一次尚在進行中則排隊最新一份 */
-  const pushCloudSync = useCallback(
-    async (next: PortfolioStorage) => {
-      if (cloudSyncInFlightRef.current) {
-        cloudSyncPendingRef.current = next;
+        if (result.ok) {
+          queue.version = result.updatedAt;
+          continue;
+        }
+        if (result.status === 409) {
+          // 偵測到別台裝置的寫入時，保留本機最新變更並讓使用者選擇版本。
+          cloudQueueRef.current = null;
+          setStorageMode("local");
+          setSyncStatus("idle");
+          setSyncMessage("發現另一份雲端資料，請選擇要使用的版本。");
+          setCloudChoice({
+            version: result.remote?.updatedAt ?? null,
+            remote: result.remote?.portfolio ?? null,
+          });
+        } else {
+          setSyncStatus("error");
+          setSyncMessage(result.error);
+        }
         return;
       }
-      cloudSyncInFlightRef.current = true;
-      try {
-        await flushCloudSync(next);
-      } finally {
-        cloudSyncInFlightRef.current = false;
-        const pending = cloudSyncPendingRef.current;
-        cloudSyncPendingRef.current = null;
-        if (pending) void pushCloudSync(pending);
-      }
-    },
-    [flushCloudSync]
-  );
+      if (cloudQueueRef.current === queue) setSyncStatus("synced");
+    } finally {
+      queue.inFlight = false;
+    }
+  }, []);
 
   const applyStorage = useCallback(
     (next: PortfolioStorage, options?: { skipCloud?: boolean }) => {
       setStorage(next);
       savePortfolio(next);
-      if (isAuthenticated && !options?.skipCloud) {
-        void pushCloudSync(next);
-      }
+      if (!options?.skipCloud) void pushCloudSync(next);
     },
-    [isAuthenticated, pushCloudSync, setStorage]
+    [pushCloudSync, setStorage]
   );
 
-  const uploadToCloud = useCallback(async (next: PortfolioStorage) => {
-    setSyncStatus("syncing");
-    const res = await pushCloudPortfolio(next);
-    if (res.ok) {
-      cloudUpdatedAtRef.current = res.updatedAt;
-      setSyncStatus("synced");
-      setSyncMessage(null);
-      return true;
-    }
-    setSyncStatus("error");
-    setSyncMessage(res.error);
-    return false;
-  }, []);
-
-  const initCloudStorage = useCallback(async () => {
-    const generation = ++initGenerationRef.current;
-    setSyncStatus("syncing");
-    setSyncMessage("正在載入雲端資料…");
-
-    const local = loadPortfolio();
-    const res = await fetchCloudPortfolio();
-
-    if (generation !== initGenerationRef.current) return;
-
-    if (!res.ok) {
-      setStorageMode("cloud");
-      setStorage(local);
-      setSyncStatus("error");
-      setSyncMessage(
-        res.code === "KV_NOT_CONFIGURED"
-          ? `${res.error}（此環境無法跨裝置同步，可用 JSON 匯出／匯入）`
-          : res.error
-      );
-      return;
-    }
-
+  const connectCloud = useCallback((version: string | null) => {
+    cloudQueueRef.current = { version, pending: null, inFlight: false };
     setStorageMode("cloud");
-    const cloud = res.data?.portfolio;
-    const cloudUpdatedAt = res.data?.updatedAt;
-    cloudUpdatedAtRef.current = cloudUpdatedAt;
-
-    if (!cloud || !hasPortfolioData(cloud)) {
-      setStorage(local);
-      savePortfolio(local);
-      if (
-        hasPortfolioData(local) &&
-        sessionUserId &&
-        !isUploadPromptDismissed(sessionUserId)
-      ) {
-        setUploadPrompt(local);
-      }
-      setSyncMessage(null);
-      setSyncStatus("synced");
-      return;
-    }
-
-    setUploadPrompt(null);
-    const repairedCloud = repairCorporateActionPriceHistory(cloud);
-    const reconciled = preserveNewerUiPreferences(repairedCloud, local);
-    setStorage(reconciled);
-    savePortfolio(reconciled);
-    if (repairedCloud !== cloud || reconciled !== repairedCloud) {
-      void pushCloudSync(reconciled);
-    }
     setSyncStatus("synced");
     setSyncMessage(null);
-  }, [pushCloudSync, sessionUserId, setStorage]);
+    setCloudChoice(null);
+  }, []);
+
+  const loadCloudChoice = useCallback((remote: CloudPortfolioEnvelope | null, local: PortfolioStorage) => {
+    const version = remote?.updatedAt ?? null;
+    if (!remote || !hasPortfolioData(remote.portfolio)) {
+      if (hasPortfolioData(local)) {
+        setStorageMode("local");
+        setCloudChoice({ version, remote: null });
+        setSyncStatus("idle");
+        setSyncMessage("本機已有資料，請確認是否開始同步。");
+      } else {
+        connectCloud(version);
+        setSyncMessage("雲端同步已開啟");
+      }
+      return;
+    }
+
+    const sameData = comparablePortfolio(local) === comparablePortfolio(remote.portfolio);
+    if (hasPortfolioData(local) && !sameData) {
+      setStorageMode("local");
+      setCloudChoice({ version, remote: remote.portfolio });
+      setSyncStatus("idle");
+      setSyncMessage("本機與雲端資料不同，請選擇要使用的版本。");
+      return;
+    }
+
+    const repaired = repairCorporateActionPriceHistory(remote.portfolio);
+    const reconciled = preserveNewerUiPreferences(repaired, local);
+    if (!sameData) invalidatePriceRequests();
+    applyStorage(reconciled, { skipCloud: true });
+    connectCloud(version);
+    if (reconciled !== remote.portfolio) void pushCloudSync(reconciled);
+  }, [applyStorage, connectCloud, invalidatePriceRequests, pushCloudSync]);
 
   useEffect(() => {
     if (authStatus === "loading") return;
+    const generation = ++initGenerationRef.current;
+    cloudQueueRef.current = null;
+    cloudReadRef.current = null;
+    invalidatePriceRequests();
+    setCloudChoice(null);
+    setLatestAddedHoldingId(null);
+    const local = loadPortfolio();
+    setStorage(local);
+    setSyncMessage(null);
 
-    initGenerationRef.current += 1;
+    const cleanup = () => {
+      initGenerationRef.current++;
+      priceGenerationRef.current++;
+      priceBatchRef.current = null;
+      cloudQueueRef.current = null;
+      cloudReadRef.current = null;
+    };
 
-    if (!isAuthenticated) {
-      setStorageMode("anonymous");
-      setStorage(loadPortfolio());
+    if (!sessionUserId || isUploadPromptDismissed(sessionUserId)) {
+      setStorageMode(sessionUserId ? "local" : "anonymous");
       setSyncStatus("idle");
-      setSyncMessage(null);
-      setUploadPrompt(null);
-      cloudUpdatedAtRef.current = undefined;
-      return;
+      setInitializedAccount(account);
+      return cleanup;
     }
 
-    setStorageMode("cloud");
-    void initCloudStorage();
-  }, [authStatus, isAuthenticated, session?.user?.id, initCloudStorage, setStorage]);
+    setStorageMode("local");
+    setSyncStatus("syncing");
+    void (async () => {
+      const result = await fetchCloudPortfolio();
+      if (generation !== initGenerationRef.current) return;
+      if (result.ok) {
+        loadCloudChoice(result.data, local);
+      } else {
+        setSyncStatus("error");
+        setSyncMessage(result.error);
+      }
+      setInitializedAccount(account);
+    })();
+
+    return cleanup;
+  }, [account, authStatus, invalidatePriceRequests, loadCloudChoice, sessionUserId, setStorage]);
 
   const persist = useCallback(
     (next: PortfolioStorage) => {
@@ -530,6 +543,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         );
       }
       persist(next);
+      setLatestAddedHoldingId(created?.id ?? null);
       return created?.id ?? null;
     },
     [persist]
@@ -537,88 +551,98 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const edit = useCallback(
     (input: EditHoldingInput) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(editHolding(storage, input));
     },
-    [storage, persist]
+    [persist]
   );
 
   const sell = useCallback(
     (input: SellHoldingInput | SellHoldingInput[]) => {
+      const storage = storageRef.current;
       if (!storage) return;
       const inputs = Array.isArray(input) ? input : [input];
       persist(sellHoldings(storage, inputs));
     },
-    [storage, persist]
+    [persist]
   );
 
   const addDividend = useCallback(
     (input: CashDividendInput) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(addCashDividend(storage, input));
     },
-    [storage, persist]
+    [persist]
   );
 
   const remove = useCallback(
     (id: string) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(removeHolding(storage, id));
     },
-    [storage, persist]
+    [persist]
   );
 
   const addLoan = useCallback(
     (input: CreateLoanInput): string | null => {
+      const storage = storageRef.current;
       if (!storage) return null;
       const next = addLoanToStorage(storage, input);
       const created = next.loans[next.loans.length - 1];
       persist(next);
       return created?.id ?? null;
     },
-    [storage, persist]
+    [persist]
   );
 
   const editLoan = useCallback(
     (input: EditLoanInput) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(editLoanInStorage(storage, input));
     },
-    [storage, persist]
+    [persist]
   );
 
   const updateLoanBalance = useCallback(
     (id: string, balance: number, effectiveDate: string) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(
         recordLoanBalanceInStorage(storage, id, balance, effectiveDate)
       );
     },
-    [storage, persist]
+    [persist]
   );
 
   const recordLoanPayment = useCallback(
     (id: string, input: CreateLoanPaymentInput) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(recordLoanPaymentInStorage(storage, id, input));
     },
-    [storage, persist]
+    [persist]
   );
 
   const recordLoanRateChange = useCallback(
     (id: string, input: CreateLoanRateChangeInput) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(recordLoanRateChangeInStorage(storage, id, input));
     },
-    [storage, persist]
+    [persist]
   );
 
   const setLoanStatus = useCallback(
     (id: string, status: LoanStatus, effectiveDate: string) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(setLoanStatusInStorage(storage, id, status, effectiveDate));
     },
-    [storage, persist]
+    [persist]
   );
 
   const setManualPrice = useCallback(
@@ -635,7 +659,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       // 新增後會立即查價，必須讀取最新存檔，即使 React 還沒重新渲染。
       const holding = storageRef.current?.holdings.find((h) => h.id === id);
       if (!holding || !supportsAutoPriceUpdate(holding.assetType)) return false;
-      const generation = initGenerationRef.current;
+      const generation = priceGenerationRef.current;
       let response;
       try {
         response = await fetchPriceUpdate(holdingToUpdateRequest(holding));
@@ -651,9 +675,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       const target = current?.holdings.find((h) => h.id === id);
       if (
         !current || !target ||
-        generation !== initGenerationRef.current ||
-        holdingGroupKey(target) !== holdingGroupKey(holding) ||
-        target.lastUpdatedAt !== holding.lastUpdatedAt
+        generation !== priceGenerationRef.current ||
+        !isSamePriceTarget(target, holding) ||
+        !hasUnchangedQuote(target, holding) ||
+        (!isPriceError(response) && target.priceDate && response.priceDate < target.priceDate)
       ) return false;
 
       if (isPriceError(response)) {
@@ -673,65 +698,99 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [persist]
   );
 
-  const updateAll = useCallback(async () => {
-    if (!storage || storage.holdings.length === 0) return;
+  const refreshPrices = useCallback(async (range?: PriceHistoryRange) => {
+    const initial = storageRef.current;
+    if (!initial?.holdings.length) return { ok: false, error: "尚無持倉" };
+    if (priceBatchRef.current) return { ok: false, error: "已有一項價格更新正在進行" };
 
-    const autoPriced = storage.holdings.filter((h) =>
-      supportsAutoPriceUpdate(h.assetType)
+    const refreshQuotes = typeof range !== "object";
+    const autoPriced = initial.holdings.filter((holding) => supportsAutoPriceUpdate(holding.assetType));
+    const historyTargets = initial.holdings.filter((holding) =>
+      typeof range !== "object" || holding.buyDate <= range.endDate
     );
-    if (autoPriced.length === 0) {
+    const importable = historyTargets.filter(canImportHistory);
+    if ((!refreshQuotes || autoPriced.length === 0) && (!range || importable.length === 0)) {
+      const message = range
+        ? "現有持倉沒有可自動補齊的歷史價格"
+        : "無可自動更新的持倉，房產可在持倉頁手動估價";
       setBatchStatus("done");
-      setBatchMessage("無可自動更新的持倉（房子需手動估價）");
-      return;
+      setBatchMessage(range ? null : message);
+      return { ok: false, error: message };
     }
 
+    const request = Symbol();
+    priceBatchRef.current = request;
+    const isCurrentRequest = () => priceBatchRef.current === request;
+    const replaced = { ok: false, error: "資料來源已變更，請重新更新" };
     setBatchStatus("loading");
     setBatchMessage(null);
 
-    try {
-      const batch = await fetchBatchPriceUpdate(storage.holdings);
-      let next = storage;
-      let okCount = 0;
+    let priceOk = 0;
+    let priceFail = 0;
+    let historyOk = 0;
+    let historyFail = 0;
+    let skipped = 0;
+    let quoteError: string | undefined;
+    let historyError: string | undefined;
 
-      for (const item of batch.results) {
-        if (item.ok && item.data) {
-          okCount++;
-          next = applyPriceUpdate(
-            next,
-            item.holdingId,
-            item.data.price,
-            item.data.priceDate,
-            "api",
-            { name: item.data.name, market: item.data.market, clearError: true }
-          );
-        } else {
-          next = updateHolding(next, item.holdingId, {
-            lastError: item.error ?? "更新失敗",
-          });
+    try {
+      if (refreshQuotes && autoPriced.length > 0) {
+        try {
+          const batch = await fetchBatchPriceUpdate(autoPriced);
+          if (!isCurrentRequest() || !storageRef.current) return replaced;
+          const result = applyQuoteResults(storageRef.current, autoPriced, batch.results);
+          priceOk = result.updated;
+          priceFail = result.failed;
+          skipped += result.skipped;
+          persist(updateSettings(result.next, { lastBatchUpdateAt: batch.updatedAt }));
+        } catch {
+          priceFail = autoPriced.length;
+          quoteError = "無法連線更新現價";
         }
       }
 
-      next = updateSettings(next, {
-        lastBatchUpdateAt: batch.updatedAt,
-      });
-      persist(next);
-
-      const failCount = batch.results.length - okCount;
-      if (failCount === 0) {
-        setBatchStatus("done");
-        setBatchMessage(`已更新 ${okCount} 筆持倉`);
-      } else if (okCount > 0) {
-        setBatchStatus("partial");
-        setBatchMessage(`成功 ${okCount} 筆，失敗 ${failCount} 筆`);
-      } else {
-        setBatchStatus("error");
-        setBatchMessage("全部更新失敗，請稍後重試或手動輸入");
+      if (!isCurrentRequest()) return replaced;
+      if (range && importable.length > 0) {
+        // 現價與歷史查詢都可能使用 TWSE，間隔查詢可降低限流。
+        if (refreshQuotes && autoPriced.length > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (!isCurrentRequest()) return replaced;
+        const results = await fetchHistoryForHoldings(importable, range);
+        if (!isCurrentRequest() || !storageRef.current) return replaced;
+        const result = applyHistoryResults(storageRef.current, importable, results);
+        historyOk = result.updated;
+        historyFail = result.failed;
+        skipped += result.skipped;
+        historyError = result.error;
+        if (result.next !== storageRef.current) persist(result.next);
       }
+
+      const parts: string[] = [];
+      if (priceOk > 0) parts.push(`現價已更新 ${priceOk} 筆`);
+      if (priceFail > 0) parts.push(quoteError ?? `現價失敗 ${priceFail} 筆`);
+      if (historyOk > 0) parts.push(`歷史已載入 ${historyOk} 筆持倉`);
+      if (historyFail > 0) parts.push(`歷史失敗 ${historyFail} 筆`);
+      if (range && historyTargets.length > importable.length) parts.push("部分持倉使用既有價格歷史");
+      if (skipped > 0) parts.push(`略過 ${skipped} 筆已變更或已有較新價格的持倉`);
+      const ok = priceOk > 0 || historyOk > 0;
+      const message = parts.join("。") || "無可更新項目";
+      const detail = !ok && historyError ? `${message}。${historyError}` : message;
+      setBatchStatus(ok ? (priceFail || historyFail || skipped ? "partial" : "done") : "error");
+      if (!range) setBatchMessage(detail);
+      return ok ? { ok: true, message: detail } : { ok: false, error: detail };
     } catch {
+      if (!isCurrentRequest()) return replaced;
+      const error = "無法完成價格更新，已保存先前成功的變更。請稍後重試。";
       setBatchStatus("error");
-      setBatchMessage("網路錯誤，無法連線至更新 API");
+      if (!range) setBatchMessage(error);
+      return { ok: false, error };
+    } finally {
+      if (isCurrentRequest()) priceBatchRef.current = null;
     }
-  }, [storage, persist]);
+  }, [persist]);
+
+  const updateAll = useCallback(async () => {
+    await refreshPrices();
+  }, [refreshPrices]);
 
   const scanCorporateActions = useCallback(async () => {
     if (!storage) return;
@@ -803,38 +862,43 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const setAutoUpdate = useCallback(
     (enabled: boolean) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(updateSettings(storage, { autoUpdateEnabled: enabled }));
     },
-    [storage, persist]
+    [persist]
   );
 
   const setExposureSettings = useCallback(
     (patch: Pick<PortfolioSettings, "netAssets">) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(updateSettings(storage, patch));
     },
-    [storage, persist]
+    [persist]
   );
 
   const setAllocationTargets = useCallback(
     (allocationTargets: AssetAllocationTargets) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(updateSettings(storage, { allocationTargets }));
     },
-    [storage, persist]
+    [persist]
   );
 
   const setThemePreference = useCallback(
     (theme: UiTheme) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(updateSettings(storage, { theme }));
     },
-    [storage, persist]
+    [persist]
   );
 
   const applyUiPreferences = useCallback(
     (theme: UiTheme, preferences: UiPreferences) => {
+      const storage = storageRef.current;
       if (!storage) return;
       persist(
         updateSettings(storage, {
@@ -846,219 +910,105 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         })
       );
     },
-    [storage, persist]
+    [persist]
   );
 
-  const importPriceHistory = useCallback(
-    async (
-      groupKey: string,
-      range: ChartRange
-    ): Promise<{ ok: boolean; count?: number; error?: string }> => {
-      if (!storage) return { ok: false, error: "尚未載入資料" };
-      const groupLots = storage.holdings.filter(
-        (h) => holdingGroupKey(h) === groupKey
-      );
-      if (groupLots.length === 0) return { ok: false, error: "找不到持倉" };
+  const importPriceHistory = useCallback(async (groupKey: string, range: ChartRange) => {
+    const initial = storageRef.current;
+    if (!initial) return { ok: false, error: "尚未載入資料" };
+    const requested = initial.holdings.filter(
+      (holding) => holdingGroupKey(holding) === groupKey && canImportHistory(holding)
+    );
+    if (!requested.length) return { ok: false, error: "此標的無法自動載入歷史價格" };
 
-      try {
-        const results = await fetchHistoryForHoldings(groupLots, range);
-        let next = storage;
-        let count = 0;
-        let okAny = false;
-        let lastError: string | undefined;
+    const generation = priceGenerationRef.current;
+    const results = await fetchHistoryForHoldings(requested, range);
+    const current = storageRef.current;
+    if (!current || generation !== priceGenerationRef.current) {
+      return { ok: false, error: "資料來源已變更，請重新載入" };
+    }
 
-        for (const result of results) {
-          if (result.ok) {
-            next = applyImportedPriceHistory(
-              next,
-              result.holdingId,
-              result.points
-            );
-            count = result.points.length;
-            okAny = true;
-          } else {
-            next = updateHolding(next, result.holdingId, {
-              lastError: result.error,
-            });
-            lastError = result.error;
-          }
-        }
+    const result = applyHistoryResults(current, requested, results);
+    if (result.next !== current) persist(result.next);
+    if (!result.updated) return { ok: false, error: result.error ?? "持倉已變更，請重新選擇標的" };
+    return {
+      ok: true,
+      count: result.dates.length,
+      startDate: result.dates[0],
+      endDate: result.dates.at(-1),
+    };
+  }, [persist]);
 
-        persist(next);
-        if (okAny) return { ok: true, count };
-        return { ok: false, error: lastError ?? "載入歷史失敗" };
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "載入歷史失敗";
-        let next = storage;
-        for (const h of groupLots) {
-          next = updateHolding(next, h.id, { lastError: message });
-        }
-        persist(next);
-        return { ok: false, error: message };
-      }
-    },
-    [storage, persist]
-  );
-
-  const refreshPortfolioForRange = useCallback(
-    async (
-      range: ChartRange
-    ): Promise<{ ok: boolean; message?: string; error?: string }> => {
-      if (!storage || storage.holdings.length === 0) {
-        return { ok: false, error: "尚無持倉" };
-      }
-
-      const rangeLabel = getChartRangeLabel(range);
-      setBatchStatus("loading");
-      setBatchMessage("正在更新全部現價…");
-
-      let next = storage;
-      let priceOk = 0;
-      let priceFail = 0;
-
-      try {
-        const batch = await fetchBatchPriceUpdate(next.holdings);
-        for (const item of batch.results) {
-          if (item.ok && item.data) {
-            priceOk++;
-            next = applyPriceUpdate(
-              next,
-              item.holdingId,
-              item.data.price,
-              item.data.priceDate,
-              "api",
-              { name: item.data.name, clearError: true }
-            );
-          } else {
-            priceFail++;
-            next = updateHolding(next, item.holdingId, {
-              lastError: item.error ?? "更新失敗",
-            });
-          }
-        }
-      } catch {
-        setBatchStatus("error");
-        setBatchMessage("更新現價失敗，請檢查網路");
-        return { ok: false, error: "更新現價失敗" };
-      }
-
-      // 現價批次更新與歷史股價皆打 TWSE，稍候再載入歷史以降低限流
-      await new Promise((r) => setTimeout(r, 1500));
-
-      setBatchMessage(`正在載入「${rangeLabel}」歷史資料…`);
-
-      let historyOk = 0;
-      let historyFail = 0;
-      let historySkip = 0;
-
-      const importable = next.holdings.filter(canImportHistory);
-      historySkip = next.holdings.length - importable.length;
-
-      const historyResults = await fetchHistoryForHoldings(importable, range);
-      for (const result of historyResults) {
-        if (result.ok) {
-          next = applyImportedPriceHistory(next, result.holdingId, result.points);
-          historyOk++;
-        } else {
-          next = updateHolding(next, result.holdingId, {
-            lastError: result.error,
-          });
-          historyFail++;
-        }
-      }
-
-      next = updateSettings(next, {
-        lastBatchUpdateAt: new Date().toISOString(),
-      });
-      persist(next);
-
-      const parts: string[] = [];
-      if (priceOk > 0) parts.push(`現價已更新 ${priceOk} 筆`);
-      if (priceFail > 0) parts.push(`現價失敗 ${priceFail} 筆`);
-      if (historyOk > 0) {
-        parts.push(`${rangeLabel}歷史已載入 ${historyOk} 筆`);
-      }
-      if (historyFail > 0) parts.push(`歷史失敗 ${historyFail} 筆`);
-      if (historySkip > 0) parts.push(`略過上櫃 ${historySkip} 筆`);
-
-      const message = parts.join("；") || "無可更新項目";
-      const ok = priceOk > 0 || historyOk > 0;
-
-      if (!ok) {
-        setBatchStatus("error");
-        setBatchMessage(message);
-        return { ok: false, error: message };
-      }
-
-      setBatchStatus(
-        priceFail > 0 || historyFail > 0 ? "partial" : "done"
-      );
-      setBatchMessage(message);
-      return { ok: true, message };
-    },
-    [storage, persist]
-  );
+  const refreshPortfolioForRange = refreshPrices;
 
   const importFundHistory = importPriceHistory;
 
   const importPortfolio = useCallback(
     (incoming: PortfolioStorage, mode: PortfolioImportMode) => {
-      if (!storage) return;
-      const next = applyImportMode(storage, incoming, mode);
-      persist(next);
+      const current = storageRef.current;
+      if (!current) return;
+      if (mode === "replace") invalidatePriceRequests();
+      persist(applyImportMode(current, incoming, mode));
     },
-    [storage, persist]
+    [invalidatePriceRequests, persist]
   );
 
   const refreshFromCloud = useCallback(async (): Promise<boolean> => {
-    if (!isAuthenticated) {
-      setSyncMessage("請先登入 Google");
-      setSyncStatus("error");
-      return false;
-    }
+    if (!sessionUserId || initializedAccount !== account ||
+        cloudQueueRef.current?.inFlight || cloudReadRef.current) return false;
 
+    const generation = initGenerationRef.current;
+    const request = Symbol();
+    cloudReadRef.current = request;
+    cloudQueueRef.current = null;
+    setStorageMode("local");
     setSyncStatus("syncing");
-    setSyncMessage("正在從雲端載入…");
-    const res = await fetchCloudPortfolio();
-
-    if (!res.ok) {
+    setSyncMessage("正在讀取雲端版本…");
+    const result = await fetchCloudPortfolio();
+    if (cloudReadRef.current === request) cloudReadRef.current = null;
+    const local = storageRef.current;
+    if (!local || generation !== initGenerationRef.current) return false;
+    if (!result.ok) {
       setSyncStatus("error");
-      setSyncMessage(res.error);
+      setSyncMessage(result.error);
       return false;
     }
 
-    const cloud = res.data?.portfolio;
-    if (!cloud || !hasPortfolioData(cloud)) {
-      setSyncStatus("error");
-      setSyncMessage("雲端尚無投資組合資料");
-      return false;
-    }
-
-    cloudUpdatedAtRef.current = res.data?.updatedAt;
-    setStorageMode("cloud");
-    applyStorage(cloud, { skipCloud: true });
-    setSyncStatus("synced");
-    setSyncMessage("已從雲端載入最新資料");
+    loadCloudChoice(result.data, local);
+    if (cloudQueueRef.current) clearUploadPromptDismissed(sessionUserId);
     return true;
-  }, [isAuthenticated, applyStorage]);
+  }, [account, initializedAccount, loadCloudChoice, sessionUserId]);
 
-  const handleUploadPromptConfirm = useCallback(async () => {
-    if (!uploadPrompt) return;
-    const data = uploadPrompt;
-    setUploadPrompt(null);
-    applyStorage(data, { skipCloud: true });
-    await uploadToCloud(data);
-  }, [uploadPrompt, uploadToCloud, applyStorage]);
-
-  const handleUploadPromptDismiss = useCallback(() => {
+  const keepLocalOnly = useCallback(() => {
     if (sessionUserId) setUploadPromptDismissed(sessionUserId);
-    setUploadPrompt(null);
+    cloudQueueRef.current = null;
+    setCloudChoice(null);
+    setStorageMode("local");
+    setSyncStatus("idle");
+    setSyncMessage("目前只存本機");
   }, [sessionUserId]);
+
+  const useLocalForSync = useCallback(() => {
+    if (!cloudChoice || !sessionUserId || !storageRef.current) return;
+    clearUploadPromptDismissed(sessionUserId);
+    connectCloud(cloudChoice.version);
+    void pushCloudSync(storageRef.current);
+  }, [cloudChoice, connectCloud, pushCloudSync, sessionUserId]);
+
+  const useRemoteForSync = useCallback(() => {
+    if (!cloudChoice?.remote || !sessionUserId || !storageRef.current) return;
+    const repaired = repairCorporateActionPriceHistory(cloudChoice.remote);
+    const next = preserveNewerUiPreferences(repaired, storageRef.current);
+    invalidatePriceRequests();
+    applyStorage(next, { skipCloud: true });
+    clearUploadPromptDismissed(sessionUserId);
+    connectCloud(cloudChoice.version);
+    if (next !== cloudChoice.remote) void pushCloudSync(next);
+  }, [applyStorage, cloudChoice, connectCloud, invalidatePriceRequests, pushCloudSync, sessionUserId]);
 
   const value = useMemo(
     () => ({
-      ready: storage !== null && authStatus !== "loading",
+      ready: storage !== null && authStatus !== "loading" && initializedAccount === account,
       storageMode,
       syncStatus,
       syncMessage,
@@ -1080,6 +1030,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       corporateActionStatus,
       corporateActionMessage,
       pendingCorporateActions,
+      latestAddedHoldingId,
+      dismissAddedHolding,
       add,
       edit,
       sell,
@@ -1112,6 +1064,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [
       storage,
       authStatus,
+      initializedAccount,
+      account,
       storageMode,
       syncStatus,
       syncMessage,
@@ -1129,6 +1083,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       corporateActionStatus,
       corporateActionMessage,
       pendingCorporateActions,
+      latestAddedHoldingId,
+      dismissAddedHolding,
       add,
       edit,
       sell,
@@ -1162,13 +1118,21 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <PortfolioContext.Provider value={value}>
-      {uploadPrompt && (
-        <CloudUploadPromptModal
-          local={uploadPrompt}
-          onUpload={() => void handleUploadPromptConfirm()}
-          onKeepLocalOnly={handleUploadPromptDismiss}
+      {cloudChoice?.remote && storage ? (
+        <CloudMergeModal
+          local={storage}
+          cloud={cloudChoice.remote}
+          onChooseLocal={useLocalForSync}
+          onChooseCloud={useRemoteForSync}
+          onDismiss={keepLocalOnly}
         />
-      )}
+      ) : cloudChoice && storage ? (
+        <CloudUploadPromptModal
+          local={storage}
+          onUpload={useLocalForSync}
+          onKeepLocalOnly={keepLocalOnly}
+        />
+      ) : null}
       {children}
     </PortfolioContext.Provider>
   );

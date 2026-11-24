@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
+import { type FormEvent, useMemo, useState } from "react";
 import { LoanFormModal } from "@/components/loans/LoanFormModal";
 import { LoanBalanceModal } from "@/components/loans/LoanBalanceModal";
 import { LoanPaymentModal } from "@/components/loans/LoanPaymentModal";
@@ -8,7 +9,10 @@ import { LoanRateModal } from "@/components/loans/LoanRateModal";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { todayIsoDate } from "@/lib/date/iso-date";
+import { DatePicker } from "@/components/ui/DatePicker";
+import { ErrorAlert } from "@/components/ui/ErrorAlert";
+import { Modal } from "@/components/ui/Modal";
+import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot } from "@/lib/loans/calculations";
 import {
   calculateLoanCollateralValuation,
@@ -23,7 +27,6 @@ import {
   LOAN_TYPE_LABELS,
   REPAYMENT_METHOD_LABELS,
 } from "@/lib/loans/labels";
-import { formatCurrency } from "@/lib/portfolio/calculations";
 import type {
   CreateLoanInput,
   Loan,
@@ -33,6 +36,7 @@ import type {
 import { usePortfolio } from "@/providers/PortfolioProvider";
 
 export function LoanManager() {
+  const { formatAmount } = useAmountPrivacy();
   const {
     ready,
     loans,
@@ -51,6 +55,7 @@ export function LoanManager() {
   const [balanceLoan, setBalanceLoan] = useState<Loan | null>(null);
   const [paymentLoan, setPaymentLoan] = useState<Loan | null>(null);
   const [rateLoan, setRateLoan] = useState<Loan | null>(null);
+  const [closingLoan, setClosingLoan] = useState<Loan | null>(null);
   const today = todayIsoDate();
   const snapshots = useMemo(
     () => loans.map((loan) => calculateLoanSnapshot(loan, today)),
@@ -95,12 +100,12 @@ export function LoanManager() {
 
       {loans.length > 0 && <section className="metric-grid-container" aria-label="貸款摘要">
         <div className="metric-grid">
-        <Metric label="貸款總額" value={formatCurrency(loanSummary.totalDebt)} />
-        <Metric label="投資用途本金" value={formatCurrency(loanSummary.investmentDebt)} />
-        <Metric label="本月融資成本" value={formatCurrency(loanSummary.monthlyInvestmentFinancingCost)} />
+        <Metric label="貸款總額" value={formatAmount(loanSummary.totalDebt)} />
+        <Metric label="投資用途本金" value={formatAmount(loanSummary.investmentDebt)} />
+        <Metric label="本月融資成本" value={formatAmount(loanSummary.monthlyInvestmentFinancingCost)} />
         <Metric
           label="近期應繳"
-          value={loanSummary.nextPaymentDate ? formatCurrency(loanSummary.nextPaymentAmount) : "—"}
+          value={loanSummary.nextPaymentDate ? formatAmount(loanSummary.nextPaymentAmount) : "—"}
           sub={loanSummary.nextPaymentDate ?? "尚無還款預估"}
         />
         </div>
@@ -119,11 +124,21 @@ export function LoanManager() {
             <span className="rounded-full bg-surface-raised px-2.5 py-1 text-xs text-muted">{loanReminders.length} 項</span>
           </div>
           <div className="space-y-2">
-            {loanReminders.map((reminder) => (
-              <div key={reminder.id} className={`rounded-lg border p-3 text-sm ${reminder.severity === "critical" ? "border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-300" : reminder.severity === "warning" ? "border-amber-400/40 bg-amber-400/10 text-amber-700 dark:text-amber-300" : "border-border bg-surface-raised text-muted"}`}>
-                <span className="font-medium">{reminder.loanName}</span><span className="mx-2">·</span><span>{reminder.message}</span>
-              </div>
-            ))}
+            {loanReminders.map((reminder) => {
+              const loan = activeSnapshots.find((snapshot) => snapshot.loan.id === reminder.loanId)?.loan;
+              return (
+                <div key={reminder.id} className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${reminder.severity === "critical" ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300" : reminder.severity === "warning" ? "border-amber-400/40 bg-amber-400/10 text-amber-700 dark:text-amber-300" : "border-border bg-surface-raised text-muted"}`}>
+                  <p><span className="font-medium">{reminder.loanName}</span> · {reminder.message}{reminder.amount !== undefined && ` ${formatAmount(reminder.amount)}`}</p>
+                  {loan && (reminder.kind === "payment_due" ? (
+                    <button type="button" className="btn-secondary" onClick={() => setPaymentLoan(loan)}>
+                      記錄繳款
+                    </button>
+                  ) : (
+                    <a href={`#loan-${loan.id}`} className="btn-secondary">查看貸款</a>
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </section>
       ) : null}
@@ -164,7 +179,7 @@ export function LoanManager() {
                 onRecordPayment={() => setPaymentLoan(snapshot.loan)}
                 onRecordRate={() => setRateLoan(snapshot.loan)}
                 onUpdateBalance={hasFlexibleCredit(snapshot.loan) ? () => setBalanceLoan(snapshot.loan) : undefined}
-                onPaidOff={() => setLoanStatus(snapshot.loan.id, "paid_off", today)}
+                onPaidOff={() => setClosingLoan(snapshot.loan)}
               />
             ))}
           </div>
@@ -230,7 +245,67 @@ export function LoanManager() {
           onClose={() => setRateLoan(null)}
         />
       ) : null}
+      {closingLoan && (
+        <LoanClosureModal
+          loan={closingLoan}
+          onClose={() => setClosingLoan(null)}
+          onSave={(date) => {
+            setLoanStatus(closingLoan.id, "paid_off", date);
+            setClosingLoan(null);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function LoanClosureModal({
+  loan,
+  onClose,
+  onSave,
+}: {
+  loan: Loan;
+  onClose: () => void;
+  onSave: (date: string) => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const today = todayIsoDate();
+  const earliest = [
+    loan.trackingStartDate,
+    ...(loan.paymentHistory ?? []).map((payment) => payment.paymentDate),
+    ...(loan.balanceHistory ?? []).map((balance) => balance.effectiveDate),
+  ].reduce((latest, date) => (date <= today && date > latest ? date : latest), loan.trackingStartDate);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const date = String(new FormData(event.currentTarget).get("closedAt") ?? "");
+    if (!parseIsoDate(date) || date < earliest || date > today) {
+      setError("清償日須介於最後一筆本金或繳款紀錄與今天之間。");
+      return;
+    }
+    onSave(date);
+  }
+
+  return (
+    <Modal labelledBy="loan-closure-title" onClose={onClose}>
+      <form onSubmit={submit} className="glass-card w-full max-w-md space-y-4 rounded-b-none p-5 sm:rounded-2xl">
+        <div>
+          <h2 id="loan-closure-title" className="text-lg font-semibold">確認貸款清償</h2>
+          <p className="mt-1 break-words text-sm text-muted">
+            {loan.name} 將移至已清償紀錄。清償日起停止計入未償本金與後續利息。
+          </p>
+        </div>
+        <label className="block text-sm font-medium">
+          清償生效日
+          <DatePicker name="closedAt" defaultValue={today} min={earliest} max={today} required className="mt-1.5" />
+        </label>
+        {error && <ErrorAlert message={error} />}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary">取消</button>
+          <button type="submit" className="btn-primary">確認清償</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -255,13 +330,14 @@ function LoanCard({
   onRecordPayment?: () => void;
   onRecordRate?: () => void;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   const { loan } = snapshot;
   const flexibleCredit = hasFlexibleCredit(loan);
   const futureSchedule = loan.status === "active"
     ? snapshot.schedule.filter((row) => row.paymentDate > todayIsoDate())
     : [];
   return (
-    <article className="glass-card p-4 sm:p-5">
+    <article id={`loan-${loan.id}`} className="glass-card p-4 sm:p-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -281,26 +357,26 @@ function LoanCard({
           {onRecordRate ? <button type="button" className="btn-secondary text-sm" onClick={onRecordRate}>利率異動</button> : null}
           {onUpdateBalance ? <button type="button" className="btn-secondary text-sm" onClick={onUpdateBalance}>更新餘額</button> : null}
           <button type="button" className="btn-secondary text-sm" onClick={onEdit}>更正資料</button>
-          {onPaidOff ? <button type="button" className="btn-secondary text-sm" onClick={onPaidOff}>標記已清償</button> : null}
+          {onPaidOff ? <button type="button" className="btn-secondary text-sm" onClick={onPaidOff}>標記已清償…</button> : null}
           {onReopen ? <button type="button" className="btn-secondary text-sm" onClick={onReopen}>恢復追蹤</button> : null}
         </div>
       </div>
 
       <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <Stat label="目前本金" value={formatCurrency(snapshot.currentPrincipal)} />
+        <Stat label="目前本金" value={formatAmount(snapshot.currentPrincipal)} />
         <Stat label="目前年利率" value={`${snapshot.currentAnnualInterestRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`} />
         <Stat label="實質年利率" value={snapshot.effectiveAprPercent === null ? "—" : `${snapshot.effectiveAprPercent.toFixed(2)}%`} sub={snapshot.effectiveAprPercent === null ? "未來利率或現金流不固定" : "含開辦費的年化估算"} />
-        <Stat label="下次應繳" value={snapshot.nextPayment ? formatCurrency(snapshot.nextPayment.payment) : "—"} sub={snapshot.nextPayment?.paymentDate} />
+        <Stat label="下次應繳" value={snapshot.nextPayment ? formatAmount(snapshot.nextPayment.payment) : "—"} sub={snapshot.nextPayment?.paymentDate} />
         <Stat
           label={flexibleCredit ? "契約額度" : "預估剩餘利息"}
           value={
             flexibleCredit
               ? loan.creditLimit === undefined
                 ? "—"
-                : formatCurrency(loan.creditLimit)
+                : formatAmount(loan.creditLimit)
               : snapshot.projectedInterest === null
                 ? "—"
-                : formatCurrency(snapshot.projectedInterest)
+                : formatAmount(snapshot.projectedInterest)
           }
         />
       </dl>
@@ -326,7 +402,7 @@ function LoanCard({
               <tbody>
                 {futureSchedule.map((row) => (
                   <tr key={row.installment} className="border-t border-border/60">
-                    <td className="px-3 py-2">{row.installment}</td><td className="px-3 py-2">{row.paymentDate}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.principal)}</td><td className="px-3 py-2 text-right tabular-nums">{formatCurrency(row.interest)}</td><td className="px-3 py-2 text-right font-medium tabular-nums">{formatCurrency(row.payment)}</td><td className="px-3 py-2 text-right tabular-nums text-muted">{formatCurrency(row.remainingPrincipal)}</td>
+                    <td className="px-3 py-2">{row.installment}</td><td className="px-3 py-2">{row.paymentDate}</td><td className="px-3 py-2 text-right tabular-nums">{formatAmount(row.principal)}</td><td className="px-3 py-2 text-right tabular-nums">{formatAmount(row.interest)}</td><td className="px-3 py-2 text-right font-medium tabular-nums">{formatAmount(row.payment)}</td><td className="px-3 py-2 text-right tabular-nums text-muted">{formatAmount(row.remainingPrincipal)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -370,16 +446,17 @@ function FlexibleCreditDetails({
   loan: Loan;
   risk: LoanCollateralValuation;
 }) {
+  const { formatAmount } = useAmountPrivacy();
   const secured = hasCollateralRisk(loan);
   return (
     <div className="mt-5 space-y-3 border-t border-border pt-4">
       <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {secured ? <Stat label="擔保品市值" value={formatCurrency(risk.collateralMarketValue)} /> : null}
+        {secured ? <Stat label="擔保品市值" value={formatAmount(risk.collateralMarketValue)} /> : null}
         {secured ? <Stat label="目前維持率" value={risk.maintenanceRatioPercent === null ? "—" : `${risk.maintenanceRatioPercent.toFixed(1)}%`} /> : null}
         {secured ? <Stat label="距警示可跌" value={risk.warningBufferPercent === null ? "—" : `${risk.warningBufferPercent.toFixed(1)}%`} /> : null}
         {secured ? <Stat label="距追繳可跌" value={risk.callBufferPercent === null ? "—" : `${risk.callBufferPercent.toFixed(1)}%`} /> : null}
         {loan.creditLimit !== undefined ? <Stat label="額度使用率" value={risk.creditUtilizationPercent === null ? "—" : `${risk.creditUtilizationPercent.toFixed(1)}%`} /> : null}
-        {loan.creditLimit !== undefined ? <Stat label="尚可動用" value={risk.availableCredit === null ? "—" : formatCurrency(risk.availableCredit)} /> : null}
+        {loan.creditLimit !== undefined ? <Stat label="尚可動用" value={risk.availableCredit === null ? "—" : formatAmount(risk.availableCredit)} /> : null}
         {loan.maturityDate ? <Stat label="契約到期日" value={loan.maturityDate} sub={risk.daysToMaturity === null ? undefined : risk.daysToMaturity < 0 ? `已逾期 ${Math.abs(risk.daysToMaturity)} 天` : `剩餘 ${risk.daysToMaturity} 天`} /> : null}
       </dl>
       {risk.missingPositionCount > 0 ? <p className="rounded-lg bg-amber-400/10 p-3 text-xs text-amber-700 dark:text-amber-300">有 {risk.missingPositionCount} 筆擔保品缺價、遺失或數量超過追蹤持倉，目前維持率不可作為完整判斷。</p> : null}
@@ -390,6 +467,7 @@ function FlexibleCreditDetails({
 }
 
 function LoanHistoryDetails({ loan }: { loan: Loan }) {
+  const { formatAmount } = useAmountPrivacy();
   const payments = [...(loan.paymentHistory ?? [])].sort(
     (a, b) =>
       b.paymentDate.localeCompare(a.paymentDate) ||
@@ -414,9 +492,9 @@ function LoanHistoryDetails({ loan }: { loan: Loan }) {
               const reconciled = !!payment.interestPeriodStartDate && !!payment.interestPeriodEndDate;
               return (
                 <div key={payment.id} className="rounded-lg bg-surface-raised p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{payment.paymentDate}</span><span className="tabular-nums">實付 {formatCurrency(cashOutflow)}</span></div>
-                  <p className="mt-1 text-xs text-muted">本金 {formatCurrency(payment.principalPaid)} · 利息 {formatCurrency(payment.interestPaid)} · 費用 {formatCurrency(payment.feePaid)}{payment.subsidyReceived > 0 ? ` · 補貼 ${formatCurrency(payment.subsidyReceived)}` : ""}</p>
-                  <p className={`mt-1 text-xs ${reconciled ? "text-emerald-600 dark:text-emerald-300" : payment.interestPaid > 0 ? "text-amber-600 dark:text-amber-300" : "text-muted"}`}>{reconciled ? `已對帳 ${payment.interestPeriodStartDate}～${payment.interestPeriodEndDate}` : payment.interestPaid > 0 ? "尚未指定計息期間，損益仍採估算" : "本次無利息對帳"}{payment.remainingPrincipalAfter !== undefined ? ` · 餘額 ${formatCurrency(payment.remainingPrincipalAfter)}` : ""}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{payment.paymentDate}</span><span className="tabular-nums">實付 {formatAmount(cashOutflow)}</span></div>
+                  <p className="mt-1 text-xs text-muted">本金 {formatAmount(payment.principalPaid)} · 利息 {formatAmount(payment.interestPaid)} · 費用 {formatAmount(payment.feePaid)}{payment.subsidyReceived > 0 ? ` · 補貼 ${formatAmount(payment.subsidyReceived)}` : ""}</p>
+                  <p className={`mt-1 text-xs ${reconciled ? "text-emerald-600 dark:text-emerald-300" : payment.interestPaid > 0 ? "text-amber-600 dark:text-amber-300" : "text-muted"}`}>{reconciled ? `已對帳 ${payment.interestPeriodStartDate}～${payment.interestPeriodEndDate}` : payment.interestPaid > 0 ? "尚未指定計息期間，損益仍採估算" : "本次無利息對帳"}{payment.remainingPrincipalAfter !== undefined ? ` · 餘額 ${formatAmount(payment.remainingPrincipalAfter)}` : ""}</p>
                 </div>
               );
             })}
