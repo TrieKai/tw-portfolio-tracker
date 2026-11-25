@@ -272,7 +272,7 @@ export function CorporateActionsPanel() {
     setShowManualForm(true);
   }
 
-  function handleManualSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleManualSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!form.groupKey) {
       setFormError("請選擇標的");
@@ -297,13 +297,17 @@ export function CorporateActionsPanel() {
       setFormError("請輸入有效生效日");
       return;
     }
-    applyManualActionToGroup(form.groupKey, {
+    const saved = await applyManualActionToGroup(form.groupKey, {
       actionType: form.actionType,
       effectiveDate: form.effectiveDate,
       adjustmentRatio: parsedAdjustmentRatio,
       cashReturnPerShare: parsedCashReturnPerShare,
       note: form.note,
     });
+    if (!saved) {
+      setFormError("未能儲存公司行動，請確認持倉與瀏覽器儲存空間後重試。");
+      return;
+    }
     setShowManualForm(false);
     setFormError(null);
   }

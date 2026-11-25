@@ -24,9 +24,10 @@ export function EditHoldingModal({
   onClose,
 }: {
   holding: HoldingWithMetrics;
-  onSave: (input: EditHoldingInput) => void;
+  onSave: (input: EditHoldingInput, original: HoldingWithMetrics) => Promise<boolean>;
   onClose: () => void;
 }) {
+  const [original] = useState(holding);
   const [symbol, setSymbol] = useState(holding.symbol);
   const [propertyName, setPropertyName] = useState(holding.name);
   const [resolvedName, setResolvedName] = useState(holding.name);
@@ -41,6 +42,7 @@ export function EditHoldingModal({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     setError(null);
 
     const price = Number.parseFloat(buyPrice);
@@ -69,7 +71,8 @@ export function EditHoldingModal({
       return;
     }
     if (isProperty) {
-      onSave({
+      setSubmitting(true);
+      const saved = await onSave({
         id: holding.id,
         assetType: "property",
         name: propertyName.trim(),
@@ -77,7 +80,9 @@ export function EditHoldingModal({
         buyPrice: price,
         quantity: qty,
         buyDate,
-      });
+      }, original);
+      setSubmitting(false);
+      if (!saved) setError("未能儲存。若持倉已在其他分頁變更，請關閉表單後重新編輯。");
       return;
     }
 
@@ -85,14 +90,13 @@ export function EditHoldingModal({
 
     const lookup = await resolveInstrumentName(holding.assetType, symbol);
 
-    setSubmitting(false);
-
     if (!lookup.ok) {
+      setSubmitting(false);
       setError(lookup.error);
       return;
     }
 
-    onSave({
+    const saved = await onSave({
       id: holding.id,
       assetType: holding.assetType,
       name: lookup.name,
@@ -101,7 +105,9 @@ export function EditHoldingModal({
       buyPrice: price,
       quantity: qty,
       buyDate,
-    });
+    }, original);
+    setSubmitting(false);
+    if (!saved) setError("未能儲存。若持倉已在其他分頁變更，請關閉表單後重新編輯。");
   }
 
   return (
@@ -206,7 +212,7 @@ export function EditHoldingModal({
           />
         </Field>
 
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        {error && <p role="alert" className="text-sm text-rose-500">{error}</p>}
 
         <div className="flex justify-end gap-2 pt-2">
           <button

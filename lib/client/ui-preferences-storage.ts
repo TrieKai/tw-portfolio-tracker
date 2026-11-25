@@ -46,6 +46,10 @@ export function saveStoredUiAppearance(
   appearance: StoredUiAppearance
 ): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(UI_PREFERENCES_STORAGE_KEY, JSON.stringify(appearance));
+  try {
+    localStorage.setItem(UI_PREFERENCES_STORAGE_KEY, JSON.stringify(appearance));
+  } catch {
+    // 外觀已保存到投資組合，獨立快照寫入失敗仍可從投資組合載入。
+  }
 }
 

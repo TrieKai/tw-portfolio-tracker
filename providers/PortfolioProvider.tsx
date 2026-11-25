@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useSession } from "next-auth/react";
 import { todayIsoDate } from "@/lib/date/iso-date";
+import { PORTFOLIO_STORAGE_KEY } from "@/lib/portfolio/constants";
 import { CloudMergeModal } from "@/components/auth/CloudMergeModal";
 import { CloudUploadPromptModal } from "@/components/auth/CloudUploadPromptModal";
 import {
@@ -68,12 +69,13 @@ import {
   applyManualCorporateAction,
   applyManualCorporateActionToGroup,
   applyPriceUpdate,
+  commitPortfolio,
   editHolding,
   loadPortfolio,
   removeHolding,
   repairCorporateActionPriceHistory,
   sellHoldings,
-  savePortfolio,
+  UnreadablePortfolioError,
   updateHolding,
   updateSettings,
 } from "@/lib/storage/portfolio-store";
@@ -84,6 +86,7 @@ import {
   recordLoanBalance as recordLoanBalanceInStorage,
   recordLoanPayment as recordLoanPaymentInStorage,
   recordLoanRateChange as recordLoanRateChangeInStorage,
+  restartLoan,
   setLoanStatus as setLoanStatusInStorage,
 } from "@/lib/storage/loan-store";
 import type {
@@ -182,35 +185,35 @@ interface PortfolioContextValue {
   add: (
     input: CreateHoldingInput,
     options?: { initialPrice?: number; initialPriceDate?: string }
-  ) => string | null;
-  edit: (input: EditHoldingInput) => void;
-  sell: (input: SellHoldingInput | SellHoldingInput[]) => void;
-  addDividend: (input: CashDividendInput) => void;
-  remove: (id: string) => void;
-  addLoan: (input: CreateLoanInput) => string | null;
-  editLoan: (input: EditLoanInput) => void;
+  ) => Promise<string | null>;
+  edit: (input: EditHoldingInput, original: Holding) => Promise<boolean>;
+  sell: (input: SellHoldingInput | SellHoldingInput[]) => Promise<boolean>;
+  addDividend: (input: CashDividendInput) => Promise<boolean>;
+  remove: (id: string) => Promise<boolean>;
+  addLoan: (input: CreateLoanInput, restartFromId?: string) => Promise<string | null>;
+  editLoan: (input: EditLoanInput) => Promise<boolean>;
   updateLoanBalance: (
     id: string,
     balance: number,
     effectiveDate: string
-  ) => void;
-  recordLoanPayment: (id: string, input: CreateLoanPaymentInput) => void;
-  recordLoanRateChange: (id: string, input: CreateLoanRateChangeInput) => void;
+  ) => Promise<boolean>;
+  recordLoanPayment: (id: string, input: CreateLoanPaymentInput) => Promise<boolean>;
+  recordLoanRateChange: (id: string, input: CreateLoanRateChangeInput) => Promise<boolean>;
   setLoanStatus: (
     id: string,
     status: LoanStatus,
     effectiveDate: string
-  ) => void;
-  setManualPrice: (id: string, price: number, priceDate: string) => void;
+  ) => Promise<boolean>;
+  setManualPrice: (id: string, price: number, priceDate: string) => Promise<boolean>;
   updateOne: (id: string) => Promise<boolean>;
   updateAll: () => Promise<void>;
   scanCorporateActions: () => Promise<void>;
-  applyDetectedCorporateAction: (event: CorporateActionEvent) => void;
-  applyManualAction: (input: ManualCorporateActionInput) => void;
+  applyDetectedCorporateAction: (event: CorporateActionEvent) => Promise<boolean>;
+  applyManualAction: (input: ManualCorporateActionInput) => Promise<boolean>;
   applyManualActionToGroup: (
     groupKey: string,
     input: Omit<ManualCorporateActionInput, "holdingId">
-  ) => void;
+  ) => Promise<boolean>;
   refreshPortfolioForRange: (range: PriceHistoryRange) => Promise<{
     ok: boolean;
     message?: string;
@@ -224,18 +227,18 @@ interface PortfolioContextValue {
     groupKey: string,
     range: ChartRange
   ) => Promise<{ ok: boolean; count?: number; startDate?: string; endDate?: string; error?: string }>;
-  setAutoUpdate: (enabled: boolean) => void;
+  setAutoUpdate: (enabled: boolean) => Promise<boolean>;
   setExposureSettings: (
     patch: Pick<PortfolioSettings, "netAssets">
-  ) => void;
-  setAllocationTargets: (targets: AssetAllocationTargets) => void;
-  setThemePreference: (theme: UiTheme) => void;
-  applyUiPreferences: (theme: UiTheme, preferences: UiPreferences) => void;
+  ) => Promise<boolean>;
+  setAllocationTargets: (targets: AssetAllocationTargets) => Promise<boolean>;
+  setThemePreference: (theme: UiTheme) => Promise<boolean>;
+  applyUiPreferences: (theme: UiTheme, preferences: UiPreferences) => Promise<boolean>;
   /** 從 JSON 備份匯入（取代或合併） */
   importPortfolio: (
     incoming: PortfolioStorage,
     mode: PortfolioImportMode
-  ) => void;
+  ) => Promise<boolean>;
   /** 強制從雲端重新載入（新裝置／同步異常時使用） */
   refreshFromCloud: () => Promise<boolean>;
 }
@@ -249,6 +252,7 @@ interface CloudSyncQueue {
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
+const EMPTY_LOANS: Loan[] = [];
 
 export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status: authStatus } = useSession();
@@ -260,6 +264,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     setStorageState(next);
   }, []);
   const [storageMode, setStorageMode] = useState<StorageMode>("anonymous");
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<UpdateStatus>("idle");
@@ -302,6 +307,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     setSyncMessage(null);
     try {
       while (queue.pending && cloudQueueRef.current === queue) {
+        if (sessionUserId && isUploadPromptDismissed(sessionUserId)) return;
         const pending = queue.pending;
         queue.pending = null;
         const result = await pushCloudPortfolio(pending, queue.version);
@@ -331,13 +337,37 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     } finally {
       queue.inFlight = false;
     }
-  }, []);
+  }, [sessionUserId]);
 
   const applyStorage = useCallback(
-    (next: PortfolioStorage, options?: { skipCloud?: boolean }) => {
-      setStorage(next);
-      savePortfolio(next);
-      if (!options?.skipCloud) void pushCloudSync(next);
+    async (
+      update: (latest: PortfolioStorage) => PortfolioStorage | null,
+      options?: {
+        skipCloud?: boolean;
+        onSaved?: (saved: PortfolioStorage) => void;
+        overwriteUnreadable?: boolean;
+      }
+    ) => {
+      const generation = initGenerationRef.current;
+      try {
+        return await commitPortfolio(
+          (latest) => generation === initGenerationRef.current ? update(latest) : null,
+          (saved) => {
+            setStorage(saved);
+            setStorageError(null);
+            options?.onSaved?.(saved);
+            if (!options?.skipCloud) void pushCloudSync(saved);
+          },
+          options?.overwriteUnreadable
+        );
+      } catch (error) {
+        if (generation === initGenerationRef.current) {
+          setStorageError(error instanceof UnreadablePortfolioError
+            ? "無法讀取本機資料。可到持倉頁的資料備份，用 JSON 備份取代資料。"
+            : "這次變更未儲存。請確認瀏覽器允許儲存，並釋出空間後重試。");
+        }
+        return false;
+      }
     },
     [pushCloudSync, setStorage]
   );
@@ -350,37 +380,70 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     setCloudChoice(null);
   }, []);
 
-  const loadCloudChoice = useCallback((remote: CloudPortfolioEnvelope | null, local: PortfolioStorage) => {
+  const loadCloudChoice = useCallback(async (remote: CloudPortfolioEnvelope | null) => {
     const version = remote?.updatedAt ?? null;
-    if (!remote || !hasPortfolioData(remote.portfolio)) {
-      if (hasPortfolioData(local)) {
+    let needsChoice = false;
+    const saved = await applyStorage((local) => {
+      if (!remote || !hasPortfolioData(remote.portfolio)) {
+        if (!hasPortfolioData(local)) return local;
+        needsChoice = true;
         setStorageMode("local");
         setCloudChoice({ version, remote: null });
         setSyncStatus("idle");
         setSyncMessage("本機已有資料，請確認是否開始同步。");
-      } else {
-        connectCloud(version);
-        setSyncMessage("雲端同步已開啟");
+        return null;
       }
-      return;
-    }
 
-    const sameData = comparablePortfolio(local) === comparablePortfolio(remote.portfolio);
-    if (hasPortfolioData(local) && !sameData) {
-      setStorageMode("local");
-      setCloudChoice({ version, remote: remote.portfolio });
-      setSyncStatus("idle");
-      setSyncMessage("本機與雲端資料不同，請選擇要使用的版本。");
-      return;
-    }
+      const sameData = comparablePortfolio(local) === comparablePortfolio(remote.portfolio);
+      if (hasPortfolioData(local) && !sameData) {
+        needsChoice = true;
+        setStorageMode("local");
+        setCloudChoice({ version, remote: remote.portfolio });
+        setSyncStatus("idle");
+        setSyncMessage("本機與雲端資料不同，請選擇要使用的版本。");
+        return null;
+      }
 
-    const repaired = repairCorporateActionPriceHistory(remote.portfolio);
-    const reconciled = preserveNewerUiPreferences(repaired, local);
-    if (!sameData) invalidatePriceRequests();
-    applyStorage(reconciled, { skipCloud: true });
-    connectCloud(version);
-    if (reconciled !== remote.portfolio) void pushCloudSync(reconciled);
-  }, [applyStorage, connectCloud, invalidatePriceRequests, pushCloudSync]);
+      if (!sameData) invalidatePriceRequests();
+      return preserveNewerUiPreferences(repairCorporateActionPriceHistory(remote.portfolio), local);
+    }, {
+      skipCloud: true,
+      onSaved: (saved) => {
+        connectCloud(version);
+        if (sessionUserId) clearUploadPromptDismissed(sessionUserId);
+        if (remote && hasPortfolioData(remote.portfolio) && saved !== remote.portfolio) {
+          void pushCloudSync(saved);
+        }
+      },
+    });
+    return saved || needsChoice;
+  }, [applyStorage, connectCloud, invalidatePriceRequests, pushCloudSync, sessionUserId]);
+
+  const readLocalPortfolio = useCallback(() => {
+    try {
+      setStorage(loadPortfolio());
+      setStorageError(null);
+    } catch {
+      if (!storageRef.current) setStorage(defaultPortfolioStorage());
+      setStorageError("無法讀取本機資料。請確認瀏覽器允許存取，或從備份復原。");
+    }
+  }, [setStorage]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage) return;
+      if (event.key === PORTFOLIO_STORAGE_KEY || event.key === null) readLocalPortfolio();
+      if (sessionUserId && isUploadPromptDismissed(sessionUserId)) {
+        cloudQueueRef.current = null;
+        setCloudChoice(null);
+        setStorageMode("local");
+        setSyncStatus("idle");
+        setSyncMessage("目前只存本機");
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [readLocalPortfolio, sessionUserId]);
 
   useEffect(() => {
     if (authStatus === "loading") return;
@@ -390,8 +453,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     invalidatePriceRequests();
     setCloudChoice(null);
     setLatestAddedHoldingId(null);
-    const local = loadPortfolio();
-    setStorage(local);
+    readLocalPortfolio();
     setSyncMessage(null);
 
     const cleanup = () => {
@@ -414,22 +476,31 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       const result = await fetchCloudPortfolio();
       if (generation !== initGenerationRef.current) return;
+      if (isUploadPromptDismissed(sessionUserId)) {
+        setInitializedAccount(account);
+        return;
+      }
       if (result.ok) {
-        loadCloudChoice(result.data, local);
+        if (!(await loadCloudChoice(result.data)) && generation === initGenerationRef.current) {
+          setSyncStatus("error");
+          setSyncMessage("請先確認本機資料可讀寫，再啟用雲端同步。");
+        }
       } else {
         setSyncStatus("error");
         setSyncMessage(result.error);
       }
-      setInitializedAccount(account);
+      if (generation === initGenerationRef.current) setInitializedAccount(account);
     })();
 
     return cleanup;
-  }, [account, authStatus, invalidatePriceRequests, loadCloudChoice, sessionUserId, setStorage]);
+  }, [account, authStatus, invalidatePriceRequests, loadCloudChoice, readLocalPortfolio, sessionUserId]);
 
   const persist = useCallback(
-    (next: PortfolioStorage) => {
-      applyStorage(next);
-    },
+    (update: (latest: PortfolioStorage) => PortfolioStorage | null) =>
+      applyStorage((latest) => {
+        const next = update(latest);
+        return next !== latest ? next : null;
+      }),
     [applyStorage]
   );
 
@@ -452,7 +523,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [holdings, storage?.sales, storage?.holdings, storage?.priceHistory]
   );
 
-  const loans = storage?.loans ?? [];
+  const loans = storage?.loans ?? EMPTY_LOANS;
   const grossInvestmentPnl = useMemo(
     () =>
       holdings
@@ -517,140 +588,114 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   }, [detectedCorporateActions, storage?.corporateActions]);
 
   const add = useCallback(
-    (
+    async (
       input: CreateHoldingInput,
       options?: { initialPrice?: number; initialPriceDate?: string }
-    ): string | null => {
-      const storage = storageRef.current;
-      if (!storage) return null;
-      let next = addHolding(storage, input);
-      const created = next.holdings[next.holdings.length - 1];
-      const initialPrice = options?.initialPrice;
-      if (
-        created &&
-        initialPrice !== undefined &&
-        Number.isFinite(initialPrice) &&
-        initialPrice > 0
-      ) {
-        next = applyPriceUpdate(
+    ): Promise<string | null> => {
+      let createdId: string | null = null;
+      const saved = await persist((latest) => {
+        const next = addHolding(latest, input);
+        if (next === latest) return null;
+        const created = next.holdings.at(-1)!;
+        createdId = created.id;
+        const initialPrice = options?.initialPrice;
+        if (initialPrice === undefined || !Number.isFinite(initialPrice) || initialPrice <= 0) {
+          return next;
+        }
+        return applyPriceUpdate(
           next,
           created.id,
           initialPrice,
-          options?.initialPriceDate ??
-            new Date().toISOString().slice(0, 10),
+          options?.initialPriceDate ?? todayIsoDate(),
           "manual",
           { clearError: true }
         );
-      }
-      persist(next);
-      setLatestAddedHoldingId(created?.id ?? null);
-      return created?.id ?? null;
+      });
+      if (!saved) return null;
+      setLatestAddedHoldingId(createdId);
+      return createdId;
     },
     [persist]
   );
 
   const edit = useCallback(
-    (input: EditHoldingInput) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(editHolding(storage, input));
-    },
+    (input: EditHoldingInput, original: Holding) => persist((latest) => {
+      const current = latest.holdings.find((holding) => holding.id === input.id);
+      if (!current || !isSamePriceTarget(current, original) || current.quantity !== original.quantity ||
+        current.buyPrice !== original.buyPrice || current.buyDate !== original.buyDate) {
+        return null;
+      }
+      return editHolding(latest, input);
+    }),
     [persist]
   );
 
   const sell = useCallback(
-    (input: SellHoldingInput | SellHoldingInput[]) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      const inputs = Array.isArray(input) ? input : [input];
-      persist(sellHoldings(storage, inputs));
-    },
+    (input: SellHoldingInput | SellHoldingInput[]) =>
+      persist((latest) => sellHoldings(latest, Array.isArray(input) ? input : [input])),
     [persist]
   );
 
   const addDividend = useCallback(
-    (input: CashDividendInput) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(addCashDividend(storage, input));
-    },
+    (input: CashDividendInput) => persist((latest) => addCashDividend(latest, input)),
     [persist]
   );
 
   const remove = useCallback(
-    (id: string) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(removeHolding(storage, id));
-    },
+    (id: string) => persist((latest) => removeHolding(latest, id)),
     [persist]
   );
 
   const addLoan = useCallback(
-    (input: CreateLoanInput): string | null => {
-      const storage = storageRef.current;
-      if (!storage) return null;
-      const next = addLoanToStorage(storage, input);
-      const created = next.loans[next.loans.length - 1];
-      persist(next);
-      return created?.id ?? null;
+    async (input: CreateLoanInput, restartFromId?: string): Promise<string | null> => {
+      let createdId: string | null = null;
+      const saved = await persist((latest) => {
+        const next = restartFromId
+          ? restartLoan(latest, restartFromId, input)
+          : addLoanToStorage(latest, input);
+        if (next === latest) return null;
+        createdId = next.loans.at(-1)!.id;
+        return next;
+      });
+      return saved ? createdId : null;
     },
     [persist]
   );
 
   const editLoan = useCallback(
-    (input: EditLoanInput) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(editLoanInStorage(storage, input));
-    },
+    (input: EditLoanInput) => persist((latest) => editLoanInStorage(latest, input)),
     [persist]
   );
 
   const updateLoanBalance = useCallback(
-    (id: string, balance: number, effectiveDate: string) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(
-        recordLoanBalanceInStorage(storage, id, balance, effectiveDate)
-      );
-    },
+    (id: string, balance: number, effectiveDate: string) =>
+      persist((latest) => recordLoanBalanceInStorage(latest, id, balance, effectiveDate)),
     [persist]
   );
 
   const recordLoanPayment = useCallback(
-    (id: string, input: CreateLoanPaymentInput) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(recordLoanPaymentInStorage(storage, id, input));
-    },
+    (id: string, input: CreateLoanPaymentInput) =>
+      persist((latest) => recordLoanPaymentInStorage(latest, id, input)),
     [persist]
   );
 
   const recordLoanRateChange = useCallback(
-    (id: string, input: CreateLoanRateChangeInput) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(recordLoanRateChangeInStorage(storage, id, input));
-    },
+    (id: string, input: CreateLoanRateChangeInput) =>
+      persist((latest) => recordLoanRateChangeInStorage(latest, id, input)),
     [persist]
   );
 
   const setLoanStatus = useCallback(
-    (id: string, status: LoanStatus, effectiveDate: string) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(setLoanStatusInStorage(storage, id, status, effectiveDate));
-    },
+    (id: string, status: LoanStatus, effectiveDate: string) =>
+      persist((latest) => setLoanStatusInStorage(latest, id, status, effectiveDate)),
     [persist]
   );
 
   const setManualPrice = useCallback(
-    (id: string, price: number, priceDate: string) => {
-      const current = storageRef.current;
-      if (!current?.holdings.some((holding) => holding.id === id)) return;
-      persist(applyPriceUpdate(current, id, price, priceDate, "manual", { clearError: true }));
-    },
+    (id: string, price: number, priceDate: string) =>
+      persist((latest) => latest.holdings.some((holding) => holding.id === id)
+        ? applyPriceUpdate(latest, id, price, priceDate, "manual", { clearError: true })
+        : null),
     [persist]
   );
 
@@ -671,29 +716,23 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
-      const current = storageRef.current;
-      const target = current?.holdings.find((h) => h.id === id);
-      if (
-        !current || !target ||
-        generation !== priceGenerationRef.current ||
-        !isSamePriceTarget(target, holding) ||
-        !hasUnchangedQuote(target, holding) ||
-        (!isPriceError(response) && target.priceDate && response.priceDate < target.priceDate)
-      ) return false;
-
-      if (isPriceError(response)) {
-        persist(updateHolding(current, id, { lastError: response.error }));
-        return false;
-      }
-
-      persist(
-        applyPriceUpdate(current, id, response.price, response.priceDate, "api", {
+      const saved = await persist((latest) => {
+        const target = latest.holdings.find((h) => h.id === id);
+        if (
+          !target ||
+          generation !== priceGenerationRef.current ||
+          !isSamePriceTarget(target, holding) ||
+          !hasUnchangedQuote(target, holding) ||
+          (!isPriceError(response) && target.priceDate && response.priceDate < target.priceDate)
+        ) return null;
+        if (isPriceError(response)) return updateHolding(latest, id, { lastError: response.error });
+        return applyPriceUpdate(latest, id, response.price, response.priceDate, "api", {
           name: response.name,
           market: response.market,
           clearError: true,
-        })
-      );
-      return true;
+        });
+      });
+      return saved && !isPriceError(response);
     },
     [persist]
   );
@@ -737,12 +776,19 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       if (refreshQuotes && autoPriced.length > 0) {
         try {
           const batch = await fetchBatchPriceUpdate(autoPriced);
-          if (!isCurrentRequest() || !storageRef.current) return replaced;
-          const result = applyQuoteResults(storageRef.current, autoPriced, batch.results);
-          priceOk = result.updated;
-          priceFail = result.failed;
-          skipped += result.skipped;
-          persist(updateSettings(result.next, { lastBatchUpdateAt: batch.updatedAt }));
+          const saved = await persist((latest) => {
+            if (!isCurrentRequest()) return null;
+            const result = applyQuoteResults(latest, autoPriced, batch.results);
+            priceOk = result.updated;
+            priceFail = result.failed;
+            skipped += result.skipped;
+            return updateSettings(result.next, { lastBatchUpdateAt: batch.updatedAt });
+          });
+          if (!saved) {
+            priceOk = 0;
+            priceFail = autoPriced.length;
+            quoteError = "現價更新未儲存";
+          }
         } catch {
           priceFail = autoPriced.length;
           quoteError = "無法連線更新現價";
@@ -755,15 +801,23 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
         if (refreshQuotes && autoPriced.length > 0) await new Promise((resolve) => setTimeout(resolve, 1500));
         if (!isCurrentRequest()) return replaced;
         const results = await fetchHistoryForHoldings(importable, range);
-        if (!isCurrentRequest() || !storageRef.current) return replaced;
-        const result = applyHistoryResults(storageRef.current, importable, results);
-        historyOk = result.updated;
-        historyFail = result.failed;
-        skipped += result.skipped;
-        historyError = result.error;
-        if (result.next !== storageRef.current) persist(result.next);
+        const saved = await persist((latest) => {
+          if (!isCurrentRequest()) return null;
+          const result = applyHistoryResults(latest, importable, results);
+          historyOk = result.updated;
+          historyFail = result.failed;
+          skipped += result.skipped;
+          historyError = result.error;
+          return result.next;
+        });
+        if (!saved && historyOk > 0) {
+          historyOk = 0;
+          historyFail = importable.length;
+          historyError = "歷史價格未儲存";
+        }
       }
 
+      if (!isCurrentRequest()) return replaced;
       const parts: string[] = [];
       if (priceOk > 0) parts.push(`現價已更新 ${priceOk} 筆`);
       if (priceFail > 0) parts.push(quoteError ?? `現價失敗 ${priceFail} 筆`);
@@ -834,82 +888,60 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   }, [storage]);
 
   const applyDetectedCorporateAction = useCallback(
-    (event: CorporateActionEvent) => {
-      const current = storageRef.current;
-      if (current) persist(applyCorporateAction(current, event));
-      setCorporateActionMessage("已處理公司行動");
+    async (event: CorporateActionEvent) => {
+      const saved = await persist((latest) => applyCorporateAction(latest, event));
+      if (saved) setCorporateActionMessage("已處理公司行動");
+      return saved;
     },
     [persist]
   );
 
   const applyManualAction = useCallback(
-    (input: ManualCorporateActionInput) => {
-      const current = storageRef.current;
-      if (current) persist(applyManualCorporateAction(current, input));
-      setCorporateActionMessage("已套用手動公司行動調整");
+    async (input: ManualCorporateActionInput) => {
+      const saved = await persist((latest) => applyManualCorporateAction(latest, input));
+      if (saved) setCorporateActionMessage("已套用手動公司行動調整");
+      return saved;
     },
     [persist]
   );
 
   const applyManualActionToGroup = useCallback(
-    (groupKey: string, input: Omit<ManualCorporateActionInput, "holdingId">) => {
-      const current = storageRef.current;
-      if (current) persist(applyManualCorporateActionToGroup(current, groupKey, input));
-      setCorporateActionMessage("已套用手動公司行動調整");
+    async (groupKey: string, input: Omit<ManualCorporateActionInput, "holdingId">) => {
+      const saved = await persist((latest) => applyManualCorporateActionToGroup(latest, groupKey, input));
+      if (saved) setCorporateActionMessage("已套用手動公司行動調整");
+      return saved;
     },
     [persist]
   );
 
   const setAutoUpdate = useCallback(
-    (enabled: boolean) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(updateSettings(storage, { autoUpdateEnabled: enabled }));
-    },
+    (enabled: boolean) => persist((latest) => updateSettings(latest, { autoUpdateEnabled: enabled })),
     [persist]
   );
 
   const setExposureSettings = useCallback(
-    (patch: Pick<PortfolioSettings, "netAssets">) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(updateSettings(storage, patch));
-    },
+    (patch: Pick<PortfolioSettings, "netAssets">) => persist((latest) => updateSettings(latest, patch)),
     [persist]
   );
 
   const setAllocationTargets = useCallback(
-    (allocationTargets: AssetAllocationTargets) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(updateSettings(storage, { allocationTargets }));
-    },
+    (allocationTargets: AssetAllocationTargets) =>
+      persist((latest) => updateSettings(latest, { allocationTargets })),
     [persist]
   );
 
   const setThemePreference = useCallback(
-    (theme: UiTheme) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(updateSettings(storage, { theme }));
-    },
+    (theme: UiTheme) => persist((latest) => updateSettings(latest, { theme })),
     [persist]
   );
 
   const applyUiPreferences = useCallback(
-    (theme: UiTheme, preferences: UiPreferences) => {
-      const storage = storageRef.current;
-      if (!storage) return;
-      persist(
-        updateSettings(storage, {
-          theme,
-          uiPreferences: {
-            ...preferences,
-            updatedAt: preferences.updatedAt ?? new Date().toISOString(),
-          },
-        })
-      );
-    },
+    (theme: UiTheme, preferences: UiPreferences) =>
+      persist((latest) => {
+        const updatedAt = preferences.updatedAt ?? new Date().toISOString();
+        if (updatedAt < (latest.settings.uiPreferences?.updatedAt ?? "")) return null;
+        return updateSettings(latest, { theme, uiPreferences: { ...preferences, updatedAt } });
+      }),
     [persist]
   );
 
@@ -923,19 +955,27 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
     const generation = priceGenerationRef.current;
     const results = await fetchHistoryForHoldings(requested, range);
-    const current = storageRef.current;
-    if (!current || generation !== priceGenerationRef.current) {
+    let dates: string[] = [];
+    let error: string | undefined;
+    const saved = await persist((latest) => {
+      if (generation !== priceGenerationRef.current) return null;
+      const result = applyHistoryResults(latest, requested, results);
+      dates = result.dates;
+      error = result.error;
+      return result.next;
+    });
+    if (generation !== priceGenerationRef.current) {
       return { ok: false, error: "資料來源已變更，請重新載入" };
     }
 
-    const result = applyHistoryResults(current, requested, results);
-    if (result.next !== current) persist(result.next);
-    if (!result.updated) return { ok: false, error: result.error ?? "持倉已變更，請重新選擇標的" };
+    if (!saved || !dates.length) {
+      return { ok: false, error: error ?? (dates.length ? "歷史價格未儲存" : "持倉已變更，請重新選擇標的") };
+    }
     return {
       ok: true,
-      count: result.dates.length,
-      startDate: result.dates[0],
-      endDate: result.dates.at(-1),
+      count: dates.length,
+      startDate: dates[0],
+      endDate: dates.at(-1),
     };
   }, [persist]);
 
@@ -945,12 +985,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   const importPortfolio = useCallback(
     (incoming: PortfolioStorage, mode: PortfolioImportMode) => {
-      const current = storageRef.current;
-      if (!current) return;
-      if (mode === "replace") invalidatePriceRequests();
-      persist(applyImportMode(current, incoming, mode));
+      return applyStorage(
+        (latest) => applyImportMode(latest, incoming, mode),
+        {
+          overwriteUnreadable: mode === "replace",
+          onSaved: mode === "replace" ? invalidatePriceRequests : undefined,
+        }
+      );
     },
-    [invalidatePriceRequests, persist]
+    [applyStorage, invalidatePriceRequests]
   );
 
   const refreshFromCloud = useCallback(async (): Promise<boolean> => {
@@ -966,17 +1009,19 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     setSyncMessage("正在讀取雲端版本…");
     const result = await fetchCloudPortfolio();
     if (cloudReadRef.current === request) cloudReadRef.current = null;
-    const local = storageRef.current;
-    if (!local || generation !== initGenerationRef.current) return false;
+    if (generation !== initGenerationRef.current) return false;
     if (!result.ok) {
       setSyncStatus("error");
       setSyncMessage(result.error);
       return false;
     }
 
-    loadCloudChoice(result.data, local);
-    if (cloudQueueRef.current) clearUploadPromptDismissed(sessionUserId);
-    return true;
+    const loaded = await loadCloudChoice(result.data);
+    if (!loaded && generation === initGenerationRef.current) {
+      setSyncStatus("error");
+      setSyncMessage("請先確認本機資料可讀寫，再啟用雲端同步。");
+    }
+    return loaded;
   }, [account, initializedAccount, loadCloudChoice, sessionUserId]);
 
   const keepLocalOnly = useCallback(() => {
@@ -988,22 +1033,30 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     setSyncMessage("目前只存本機");
   }, [sessionUserId]);
 
-  const useLocalForSync = useCallback(() => {
+  const useLocalForSync = useCallback(async () => {
     if (!cloudChoice || !sessionUserId || !storageRef.current) return;
-    clearUploadPromptDismissed(sessionUserId);
-    connectCloud(cloudChoice.version);
-    void pushCloudSync(storageRef.current);
-  }, [cloudChoice, connectCloud, pushCloudSync, sessionUserId]);
+    await applyStorage((local) => local, {
+      onSaved: () => {
+        clearUploadPromptDismissed(sessionUserId);
+        connectCloud(cloudChoice.version);
+      },
+    });
+  }, [applyStorage, cloudChoice, connectCloud, sessionUserId]);
 
-  const useRemoteForSync = useCallback(() => {
+  const useRemoteForSync = useCallback(async () => {
     if (!cloudChoice?.remote || !sessionUserId || !storageRef.current) return;
-    const repaired = repairCorporateActionPriceHistory(cloudChoice.remote);
-    const next = preserveNewerUiPreferences(repaired, storageRef.current);
-    invalidatePriceRequests();
-    applyStorage(next, { skipCloud: true });
-    clearUploadPromptDismissed(sessionUserId);
-    connectCloud(cloudChoice.version);
-    if (next !== cloudChoice.remote) void pushCloudSync(next);
+    const remote = cloudChoice.remote;
+    await applyStorage((local) => {
+      invalidatePriceRequests();
+      return preserveNewerUiPreferences(repairCorporateActionPriceHistory(remote), local);
+    }, {
+      skipCloud: true,
+      onSaved: (saved) => {
+        clearUploadPromptDismissed(sessionUserId);
+        connectCloud(cloudChoice.version);
+        if (saved !== remote) void pushCloudSync(saved);
+      },
+    });
   }, [applyStorage, cloudChoice, connectCloud, invalidatePriceRequests, pushCloudSync, sessionUserId]);
 
   const value = useMemo(
@@ -1118,6 +1171,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <PortfolioContext.Provider value={value}>
+      {storageError && (
+        <div role="alert" className="mx-auto my-3 flex max-w-7xl flex-wrap items-center gap-3 rounded-lg border border-amber-500/40 px-4 py-3 text-sm">
+          <span>{storageError}</span>
+          <button type="button" className="underline underline-offset-4" onClick={() => setStorageError(null)}>關閉提示</button>
+        </div>
+      )}
       {cloudChoice?.remote && storage ? (
         <CloudMergeModal
           local={storage}

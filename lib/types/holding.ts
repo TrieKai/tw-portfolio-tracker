@@ -85,6 +85,8 @@ export interface SaleTransaction {
   name: string;
   symbol: string;
   market?: StockMarket;
+  /** 舊賣出紀錄可能未保存；有買入交易時可從交易還原。 */
+  buyDate?: string;
   /** 賣出時該筆持倉的成本均價 */
   buyPrice: number;
   quantity: number;
@@ -206,7 +208,9 @@ export interface PortfolioTransactionRevision {
 export interface PersistedPnlDaySummary {
   date: string;
   pnl: number;
-  returnRate: number;
+  returnRate: number | null;
+  returnBase?: number;
+  gapStartDate?: string;
   quality: "complete" | "partial" | "estimated" | "provisional";
   computedAt: string;
 }

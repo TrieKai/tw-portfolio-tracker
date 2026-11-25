@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import React from "react";
 import { AmountPrivacyProvider } from "@/providers/AmountPrivacyProvider";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -60,13 +60,15 @@ describe("CalendarGrid", () => {
     };
 
     const html = renderToStaticMarkup(
-      createElement(AmountPrivacyProvider, { children: createElement(CalendarGrid, {
-        rows,
-        calendar,
-        weekendEvents: new Map(),
-        onSelectDay: () => undefined,
-        onSelectWeek: () => undefined,
-      }) })
+      <AmountPrivacyProvider>
+        <CalendarGrid
+          rows={rows}
+          calendar={calendar}
+          weekendEvents={new Map()}
+          onSelectDay={() => undefined}
+          onSelectWeek={() => undefined}
+        />
+      </AmountPrivacyProvider>
     );
 
     expect(html.indexOf("第 1 週損益")).toBeLessThan(

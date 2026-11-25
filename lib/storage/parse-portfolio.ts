@@ -377,6 +377,9 @@ function normalizeLoan(raw: unknown): Loan | null {
     ...(typeof raw.closedAt === "string" && normalizeToIsoDate(raw.closedAt)
       ? { closedAt: normalizeToIsoDate(raw.closedAt) }
       : {}),
+    ...(typeof raw.restartedFromLoanId === "string" && raw.restartedFromLoanId
+      ? { restartedFromLoanId: raw.restartedFromLoanId }
+      : {}),
     dataQuality,
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : now,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : now,

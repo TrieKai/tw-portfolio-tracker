@@ -191,8 +191,11 @@ export function AiLayoutAssistantModal({
     previewSuggestion(result.data);
   }
 
-  function savePreview() {
-    if (!applyPreview()) return;
+  async function savePreview() {
+    if (!(await applyPreview())) {
+      setError("未能儲存外觀設定。請確認瀏覽器儲存空間後重試。");
+      return;
+    }
     setSaved(true);
     window.setTimeout(onClose, 650);
   }

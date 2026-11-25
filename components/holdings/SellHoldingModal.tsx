@@ -14,7 +14,7 @@ export function SellHoldingModal({
   onClose,
 }: {
   holding: HoldingWithMetrics;
-  onSave: (input: SellHoldingInput) => void;
+  onSave: (input: SellHoldingInput) => Promise<boolean>;
   onClose: () => void;
 }) {
   const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
@@ -26,6 +26,7 @@ export function SellHoldingModal({
   const [sellDate, setSellDate] = useState(todayIsoDate());
   const [fee, setFee] = useState("");
   const [tax, setTax] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const preview = useMemo(() => {
@@ -49,8 +50,9 @@ export function SellHoldingModal({
     return { proceeds, realizedPnl, isFullSell };
   }, [quantity, sellPrice, fee, tax, holding.buyPrice, holding.quantity]);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (saving) return;
     setError(null);
 
     const qty = Number.parseFloat(quantity);
@@ -83,7 +85,8 @@ export function SellHoldingModal({
       return;
     }
 
-    onSave({
+    setSaving(true);
+    const saved = await onSave({
       id: holding.id,
       quantity: qty,
       sellPrice: price,
@@ -91,6 +94,8 @@ export function SellHoldingModal({
       fee: feeAmount,
       tax: taxAmount,
     });
+    setSaving(false);
+    if (!saved) setError("這次變更未儲存。請確認資料狀態與瀏覽器儲存空間後重試。");
   }
 
   return (
@@ -210,13 +215,13 @@ export function SellHoldingModal({
           </div>
         )}
 
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        {error && <p role="alert" className="text-sm text-rose-500">{error}</p>}
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="btn-secondary">
             取消
           </button>
-          <button type="submit" className="btn-primary">
+          <button type="submit" disabled={saving} className="btn-primary">
             確認賣出
           </button>
         </div>

@@ -64,10 +64,15 @@ function compactPnl(value: number): string {
   return `${prefix}${Math.round(absolute).toLocaleString("zh-TW")}`;
 }
 
-function pnlClass(value: number): string {
+function pnlClass(value: number | null): string {
+  if (value === null) return "text-muted";
   if (value > 0) return "text-gain";
   if (value < 0) return "text-loss";
   return "text-muted";
+}
+
+function formatRate(rate: number | null): string {
+  return rate === null ? "—" : `${rate > 0 ? "+" : ""}${rate.toFixed(2)}%`;
 }
 
 function weekStartForDate(iso: string): string {
@@ -91,6 +96,7 @@ function filterFromValue(value: string): PnlCalendarFilter {
 }
 
 function dayStatus(day: PnlCalendarDay): string | null {
+  if (day.gapStartDate) return "區間";
   if (day.isProvisional) return "暫";
   if (day.quality === "estimated") return "估";
   if (day.quality === "partial") {
@@ -133,7 +139,7 @@ function CalendarDayCell({
       style={day && !amountsHidden ? heatStyle(day, maximum) : undefined}
       aria-label={
         day
-          ? `${date}，損益 ${amountsHidden ? "金額已隱藏" : formatSignedAmount(day.pnl)}，報酬 ${day.returnRate.toFixed(2)}%`
+          ? `${date}，損益 ${amountsHidden ? "金額已隱藏" : formatSignedAmount(day.pnl)}，報酬 ${day.returnRate === null ? "無可用基準" : formatRate(day.returnRate)}${day.gapStartDate ? `，自 ${day.gapStartDate} 的區間價差` : ""}`
           : `${date}，無損益資料`
       }
     >
@@ -150,8 +156,7 @@ function CalendarDayCell({
             {maskAmount(compactPnl(day.pnl))}
           </span>
           <span className="mt-1 hidden text-center text-sm tabular-nums text-foreground md:block">
-            {day.returnRate > 0 ? "+" : ""}
-            {day.returnRate.toFixed(2)}%
+            {formatRate(day.returnRate)}
           </span>
         </span>
       ) : (
@@ -230,8 +235,7 @@ export function CalendarGrid({
               </span>
               {week ? (
                 <span className={`hidden text-xs tabular-nums md:block ${pnlClass(week.returnRate)}`}>
-                  {week.returnRate > 0 ? "+" : ""}
-                  {week.returnRate.toFixed(2)}%
+                  {formatRate(week.returnRate)}{week.returnRateIncomplete && week.returnRate !== null ? " 估" : ""}
                 </span>
               ) : null}
               {weekendEventCount > 0 ? (
@@ -555,7 +559,8 @@ export function PnlCalendarPage() {
             />
             <SummaryCard
               label={showNetPerformance ? "估算淨報酬率" : "複利報酬率"}
-              value={`${calendar.summary.returnRate > 0 ? "+" : ""}${calendar.summary.returnRate.toFixed(2)}%`}
+              value={formatRate(calendar.summary.returnRate)}
+              description={calendar.summary.returnRateIncomplete ? "部分日期缺少報酬基準" : undefined}
               className={pnlClass(calendar.summary.returnRate)}
             />
             <SummaryCard
@@ -595,7 +600,7 @@ export function PnlCalendarPage() {
       </section>
 
       <p className="text-xs leading-5 text-muted">
-        已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」包含舊資料回算或融資成本估算，比例標籤代表只有部分資產更新。非交易日的利息會計入週與月合計。
+        已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」包含舊資料回算或融資成本估算，「區間」表示中間有平日缺少估值，比例標籤代表只有部分資產更新。非交易日的利息會計入週與月合計。
       </p>
 
       {selection ? (

@@ -20,6 +20,7 @@ import {
   summarizePortfolioPeriod,
   summarizeTimelineChange,
 } from "@/lib/portfolio/portfolio-timeline";
+import type { PortfolioHistory } from "@/lib/portfolio/time-travel";
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
 import { ChartFrame } from "@/components/ui/ChartFrame";
 import { PortfolioTimelineTooltip } from "./PortfolioTimelineTooltip";
@@ -29,17 +30,21 @@ interface PortfolioValueTrendChartProps {
   holdings: Holding[];
   priceHistory: PriceHistoryMap;
   range: ChartRange;
+  portfolioHistory?: PortfolioHistory;
+  asOfDate?: string;
 }
 
 export function PortfolioValueTrendChart({
   holdings,
   priceHistory,
   range,
+  portfolioHistory,
+  asOfDate,
 }: PortfolioValueTrendChartProps) {
   const { amountsHidden, formatAmount } = useAmountPrivacy();
   const timeline = useMemo(
-    () => buildPortfolioTimeline(holdings, priceHistory, range),
-    [holdings, priceHistory, range]
+    () => buildPortfolioTimeline(holdings, priceHistory, range, portfolioHistory, asOfDate),
+    [holdings, priceHistory, range, portfolioHistory, asOfDate]
   );
 
   const summary = useMemo(
@@ -48,8 +53,8 @@ export function PortfolioValueTrendChart({
   );
 
   const periodSummary = useMemo(
-    () => summarizePortfolioPeriod(holdings, timeline, range),
-    [holdings, timeline, range]
+    () => summarizePortfolioPeriod(portfolioHistory?.initialLots ?? holdings, timeline, range),
+    [holdings, portfolioHistory, timeline, range]
   );
 
   const chartData = timeline.map((p) => ({
@@ -89,7 +94,15 @@ export function PortfolioValueTrendChart({
     <div className="space-y-4">
       <p className="text-xs text-muted">
         顯示期間 {timeline[0].date}～{timeline.at(-1)?.date} · {timeline.length} 個估值日
+        {portfolioHistory && " · 市值變化反映買賣與價格變動"}
       </p>
+      {portfolioHistory && (
+        <p className="text-xs text-muted">
+          缺少當日行情時，沿用最近行情或以成本價估計。
+          {portfolioHistory.estimatedStartCount > 0 && ` ${portfolioHistory.estimatedStartCount} 筆舊持倉從已知追蹤日回推。`}
+          {portfolioHistory.unknownStartCount > 0 && ` ${portfolioHistory.unknownStartCount} 筆舊賣出持倉缺少買入日期，未列入圖表。`}
+        </p>
+      )}
       {summary && (
         <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="期初市值" value={formatAmount(summary.startValue)} />
@@ -151,7 +164,7 @@ export function PortfolioValueTrendChart({
               value === "totalValue"
                 ? "總市值"
                 : value === "totalCost"
-                  ? "累計投入成本"
+                  ? "剩餘持倉成本"
                   : String(value)
             }
           />

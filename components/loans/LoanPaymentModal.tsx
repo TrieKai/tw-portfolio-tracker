@@ -19,7 +19,7 @@ export function LoanPaymentModal({
 }: {
   loan: Loan;
   currentPrincipal: number;
-  onSave: (input: CreateLoanPaymentInput) => void;
+  onSave: (input: CreateLoanPaymentInput) => Promise<boolean>;
   onClose: () => void;
 }) {
   const { formatAmount } = useAmountPrivacy();
@@ -34,10 +34,12 @@ export function LoanPaymentModal({
   const [interestPeriodStartDate, setInterestPeriodStartDate] = useState("");
   const [interestPeriodEndDate, setInterestPeriodEndDate] = useState(today);
   const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
     setError(null);
     const principal = optionalAmount(principalPaid);
     const interest = optionalAmount(interestPaid);
@@ -81,7 +83,8 @@ export function LoanPaymentModal({
       }
     }
 
-    onSave({
+    setSaving(true);
+    const saved = await onSave({
       paymentDate,
       principalPaid: principal,
       interestPaid: interest,
@@ -96,6 +99,8 @@ export function LoanPaymentModal({
         : undefined,
       note: note.trim() || undefined,
     });
+    setSaving(false);
+    if (!saved) setError("這次變更未儲存。請確認資料狀態與瀏覽器儲存空間後重試。");
   }
 
   return (
@@ -136,7 +141,7 @@ export function LoanPaymentModal({
         {error ? <p className="text-sm text-rose-500">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
-          <button type="submit" className="btn-primary">儲存繳款紀錄</button>
+          <button type="submit" disabled={saving} className="btn-primary">儲存繳款紀錄</button>
         </div>
       </form>
     </Modal>

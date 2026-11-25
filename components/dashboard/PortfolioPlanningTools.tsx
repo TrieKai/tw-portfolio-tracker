@@ -56,7 +56,7 @@ export function PortfolioPlanningTools({
   holdings: HoldingWithMetrics[];
   summary: PortfolioSummary;
   savedTargets?: AssetAllocationTargets;
-  onSaveTargets: (targets: AssetAllocationTargets) => void;
+  onSaveTargets: (targets: AssetAllocationTargets) => Promise<boolean>;
   readOnly?: boolean;
 }) {
   return (
@@ -159,7 +159,7 @@ export function RebalancePanel({
 }: {
   summary: PortfolioSummary;
   savedTargets?: AssetAllocationTargets;
-  onSaveTargets: (targets: AssetAllocationTargets) => void;
+  onSaveTargets: (targets: AssetAllocationTargets) => Promise<boolean>;
   readOnly: boolean;
   view?: DashboardCardView;
 }) {
@@ -260,7 +260,7 @@ export function RebalancePanel({
         <button
           type="button"
           disabled={!plan.valid || readOnly}
-          onClick={() => { onSaveTargets(targets); setSaved(true); }}
+          onClick={async () => setSaved(await onSaveTargets(targets))}
           className="shrink-0 rounded-lg bg-accent-button px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
           title={readOnly ? "時間旅行模式下不可修改設定" : undefined}
         >

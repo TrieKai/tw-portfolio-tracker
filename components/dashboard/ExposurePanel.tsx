@@ -17,7 +17,7 @@ interface ExposurePanelProps {
   settings: PortfolioSettings;
   onSaveSettings: (
     patch: Pick<PortfolioSettings, "netAssets">
-  ) => void;
+  ) => Promise<boolean>;
   view?: DashboardCardView;
   readOnly?: boolean;
 }
@@ -43,7 +43,7 @@ export function ExposurePanel({
     }
   }, [settings.netAssets, editing]);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const patch: Pick<PortfolioSettings, "netAssets"> = {};
 
@@ -56,7 +56,7 @@ export function ExposurePanel({
       patch.netAssets = n;
     }
 
-    onSaveSettings(patch);
+    if (!(await onSaveSettings(patch))) return;
     setEditing(false);
   }
 

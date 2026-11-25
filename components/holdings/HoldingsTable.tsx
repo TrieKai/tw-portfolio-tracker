@@ -244,9 +244,10 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
       {editHoldingRow && (
         <EditHoldingModal
           holding={editHoldingRow}
-          onSave={(input) => {
-            edit(input);
-            setEditId(null);
+          onSave={async (input, original) => {
+            const saved = await edit(input, original);
+            if (saved) setEditId(null);
+            return saved;
           }}
           onClose={() => setEditId(null)}
         />
@@ -255,9 +256,10 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
       {sellHoldingRow && (
         <SellHoldingModal
           holding={sellHoldingRow}
-          onSave={(input) => {
-            sell(input);
-            setSellId(null);
+          onSave={async (input) => {
+            const saved = await sell(input);
+            if (saved) setSellId(null);
+            return saved;
           }}
           onClose={() => setSellId(null)}
         />
@@ -266,9 +268,10 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
       {sellGroup && (
         <SellGroupHoldingModal
           group={sellGroup}
-          onSave={(inputs) => {
-            sell(inputs);
-            setSellGroupKey(null);
+          onSave={async (inputs) => {
+            const saved = await sell(inputs);
+            if (saved) setSellGroupKey(null);
+            return saved;
           }}
           onClose={() => setSellGroupKey(null)}
         />
@@ -281,9 +284,10 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
           assetType={manualHolding.assetType}
           defaultPrice={manualHolding.currentPrice}
           defaultDate={manualHolding.priceDate}
-          onSave={(price, date) => {
-            setManualPrice(manualHolding.id, price, date);
-            setManualId(null);
+          onSave={async (price, date) => {
+            const saved = await setManualPrice(manualHolding.id, price, date);
+            if (saved) setManualId(null);
+            return saved;
           }}
           onClose={() => setManualId(null)}
         />

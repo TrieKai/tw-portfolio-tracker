@@ -27,7 +27,7 @@ interface CalendarMonthlyPnlRow extends MonthlyPnlRow {
   investmentPnl: number;
   financingCost: number;
   netPnl: number;
-  returnRate: number;
+  returnRate: number | null;
   dataDayCount: number;
   completeDayCount: number;
 }
@@ -189,11 +189,10 @@ export function MonthlyPnlTable({
                     <td className="px-4 py-3">
                       <span
                         className={`tabular-nums ${
-                          row.returnRate >= 0 ? "text-gain" : "text-loss"
+                          row.returnRate === null ? "text-muted" : row.returnRate >= 0 ? "text-gain" : "text-loss"
                         }`}
                       >
-                        {row.returnRate > 0 ? "+" : ""}
-                        {row.returnRate.toFixed(2)}%
+                        {row.returnRate === null ? "—" : `${row.returnRate > 0 ? "+" : ""}${row.returnRate.toFixed(2)}%`}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-muted tabular-nums">

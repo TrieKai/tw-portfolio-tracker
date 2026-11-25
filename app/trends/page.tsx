@@ -5,6 +5,7 @@ import Link from "next/link";
 import { PortfolioReturnChart } from "@/components/charts/PortfolioReturnChart";
 import { PortfolioValueTrendChart } from "@/components/charts/PortfolioValueTrendChart";
 import { HoldingLotsTable } from "@/components/portfolio/HoldingLotsTable";
+import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { buildHoldingLotSummaries } from "@/lib/portfolio/portfolio-timeline";
 import { PriceTrendChart } from "@/components/charts/PriceTrendChart";
 import { ErrorAlert } from "@/components/ui/ErrorAlert";
@@ -38,9 +39,10 @@ export default function TrendsPage() {
   const [portfolioNotice, setPortfolioNotice] = useState<HistoryNotice | null>(null);
   const [holdingNotice, setHoldingNotice] = useState<HistoryNotice | null>(null);
 
+  const portfolioHistory = useMemo(() => buildPortfolioHistory(storage), [storage]);
   const holdingLots = useMemo(
-    () => buildHoldingLotSummaries(storage.holdings),
-    [storage.holdings]
+    () => buildHoldingLotSummaries(portfolioHistory.initialLots),
+    [portfolioHistory]
   );
 
   const symbolGroups = useMemo(
@@ -112,10 +114,10 @@ export default function TrendsPage() {
         description="比較持倉總市值、成本與報酬，或查看單一標的的價格走勢。"
       />
 
-      {holdings.length === 0 ? (
+      {holdings.length === 0 && holdingLots.length === 0 ? (
         <EmptyState
           title="新增持倉後即可查看趨勢"
-          description="累積至少兩筆價格後，就能比較不同日期的市值與報酬。"
+          description={portfolioHistory.unknownStartCount > 0 ? "現有舊賣出紀錄缺少買入日期，仍可在持倉頁查看賣出明細。" : "累積至少兩筆價格後，就能比較不同日期的市值與報酬。"}
           action={<Link href="/holdings/new" className="btn-primary">新增持倉</Link>}
         />
       ) : (
@@ -146,15 +148,15 @@ export default function TrendsPage() {
               <div className="glass-card p-4 sm:p-5">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <h2 className="font-semibold">以目前持倉回推的市值</h2>
+                    <h2 className="font-semibold">歷史持倉市值</h2>
                     <p className="mt-1 text-xs text-muted">
-                      每筆持倉自買入日起計入，成本隨新買入增加。
+                      按各日持有的數量估值，買入、賣出與公司行動會反映在市值與成本。
                     </p>
                     <p className="mt-1 text-xs text-muted">
                       到 <Link href="/calendar" className="font-medium text-accent hover:underline">損益日曆</Link> 查看逐日損益及交易歸因。
                     </p>
                   </div>
-                  <button
+                  {holdings.length > 0 && <button
                     type="button"
                     onClick={handlePortfolioRefresh}
                     disabled={isPortfolioLoading}
@@ -163,13 +165,14 @@ export default function TrendsPage() {
                     {isPortfolioLoading
                       ? "更新中…"
                       : range === "all" ? "更新現價並載入歷史" : `更新現價並載入${getChartRangeLabel(range)}歷史`}
-                  </button>
+                  </button>}
                 </div>
                 {status && <div className="mb-3">{status}</div>}
                 <PortfolioValueTrendChart
                   holdings={storage.holdings}
                   priceHistory={storage.priceHistory}
                   range={range}
+                  portfolioHistory={portfolioHistory}
                 />
               </div>
 
@@ -178,6 +181,7 @@ export default function TrendsPage() {
                   holdings={storage.holdings}
                   priceHistory={storage.priceHistory}
                   range={range}
+                  portfolioHistory={portfolioHistory}
                 />
               </div>
 
@@ -189,11 +193,13 @@ export default function TrendsPage() {
                 <HoldingLotsTable lots={holdingLots} />
               </div>
 
-              <p className="text-xs text-muted">
+              {holdings.length > 0 && <p className="text-xs text-muted">
                 此按鈕會一次更新所有持倉最新價格，並向集保／TWSE
                 載入目前區間的歷史資料；上櫃股票僅更新現價，歷史請手動累積。
-              </p>
+              </p>}
             </section>
+          ) : !activeGroup ? (
+            <EmptyState title="目前沒有持倉" description="已賣出的部位可在「我的資產」查看歷史市值。" />
           ) : (
             <section className="space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">

@@ -33,7 +33,9 @@ export interface PnlCalendarDay {
   grossPnl?: number;
   financingCost?: number;
   /** 百分比，例如 5 表示 5%。 */
-  returnRate: number;
+  returnRate: number | null;
+  returnBase?: number;
+  gapStartDate?: string;
   pricedHoldingCount: number;
   totalHoldingCount: number;
   coverageRate: number;
@@ -57,6 +59,7 @@ export interface PnlCalendarContribution {
   dividend: number;
   fee: number;
   tax: number;
+  gapStartDate?: string;
   previousPrice?: number;
   currentPrice?: number;
 }
@@ -74,7 +77,8 @@ export interface PnlCalendarWeek {
   pnl: number;
   grossPnl?: number;
   financingCost?: number;
-  returnRate: number;
+  returnRate: number | null;
+  returnRateIncomplete?: boolean;
   dataDayCount: number;
 }
 
@@ -82,10 +86,11 @@ export interface PnlCalendarSummary {
   pnl: number;
   grossPnl?: number;
   financingCost?: number;
-  returnRate: number;
+  returnRate: number | null;
   gainDayCount: number;
   lossDayCount: number;
   flatDayCount: number;
+  returnRateIncomplete?: boolean;
   dataDayCount: number;
   completeDayCount: number;
 }
@@ -161,11 +166,22 @@ function roundResult(value: number): number {
   return Math.round((value + Number.EPSILON) * 1_000_000_000_000) / 1_000_000_000_000;
 }
 
-function compoundReturn(days: PnlCalendarDay[]): number {
-  return roundResult(
-    (days.reduce((factor, day) => factor * (1 + day.returnRate / 100), 1) - 1) *
-      100
-  );
+function compoundReturn(days: PnlCalendarDay[]): number | null {
+  const rates = days.flatMap((day) => day.returnRate === null ? [] : [day.returnRate]);
+  if (days.length && !rates.length) return null;
+  return roundResult((rates.reduce((factor, rate) => factor * (1 + rate / 100), 1) - 1) * 100);
+}
+
+function notePriceGap(contribution: PnlCalendarContribution, startDate: string, endDate: string) {
+  for (let date = addDaysToIsoDate(startDate, 1); date < endDate; date = addDaysToIsoDate(date, 1)) {
+    const weekday = parseIsoDate(date)?.getDay();
+    if (weekday !== undefined && weekday >= 1 && weekday <= 5) {
+      if (!contribution.gapStartDate || startDate < contribution.gapStartDate) {
+        contribution.gapStartDate = startDate;
+      }
+      return;
+    }
+  }
 }
 
 function tradingWeekBounds(iso: string): { startDate: string; endDate: string } {
@@ -332,6 +348,7 @@ export function buildPnlCalendar(
       detail.pnl += contribution;
       detail.marketPnl += contribution;
       addPriceRange(detail, previousPrice, current.price, quantity);
+      notePriceGap(detail, previous.date < instrument.buyDate ? instrument.buyDate : previous.date, current.date);
       contributionsByDate.set(current.date, existing);
     }
   }
@@ -395,6 +412,7 @@ export function buildPnlCalendar(
     detail.tax += transaction.tax;
     detail.pnl += tradePnl - transaction.fee - transaction.tax;
     addPriceRange(detail, previous.price, sellPrice, quantity);
+    notePriceGap(detail, previous.date, transaction.date);
     contributionsByDate.set(transaction.date, existing);
   }
 
@@ -439,64 +457,63 @@ export function buildPnlCalendar(
   const computedDays: PnlCalendarDay[] = Array.from(
     contributionsByDate,
     ([date, value]): PnlCalendarDay => {
-    const totalHoldingCount = Math.max(
-      value.totalHoldingIds.size,
-      instruments.filter(
-        (instrument) =>
-          instrument.buyDate <= date &&
-          quantityAtEndOfDay(
-            storage,
-            instrument.id,
-            date,
-            instrument.fallbackQuantity
-          ) > 0
-      ).length
-    );
-    const pricedHoldingCount = value.pricedHoldingIds.size;
-    const quality: PnlCalendarDay["quality"] =
-      !storage.pnlTracking.startedAt || date < storage.pnlTracking.startedAt
-        ? "estimated"
-        : pricedHoldingCount < totalHoldingCount
-          ? "partial"
-          : "complete";
-    return {
-      date,
-      pnl: value.pnl,
-      returnRate:
-        value.baseValue > 0 ? (value.pnl / value.baseValue) * 100 : 0,
-      pricedHoldingCount,
-      totalHoldingCount,
-      coverageRate:
-        totalHoldingCount > 0
-          ? (pricedHoldingCount / totalHoldingCount) * 100
-          : 0,
-      quality,
-      isProvisional: date === options.asOfDate,
-      contributions: Array.from(value.contributions.values())
-        .map((contribution): PnlCalendarContribution => ({
-          holdingId: contribution.holdingId,
-          holdingIds: contribution.holdingIds,
-          name: contribution.name,
-          symbol: contribution.symbol,
-          assetType: contribution.assetType,
-          market: contribution.market,
-          pnl: roundResult(contribution.pnl),
-          marketPnl: roundResult(contribution.marketPnl),
-          tradePnl: roundResult(contribution.tradePnl),
-          dividend: roundResult(contribution.dividend),
-          fee: roundResult(contribution.fee),
-          tax: roundResult(contribution.tax),
-          previousPrice:
-            contribution.previousPrice === undefined
-              ? undefined
-              : roundResult(contribution.previousPrice),
-          currentPrice:
-            contribution.currentPrice === undefined
-              ? undefined
-              : roundResult(contribution.currentPrice),
-        }))
-        .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl)),
-    };
+      for (const instrument of instruments) {
+        if (instrument.buyDate <= date && quantityAtEndOfDay(storage, instrument.id, date, instrument.fallbackQuantity) > 0) {
+          value.totalHoldingIds.add(instrument.id);
+        }
+      }
+      const totalHoldingCount = value.totalHoldingIds.size;
+      const gapStartDate = Array.from(value.contributions.values())
+        .flatMap((contribution) => contribution.gapStartDate ? [contribution.gapStartDate] : [])
+        .sort()[0];
+      const pricedHoldingCount = value.pricedHoldingIds.size;
+      const quality: PnlCalendarDay["quality"] =
+        gapStartDate || !storage.pnlTracking.startedAt || date < storage.pnlTracking.startedAt
+          ? "estimated"
+          : pricedHoldingCount < totalHoldingCount
+            ? "partial"
+            : "complete";
+      return {
+        date,
+        pnl: value.pnl,
+        returnBase: value.baseValue > 0 ? value.baseValue : undefined,
+        gapStartDate,
+        returnRate:
+          value.baseValue > 0 ? (value.pnl / value.baseValue) * 100 : 0,
+        pricedHoldingCount,
+        totalHoldingCount,
+        coverageRate:
+          totalHoldingCount > 0
+            ? (pricedHoldingCount / totalHoldingCount) * 100
+            : 0,
+        quality,
+        isProvisional: date === options.asOfDate,
+        contributions: Array.from(value.contributions.values())
+          .map((contribution): PnlCalendarContribution => ({
+            holdingId: contribution.holdingId,
+            holdingIds: contribution.holdingIds,
+            name: contribution.name,
+            symbol: contribution.symbol,
+            assetType: contribution.assetType,
+            market: contribution.market,
+            pnl: roundResult(contribution.pnl),
+            marketPnl: roundResult(contribution.marketPnl),
+            tradePnl: roundResult(contribution.tradePnl),
+            dividend: roundResult(contribution.dividend),
+            fee: roundResult(contribution.fee),
+            tax: roundResult(contribution.tax),
+            gapStartDate: contribution.gapStartDate,
+            previousPrice:
+              contribution.previousPrice === undefined
+                ? undefined
+                : roundResult(contribution.previousPrice),
+            currentPrice:
+              contribution.currentPrice === undefined
+                ? undefined
+                : roundResult(contribution.currentPrice),
+          }))
+          .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl)),
+      };
     }
   );
   const computedDates = new Set(computedDays.map((day) => day.date));
@@ -513,6 +530,8 @@ export function buildPnlCalendar(
             date: summary.date,
             pnl: summary.pnl,
             returnRate: summary.returnRate,
+            returnBase: summary.returnBase,
+            gapStartDate: summary.gapStartDate,
             pricedHoldingCount: 0,
             totalHoldingCount: 0,
             coverageRate: 0,
@@ -541,9 +560,8 @@ export function buildPnlCalendar(
       const gross = byDate.get(date);
       if (gross) {
         const baseValue =
-          gross.returnRate !== 0
-            ? gross.pnl / (gross.returnRate / 100)
-            : 0;
+          gross.returnBase ??
+          (gross.returnRate ? gross.pnl / (gross.returnRate / 100) : 0);
         byDate.set(date, {
           ...gross,
           grossPnl: gross.pnl,
@@ -552,7 +570,7 @@ export function buildPnlCalendar(
           returnRate:
             baseValue > 0
               ? roundResult(((gross.pnl - financingCost) / baseValue) * 100)
-              : 0,
+              : null,
           quality: "estimated",
         });
       } else {
@@ -561,7 +579,7 @@ export function buildPnlCalendar(
           pnl: roundResult(-financingCost),
           grossPnl: 0,
           financingCost,
-          returnRate: 0,
+          returnRate: null,
           pricedHoldingCount: 0,
           totalHoldingCount: 0,
           coverageRate: 0,
@@ -592,9 +610,11 @@ export function buildPnlCalendar(
       entries.reduce((sum, day) => sum + (day.financingCost ?? 0), 0)
     ),
     returnRate: compoundReturn(entries),
+    returnRateIncomplete: entries.some((day) => day.returnRate === null),
     dataDayCount: entries.length,
   })).sort((a, b) => a.startDate.localeCompare(b.startDate));
 
+  const individuallyValued = days.filter((day) => !day.gapStartDate);
   const summary: PnlCalendarSummary = {
     pnl: roundResult(days.reduce((sum, day) => sum + day.pnl, 0)),
     grossPnl: roundResult(
@@ -604,9 +624,10 @@ export function buildPnlCalendar(
       days.reduce((sum, day) => sum + (day.financingCost ?? 0), 0)
     ),
     returnRate: compoundReturn(days),
-    gainDayCount: days.filter((day) => day.pnl > 0).length,
-    lossDayCount: days.filter((day) => day.pnl < 0).length,
-    flatDayCount: days.filter((day) => day.pnl === 0).length,
+    returnRateIncomplete: days.some((day) => day.returnRate === null),
+    gainDayCount: individuallyValued.filter((day) => day.pnl > 0).length,
+    lossDayCount: individuallyValued.filter((day) => day.pnl < 0).length,
+    flatDayCount: individuallyValued.filter((day) => day.pnl === 0).length,
     dataDayCount: days.length,
     completeDayCount: days.filter((day) => day.quality === "complete").length,
   };

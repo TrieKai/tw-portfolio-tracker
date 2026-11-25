@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildDailyInvestmentFinancingCosts } from "@/lib/loans/calculations";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
 import {
   addLoan,
@@ -6,6 +7,7 @@ import {
   recordLoanBalance,
   recordLoanPayment,
   recordLoanRateChange,
+  restartLoan,
   setLoanStatus,
 } from "@/lib/storage/loan-store";
 import type { CreateLoanInput } from "@/lib/types/loan";
@@ -70,6 +72,26 @@ describe("loan store", () => {
       status: "paid_off",
       closedAt: "2026-08-30",
     });
+  });
+
+  it("keeps the closed interval interest-free when a new tracking period starts", () => {
+    const contract = { ...input, repaymentMethod: "revolving" as const };
+    const added = addLoan(defaultPortfolioStorage(), contract);
+    const id = added.loans[0].id;
+    const closed = setLoanStatus(added, id, "paid_off", "2026-09-03");
+    const next = restartLoan(closed, id, { ...contract, trackingStartDate: "2026-09-10" });
+
+    expect(next.loans[0]).toMatchObject({ status: "paid_off", closedAt: "2026-09-03" });
+    expect(next.loans[1]).toMatchObject({ status: "active", restartedFromLoanId: id, trackingStartDate: "2026-09-10" });
+    const costs = buildDailyInvestmentFinancingCosts(next.loans, "2026-09-01", "2026-09-12");
+    expect(costs["2026-09-02"]).toBeGreaterThan(0);
+    expect(costs["2026-09-05"]).toBeUndefined();
+    expect(costs["2026-09-11"]).toBeGreaterThan(0);
+    expect(restartLoan(next, id, contract)).toBe(next);
+    expect(setLoanStatus(next, id, "active", "2026-09-11")).toBe(next);
+
+    const undone = setLoanStatus(closed, id, "active", "2026-09-11");
+    expect(buildDailyInvestmentFinancingCosts(undone.loans, "2026-09-05", "2026-09-06")["2026-09-05"]).toBeGreaterThan(0);
   });
 
   it("records and replaces a dated balance snapshot", () => {

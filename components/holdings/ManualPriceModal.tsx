@@ -21,17 +21,19 @@ export function ManualPriceModal({
   assetType?: AssetType;
   defaultPrice?: number;
   defaultDate?: string;
-  onSave: (price: number, date: string) => void;
+  onSave: (price: number, date: string) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [price, setPrice] = useState(
     defaultPrice !== undefined ? String(defaultPrice) : ""
   );
   const [date, setDate] = useState(defaultDate ?? todayIsoDate());
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (saving) return;
     const n = Number.parseFloat(price);
     if (Number.isNaN(n) || n <= 0) {
       setError("請輸入有效價格");
@@ -41,7 +43,10 @@ export function ManualPriceModal({
       setError("日期格式應為 YYYY-MM-DD");
       return;
     }
-    onSave(n, date);
+    setSaving(true);
+    const saved = await onSave(n, date);
+    setSaving(false);
+    if (!saved) setError("這次變更未儲存。請確認資料狀態與瀏覽器儲存空間後重試。");
   }
 
   return (
@@ -82,13 +87,13 @@ export function ManualPriceModal({
           </div>
         </label>
 
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        {error && <p role="alert" className="text-sm text-rose-500">{error}</p>}
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-secondary">
             取消
           </button>
-          <button type="submit" className="btn-primary">
+          <button type="submit" disabled={saving} className="btn-primary">
             儲存
           </button>
         </div>

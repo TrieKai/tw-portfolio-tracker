@@ -14,7 +14,7 @@ export function LoanRateModal({
 }: {
   loan: Loan;
   currentRate: number;
-  onSave: (input: CreateLoanRateChangeInput) => void;
+  onSave: (input: CreateLoanRateChangeInput) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [effectiveDate, setEffectiveDate] = useState(todayIsoDate());
@@ -22,20 +22,25 @@ export function LoanRateModal({
     String(currentRate)
   );
   const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
     const rate = Number.parseFloat(annualInterestRate);
     if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
       setError("年利率必須介於 0% 到 100%");
       return;
     }
-    onSave({
+    setSaving(true);
+    const saved = await onSave({
       effectiveDate,
       annualInterestRate: rate,
       note: note.trim() || undefined,
     });
+    setSaving(false);
+    if (!saved) setError("這次變更未儲存。請確認資料狀態與瀏覽器儲存空間後重試。");
   }
 
   return (
@@ -50,7 +55,7 @@ export function LoanRateModal({
         <label className="block text-sm"><span className="text-muted">新年利率（%）*</span><input type="number" min="0" max="100" step="0.001" className="input-field mt-1" value={annualInterestRate} onChange={(event) => setAnnualInterestRate(event.target.value)} /></label>
         <label className="block text-sm"><span className="text-muted">異動原因（選填）</span><input className="input-field mt-1" value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：指標利率調整" /></label>
         {error ? <p className="text-sm text-rose-500">{error}</p> : null}
-        <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={onClose}>取消</button><button type="submit" className="btn-primary">儲存利率異動</button></div>
+        <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={onClose}>取消</button><button type="submit" disabled={saving} className="btn-primary">儲存利率異動</button></div>
       </form>
     </Modal>
   );

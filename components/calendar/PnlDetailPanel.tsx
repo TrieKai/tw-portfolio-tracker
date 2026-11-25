@@ -14,20 +14,23 @@ export type PnlDetailSelection =
   | { kind: "day"; day: PnlCalendarDay }
   | { kind: "week"; week: PnlCalendarWeek; days: PnlCalendarDay[] };
 
-function pnlClass(value: number): string {
+function pnlClass(value: number | null): string {
+  if (value === null) return "text-muted";
   if (value > 0) return "text-gain";
   if (value < 0) return "text-loss";
   return "text-muted";
 }
 
-function signedRate(value: number): string {
+function signedRate(value: number | null): string {
+  if (value === null) return "無可用報酬基準";
   const prefix = value > 0 ? "+" : value < 0 ? "−" : "";
   return `${prefix}${Math.abs(value).toFixed(2)}%`;
 }
 
 function qualityLabel(day: PnlCalendarDay): string {
+  if (day.gapStartDate) return `區間價差 · ${day.gapStartDate} 至 ${day.date} 間有平日缺少估值`;
   if (day.isProvisional) return "今日暫估";
-  if (day.quality === "estimated") return "舊資料估算";
+  if (day.quality === "estimated") return "估算損益";
   if (day.quality === "partial") {
     return `部分資料 · ${day.pricedHoldingCount}/${day.totalHoldingCount} 項更新`;
   }
@@ -102,7 +105,7 @@ function DayDetail({
 
                 <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
                   <div>
-                    <dt className="text-xs text-muted">價格變動</dt>
+                    <dt className="text-xs text-muted">{contribution.gapStartDate ? "區間價格變動" : "價格變動"}</dt>
                     <dd className={`mt-0.5 tabular-nums ${pnlClass(contribution.marketPnl)}`}>
                       {formatSignedAmount(contribution.marketPnl)}
                     </dd>
@@ -130,6 +133,7 @@ function DayDetail({
                 {contribution.previousPrice !== undefined &&
                 contribution.currentPrice !== undefined ? (
                   <p className="mt-3 border-t border-border/70 pt-3 text-xs text-muted">
+                    {contribution.gapStartDate && `${contribution.gapStartDate} 至 ${day.date} · `}
                     {formatQuoteAmount(contribution.previousPrice, contribution.assetType)}
                     {" → "}
                     {formatQuoteAmount(contribution.currentPrice, contribution.assetType)}
@@ -177,7 +181,7 @@ export function PnlWeekDetail({
           <div className="text-right">
             <p className="text-xs text-muted">複利報酬</p>
             <p className={`mt-1 font-medium tabular-nums ${pnlClass(week.returnRate)}`}>
-              {signedRate(week.returnRate)}
+              {signedRate(week.returnRate)}{week.returnRateIncomplete && week.returnRate !== null ? "（部分日期缺少基準）" : ""}
             </p>
           </div>
         </div>

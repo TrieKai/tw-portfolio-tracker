@@ -16,8 +16,8 @@ import type { ChartRange } from "@/lib/portfolio/calculations";
 import { formatPercent } from "@/lib/portfolio/calculations";
 import {
   buildPortfolioTimeline,
-  periodPnlFromTimeline,
 } from "@/lib/portfolio/portfolio-timeline";
+import type { PortfolioHistory } from "@/lib/portfolio/time-travel";
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
 import { ChartFrame } from "@/components/ui/ChartFrame";
 
@@ -26,41 +26,36 @@ export function PortfolioReturnChart({
   holdings,
   priceHistory,
   range,
+  portfolioHistory,
 }: {
   holdings: Holding[];
   priceHistory: PriceHistoryMap;
   range: ChartRange;
+  portfolioHistory: PortfolioHistory;
 }) {
   const { formatAmount, amountsHidden } = useAmountPrivacy();
   const timeline = useMemo(
-    () => buildPortfolioTimeline(holdings, priceHistory, range),
-    [holdings, priceHistory, range]
+    () => buildPortfolioTimeline(holdings, priceHistory, range, portfolioHistory),
+    [holdings, priceHistory, range, portfolioHistory]
   );
 
-  const periodSeries = useMemo(
-    () => periodPnlFromTimeline(timeline),
-    [timeline]
-  );
-
-  const chartData = timeline.map((p, i) => ({
-    date: p.date.slice(5),
-    fullDate: p.date,
-    pnl: periodSeries[i]?.periodPnl ?? 0,
-    returnRate: periodSeries[i]?.periodReturnRate ?? 0,
-    absolutePnl: p.pnl,
-    absoluteReturnRate: p.returnRate,
+  const chartData = timeline.map((point) => ({
+    date: point.date.slice(5),
+    fullDate: point.date,
+    pnl: point.pnl,
+    returnRate: point.activeHoldings > 0 ? point.returnRate : null,
   }));
 
   if (chartData.length < 2) {
-    return null;
+    return <p className="py-4 text-center text-sm text-muted">至少有兩個估值日才會顯示未實現損益趨勢。</p>;
   }
 
   return (
     <div>
       <p className="mb-2 text-sm font-medium">
-        累積損益
+        持倉未實現損益
         <span className="mt-0.5 block font-normal text-muted sm:ml-2 sm:mt-0 sm:inline">
-          （相對所選區間起點）
+          （按各日持有部位計算）
         </span>
       </p>
       <ChartFrame className="h-[180px] sm:h-[200px] md:h-[220px]">
@@ -87,13 +82,12 @@ export function PortfolioReturnChart({
             formatter={(_, __, item) => {
               const row = item?.payload as {
                 pnl: number;
-                returnRate: number;
-                absolutePnl: number;
+                returnRate: number | null;
               };
               if (!row) return ["", ""];
               return [
-                `${formatAmount(row.pnl)} (${formatPercent(row.returnRate)}) · 總損益 ${formatAmount(row.absolutePnl)}`,
-                "區間累積",
+                `${formatAmount(row.pnl)}${row.returnRate === null ? "" : ` (${formatPercent(row.returnRate)})`}`,
+                "未實現損益",
               ];
             }}
             contentStyle={{

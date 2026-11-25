@@ -26,6 +26,7 @@ export function PortfolioDataPanel() {
     type: "ok" | "error";
     text: string;
   } | null>(null);
+  const [importing, setImporting] = useState(false);
   const [confirm, setConfirm] = useState<ImportConfirmState | null>(null);
 
   const handleExport = useCallback(() => {
@@ -47,17 +48,7 @@ export function PortfolioDataPanel() {
       }
 
       if (!hasPortfolioData(parsed.portfolio)) {
-        setMessage({ type: "error", text: "備份檔內沒有持倉或賣出紀錄" });
-        return;
-      }
-
-      const hasCurrent = hasPortfolioData(storage);
-      if (!hasCurrent) {
-        importPortfolio(parsed.portfolio, "merge");
-        setMessage({
-          type: "ok",
-          text: `已匯入：${describePortfolioStorage(parsed.portfolio)}`,
-        });
+        setMessage({ type: "error", text: "備份檔內沒有可匯入的持倉、貸款或交易紀錄" });
         return;
       }
 
@@ -67,21 +58,25 @@ export function PortfolioDataPanel() {
         mode: "merge",
       });
     },
-    [storage, importPortfolio]
+    []
   );
 
-  const runImport = useCallback(() => {
-    if (!confirm) return;
-    importPortfolio(confirm.portfolio, confirm.mode);
+  const runImport = useCallback(async () => {
+    if (!confirm || importing) return;
+    setImporting(true);
+    setMessage(null);
+    const saved = await importPortfolio(confirm.portfolio, confirm.mode);
+    setImporting(false);
+    if (!saved) {
+      setMessage({ type: "error", text: "未能儲存備份資料。若本機資料已損毀，可選擇取代全部。也請確認瀏覽器儲存空間。" });
+      return;
+    }
     setMessage({
       type: "ok",
-      text:
-        confirm.mode === "replace"
-          ? `已取代目前資料：${confirm.summary}`
-          : `已合併：${confirm.summary}`,
+      text: confirm.mode === "replace" ? "已用備份取代資料。" : "備份已合併。",
     });
     setConfirm(null);
-  }, [confirm, importPortfolio]);
+  }, [confirm, importing, importPortfolio]);
 
   return (
     <>
@@ -132,7 +127,7 @@ export function PortfolioDataPanel() {
           目前：{describePortfolioStorage(storage)}
         </p>
 
-        {message && (
+        {message && !confirm && (
           <p role={message.type === "error" ? "alert" : "status"}
             className={`mt-2 text-sm ${
               message.type === "error" ? "text-rose-500" : "text-accent"
@@ -169,7 +164,7 @@ export function PortfolioDataPanel() {
                 <span className="text-sm">
                   <span className="font-medium text-foreground">取代全部</span>
                   <span className="mt-0.5 block text-muted">
-                    以備份檔覆蓋目前持倉、賣出與價格歷史（保留目前主題設定）
+                    以備份取代持倉、貸款、交易與價格歷史，保留目前的外觀設定。
                   </span>
                 </span>
               </label>
@@ -186,19 +181,21 @@ export function PortfolioDataPanel() {
                 <span className="text-sm">
                   <span className="font-medium text-foreground">合併</span>
                   <span className="mt-0.5 block text-muted">
-                    保留現有資料，相同 id 以備份檔為準，價格歷史合併
+                    補入缺少的紀錄。同筆持倉、貸款及交易採較新的版本，已有的同日價格與目前設定會保留。
                   </span>
                 </span>
               </label>
             </fieldset>
 
+            {message?.type === "error" && <p role="alert" className="mt-3 text-sm text-loss">{message.text}</p>}
             <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
               <button
                 type="button"
                 onClick={runImport}
+                disabled={importing}
                 className="touch-target rounded-lg bg-accent-button px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110"
               >
-                確認匯入
+                {importing ? "儲存中…" : "確認匯入"}
               </button>
               <button
                 type="button"

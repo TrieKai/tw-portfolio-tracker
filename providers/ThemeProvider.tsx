@@ -50,7 +50,11 @@ export function ThemeProvider({
     setThemeState(t);
     setThemePreview(null);
     if (typeof window !== "undefined") {
-      localStorage.setItem("portfolio-theme", t);
+      try {
+        localStorage.setItem("portfolio-theme", t);
+      } catch {
+        // 已保存的投資組合設定仍可用來恢復主題。
+      }
     }
   }, []);
 
@@ -63,9 +67,13 @@ export function ThemeProvider({
   }, []);
 
   useEffect(() => {
-    const stored = localStorage.getItem("portfolio-theme") as Theme | null;
-    if (stored && ["light", "dark", "system"].includes(stored)) {
-      setThemeState(stored);
+    try {
+      const stored = localStorage.getItem("portfolio-theme");
+      if (stored === "light" || stored === "dark" || stored === "system") {
+        setThemeState(stored);
+      }
+    } catch {
+      // 儲存空間不可用時仍可以預設主題啟動。
     }
   }, []);
 

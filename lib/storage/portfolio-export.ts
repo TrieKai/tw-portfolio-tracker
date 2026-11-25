@@ -57,86 +57,66 @@ export function parseImportPayload(
   };
 }
 
-/** 合併匯入：同 id 的持倉／賣出以匯入檔為準；價格歷史合併 */
+function mergeRecords<T extends { id: string }>(
+  current: T[],
+  incoming: T[],
+  timestamp?: (record: T) => string
+): T[] {
+  const records = new Map(current.map((record) => [record.id, record]));
+  for (const record of incoming) {
+    const existing = records.get(record.id);
+    if (!existing || (timestamp && timestamp(record) > timestamp(existing))) {
+      records.set(record.id, record);
+    }
+  }
+  return [...records.values()];
+}
+
+/** 以修改時間合併可編輯紀錄；同時刻或無修改時間的衝突保留本機。 */
 export function mergePortfolioStorage(
   current: PortfolioStorage,
   incoming: PortfolioStorage
 ): PortfolioStorage {
-  const holdingMap = new Map(current.holdings.map((h) => [h.id, h]));
-  for (const h of incoming.holdings) {
-    holdingMap.set(h.id, h);
-  }
-
-  const saleMap = new Map(current.sales.map((s) => [s.id, s]));
-  for (const s of incoming.sales) {
-    saleMap.set(s.id, s);
-  }
-
-  const loanMap = new Map(current.loans.map((loan) => [loan.id, loan]));
-  for (const loan of incoming.loans) {
-    loanMap.set(loan.id, loan);
-  }
-
-  const loanRevisionMap = new Map(
-    current.loanRevisions.map((revision) => [revision.id, revision])
-  );
-  for (const revision of incoming.loanRevisions) {
-    loanRevisionMap.set(revision.id, revision);
-  }
-
-  const corporateActionMap = new Map(
-    current.corporateActions.map((action) => [action.id, action])
-  );
-  for (const action of incoming.corporateActions) {
-    corporateActionMap.set(action.id, action);
-  }
-
-  const transactionMap = new Map(
-    current.transactions.map((transaction) => [transaction.id, transaction])
-  );
-  for (const transaction of incoming.transactions) {
-    transactionMap.set(transaction.id, transaction);
-  }
-
-  const revisionMap = new Map(
-    current.transactionRevisions.map((revision) => [revision.id, revision])
-  );
-  for (const revision of incoming.transactionRevisions) {
-    revisionMap.set(revision.id, revision);
-  }
+  const removedHoldingIds = new Set([
+    ...current.sales.map((sale) => sale.holdingId),
+    ...current.transactions.filter((event) => event.type === "sell").map((event) => event.holdingId),
+  ]);
+  for (const holding of current.holdings) removedHoldingIds.delete(holding.id);
 
   let priceHistory = { ...current.priceHistory };
   for (const [holdingId, points] of Object.entries(incoming.priceHistory)) {
-    if (!Array.isArray(points) || points.length === 0) continue;
-    priceHistory = mergePriceHistory(priceHistory, holdingId, points);
+    const existingDates = new Set((priceHistory[holdingId] ?? []).map((point) => point.date));
+    const added = points.filter((point) => !existingDates.has(point.date));
+    if (added.length) priceHistory = mergePriceHistory(priceHistory, holdingId, added);
   }
 
+  const dailySummaries = { ...current.pnlTracking.dailySummaries };
+  for (const [date, summary] of Object.entries(incoming.pnlTracking.dailySummaries)) {
+    if (!dailySummaries[date] || summary.computedAt > dailySummaries[date].computedAt) {
+      dailySummaries[date] = summary;
+    }
+  }
+  const currentHasData = current.holdings.length > 0 || current.loans.length > 0 ||
+    current.transactions.length > 0 || current.sales.length > 0;
   return {
     version: 2,
-    holdings: [...holdingMap.values()],
-    loans: [...loanMap.values()],
-    loanRevisions: [...loanRevisionMap.values()],
-    sales: [...saleMap.values()],
-    corporateActions: [...corporateActionMap.values()],
-    transactions: [...transactionMap.values()],
-    transactionRevisions: [...revisionMap.values()],
+    holdings: mergeRecords(current.holdings, incoming.holdings, (holding) => holding.updatedAt)
+      .filter((holding) => !removedHoldingIds.has(holding.id)),
+    loans: mergeRecords(current.loans, incoming.loans, (loan) => loan.updatedAt),
+    loanRevisions: mergeRecords(current.loanRevisions, incoming.loanRevisions),
+    sales: mergeRecords(current.sales, incoming.sales),
+    corporateActions: mergeRecords(current.corporateActions, incoming.corporateActions),
+    transactions: mergeRecords(current.transactions, incoming.transactions, (event) => event.updatedAt),
+    transactionRevisions: mergeRecords(current.transactionRevisions, incoming.transactionRevisions),
     pnlTracking: {
-      startedAt:
-        !current.pnlTracking.startedAt ||
-        (incoming.pnlTracking.startedAt &&
-          incoming.pnlTracking.startedAt < current.pnlTracking.startedAt)
-          ? incoming.pnlTracking.startedAt
-          : current.pnlTracking.startedAt,
-      dailySummaries: {
-        ...current.pnlTracking.dailySummaries,
-        ...incoming.pnlTracking.dailySummaries,
-      },
+      startedAt: current.pnlTracking.startedAt || incoming.pnlTracking.startedAt,
+      dailySummaries,
     },
     priceHistory,
     settings: {
-      ...incoming.settings,
+      ...(currentHasData ? current.settings : incoming.settings),
       theme: current.settings.theme ?? incoming.settings.theme,
-      autoUpdateEnabled: current.settings.autoUpdateEnabled,
+      uiPreferences: current.settings.uiPreferences ?? incoming.settings.uiPreferences,
     },
   };
 }
@@ -152,6 +132,7 @@ export function applyImportMode(
       settings: {
         ...incoming.settings,
         theme: current.settings.theme ?? incoming.settings.theme,
+        uiPreferences: current.settings.uiPreferences ?? incoming.settings.uiPreferences,
       },
     };
   }

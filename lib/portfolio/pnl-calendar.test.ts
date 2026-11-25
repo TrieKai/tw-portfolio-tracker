@@ -67,6 +67,51 @@ describe("buildPnlCalendar", () => {
     expect(calendar.summary.financingCost).toBeCloseTo(900, 6);
     expect(calendar.summary.pnl).toBeCloseTo(-850, 6);
   });
+  it("subtracts interest from the return of a flat valuation day, including a persisted summary", () => {
+    const storage = portfolioWithOneHolding();
+    storage.priceHistory["holding-1"][1].price = 100;
+    storage.loans.push({
+      id: "loan-1", name: "投資信貸", loanType: "personal_credit", purpose: "investment",
+      investmentUsePercent: 100, openingBalance: 100_000, trackingStartDate: "2026-06-09",
+      annualInterestRate: 3.65, rateType: "fixed", repaymentMethod: "revolving",
+      status: "active", dataQuality: "estimated",
+      createdAt: "2026-06-09T00:00:00.000Z", updatedAt: "2026-06-09T00:00:00.000Z",
+    });
+    const options = { month: "2026-06", asOfDate: "2026-06-10", filter: { kind: "investment" as const } };
+    const gross = buildPnlCalendar(storage, options).days[0];
+    expect(gross).toMatchObject({ pnl: 0, returnRate: 0, returnBase: 1000 });
+
+    const net = buildPnlCalendar(storage, { ...options, includeFinancingCosts: true }).days[0];
+    expect(net).toMatchObject({ grossPnl: 0, pnl: -10, returnRate: -1 });
+
+    storage.priceHistory = {};
+    storage.pnlTracking.dailySummaries[gross.date] = {
+      date: gross.date, pnl: gross.pnl, returnRate: gross.returnRate, returnBase: gross.returnBase,
+      computedAt: gross.date, quality: gross.quality,
+    };
+    expect(buildPnlCalendar(storage, { ...options, includeFinancingCosts: true }).days[0].returnRate).toBe(-1);
+    delete storage.pnlTracking.dailySummaries[gross.date].returnBase;
+    expect(buildPnlCalendar(storage, { ...options, includeFinancingCosts: true }).days[0].returnRate).toBeNull();
+  });
+
+  it("labels a multi-session price move as an interval and ignores intervening weekends", () => {
+    const storage = portfolioWithOneHolding();
+    storage.pnlTracking.startedAt = "2026-06-01";
+    storage.priceHistory["holding-1"] = [
+      { date: "2026-06-05", price: 100, source: "api" },
+      { date: "2026-06-08", price: 105, source: "api" },
+      { date: "2026-06-10", price: 110, source: "api" },
+    ];
+    const { days } = buildPnlCalendar(storage, {
+      month: "2026-06", asOfDate: "2026-06-30", filter: { kind: "investment" },
+    });
+
+    expect(days[0]).toMatchObject({ date: "2026-06-08", pnl: 50, quality: "complete" });
+    expect(days[0].gapStartDate).toBeUndefined();
+    expect(days[1]).toMatchObject({ date: "2026-06-10", pnl: 50, quality: "estimated", gapStartDate: "2026-06-08" });
+    expect(days[1].contributions[0].gapStartDate).toBe("2026-06-08");
+  });
+
   it("calculates a held position's close-to-close daily return", () => {
     const calendar = buildPnlCalendar(portfolioWithOneHolding(), {
       month: "2026-06",

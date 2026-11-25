@@ -1,4 +1,5 @@
 /** 趨勢圖時間區間 */
+import { toIsoDate } from "@/lib/date/iso-date";
 import { MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
 
 export type ChartRange =
@@ -26,10 +27,6 @@ export const CHART_RANGE_VALUES = CHART_RANGE_OPTIONS.map((o) => o.key);
 
 export function getChartRangeLabel(range: ChartRange): string {
   return CHART_RANGE_OPTIONS.find((o) => o.key === range)?.label ?? range;
-}
-
-function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
 }
 
 function subtractDays(base: Date, days: number): Date {

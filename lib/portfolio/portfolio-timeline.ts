@@ -1,10 +1,10 @@
 /**
  * 投資組合資產時間軸
  * ----------------------------------------
- * 每筆持倉有獨立買入日、買入價；僅在 buyDate 當日（含）後納入總資產與成本。
- * 成本線會在每次新買入時階梯式上升，市值則依各標的歷史價格分別推算。
+ * 自買入日起依當日持有的數量計入成本與市值，賣出後移除對應部位。
  */
 
+import type { PortfolioHistory } from "./time-travel";
 import type { ChartRange } from "./chart-date-range";
 import { chartRangeToIsoDates } from "./chart-date-range";
 import type { AssetType, Holding, PriceHistoryMap, PricePoint } from "@/lib/types/holding";
@@ -169,18 +169,21 @@ export function buildPortfolioTimelineBetween(
   holdings: Holding[],
   priceHistory: PriceHistoryMap,
   startDate: string,
-  endDate: string
+  endDate: string,
+  portfolioHistory?: PortfolioHistory
 ): PortfolioTimelinePoint[] {
-  if (holdings.length === 0) return [];
+  if (holdings.length === 0 && !portfolioHistory) return [];
 
   const histories = new Map(
     holdings.map((h) => [h.id, getEffectiveHistory(h, priceHistory)])
   );
 
-  const allDates = collectTimelineDates(holdings, priceHistory);
+  const allDates = portfolioHistory?.dates ?? collectTimelineDates(holdings, priceHistory);
+  const openingLots = new Map(portfolioHistory?.initialLots.map((holding) => [holding.id, holding]));
   const rawPoints: PortfolioTimelinePoint[] = [];
 
   for (const date of allDates) {
+    if (date < startDate || date > endDate) continue;
     const snapshots: HoldingDaySnapshot[] = [];
     const newHoldings: string[] = [];
     let costAddedToday = 0;
@@ -191,7 +194,7 @@ export function buildPortfolioTimelineBetween(
     let propertyValue = 0;
     let pricedHoldings = 0;
 
-    for (const h of holdings) {
+    for (const h of portfolioHistory?.snapshotOn(date) ?? holdings) {
       if (h.buyDate > date) continue;
 
       const hist = histories.get(h.id) ?? [];
@@ -200,10 +203,12 @@ export function buildPortfolioTimelineBetween(
 
       if (isBuyDate) {
         newHoldings.push(h.name);
-        costAddedToday += costBasis;
+        costAddedToday += (openingLots.get(h.id)?.quantity ?? h.quantity) * h.buyPrice;
       }
 
-      const { unitPrice, hasMarketPrice } = getUnitPriceOnDate(h, hist, date);
+      const { unitPrice, hasMarketPrice } = portfolioHistory
+        ? { unitPrice: h.currentPrice ?? h.buyPrice, hasMarketPrice: h.currentPrice !== undefined }
+        : getUnitPriceOnDate(h, hist, date);
       const marketValue = unitPrice * h.quantity;
 
       totalCost += costBasis;
@@ -230,7 +235,7 @@ export function buildPortfolioTimelineBetween(
       });
     }
 
-    if (snapshots.length === 0) continue;
+    if (snapshots.length === 0 && !portfolioHistory?.exitDates.has(date)) continue;
 
     snapshots.sort((a, b) => a.buyDate.localeCompare(b.buyDate));
 
@@ -254,22 +259,23 @@ export function buildPortfolioTimelineBetween(
     });
   }
 
-  return rawPoints.filter(
-    (p) => p.date >= startDate && p.date <= endDate
-  );
+  return rawPoints;
 }
 
 export function buildPortfolioTimeline(
   holdings: Holding[],
   priceHistory: PriceHistoryMap,
-  range: ChartRange
+  range: ChartRange,
+  portfolioHistory?: PortfolioHistory,
+  asOfDate?: string
 ): PortfolioTimelinePoint[] {
   const { startDate, endDate } = chartRangeToIsoDates(range);
   return buildPortfolioTimelineBetween(
     holdings,
     priceHistory,
     startDate,
-    endDate
+    asOfDate && asOfDate < endDate ? asOfDate : endDate,
+    portfolioHistory
   );
 }
 
@@ -327,7 +333,7 @@ export function summarizePortfolioPeriod(
   const last = points[points.length - 1];
 
   const lotsAddedInPeriod = buildHoldingLotSummaries(
-    holdings.filter((h) => h.buyDate >= startDate && h.buyDate <= endDate)
+    holdings.filter((h) => h.buyDate >= startDate && h.buyDate <= endDate && h.buyDate <= last.date)
   );
 
   const costAddedInPeriod = lotsAddedInPeriod.reduce(

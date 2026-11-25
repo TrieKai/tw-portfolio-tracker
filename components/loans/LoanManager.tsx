@@ -56,6 +56,8 @@ export function LoanManager() {
   const [paymentLoan, setPaymentLoan] = useState<Loan | null>(null);
   const [rateLoan, setRateLoan] = useState<Loan | null>(null);
   const [closingLoan, setClosingLoan] = useState<Loan | null>(null);
+  const [reopeningLoan, setReopeningLoan] = useState<Loan | null>(null);
+  const [restartOf, setRestartOf] = useState<Loan | null>(null);
   const today = todayIsoDate();
   const snapshots = useMemo(
     () => loans.map((loan) => calculateLoanSnapshot(loan, today)),
@@ -80,14 +82,15 @@ export function LoanManager() {
 
   if (!ready) return <LoadingSpinner />;
 
-  function saveLoan(input: CreateLoanInput) {
-    if (editingLoan) {
-      editLoan({ ...input, id: editingLoan.id });
-    } else {
-      addLoan(input);
-    }
+  async function saveLoan(input: CreateLoanInput) {
+    const saved = editingLoan
+      ? await editLoan({ ...input, id: editingLoan.id })
+      : await addLoan(input, restartOf?.id);
+    if (!saved) return false;
     setEditingLoan(null);
+    setRestartOf(null);
     setFormOpen(false);
+    return true;
   }
 
   return (
@@ -197,28 +200,30 @@ export function LoanManager() {
                 linkedHoldingName={storage.holdings.find((holding) => holding.id === snapshot.loan.linkedHoldingId)?.name}
                 risk={riskByLoanId.get(snapshot.loan.id)}
                 onEdit={() => setEditingLoan(snapshot.loan)}
-                onReopen={() => setLoanStatus(snapshot.loan.id, "active", today)}
+                onReopen={loans.some((loan) => loan.restartedFromLoanId === snapshot.loan.id) ? undefined : () => setReopeningLoan(snapshot.loan)}
               />
             ))}
           </div>
         </details>
       ) : null}
 
-      {formOpen || editingLoan ? (
+      {formOpen || editingLoan || restartOf ? (
         <LoanFormModal
           loan={editingLoan ?? undefined}
+          restartOf={restartOf ?? undefined}
           holdings={storage.holdings}
           onSave={saveLoan}
-          onClose={() => { setEditingLoan(null); setFormOpen(false); }}
+          onClose={() => { setEditingLoan(null); setRestartOf(null); setFormOpen(false); }}
         />
       ) : null}
       {balanceLoan ? (
         <LoanBalanceModal
           loan={balanceLoan}
           currentPrincipal={calculateLoanSnapshot(balanceLoan, today).currentPrincipal}
-          onSave={(balance, effectiveDate) => {
-            updateLoanBalance(balanceLoan.id, balance, effectiveDate);
-            setBalanceLoan(null);
+          onSave={async (balance, effectiveDate) => {
+            const saved = await updateLoanBalance(balanceLoan.id, balance, effectiveDate);
+            if (saved) setBalanceLoan(null);
+            return saved;
           }}
           onClose={() => setBalanceLoan(null)}
         />
@@ -227,9 +232,10 @@ export function LoanManager() {
         <LoanPaymentModal
           loan={paymentLoan}
           currentPrincipal={calculateLoanSnapshot(paymentLoan, today).currentPrincipal}
-          onSave={(input) => {
-            recordLoanPayment(paymentLoan.id, input);
-            setPaymentLoan(null);
+          onSave={async (input) => {
+            const saved = await recordLoanPayment(paymentLoan.id, input);
+            if (saved) setPaymentLoan(null);
+            return saved;
           }}
           onClose={() => setPaymentLoan(null)}
         />
@@ -238,24 +244,81 @@ export function LoanManager() {
         <LoanRateModal
           loan={rateLoan}
           currentRate={calculateLoanSnapshot(rateLoan, today).currentAnnualInterestRate}
-          onSave={(input) => {
-            recordLoanRateChange(rateLoan.id, input);
-            setRateLoan(null);
+          onSave={async (input) => {
+            const saved = await recordLoanRateChange(rateLoan.id, input);
+            if (saved) setRateLoan(null);
+            return saved;
           }}
           onClose={() => setRateLoan(null)}
         />
       ) : null}
+      {reopeningLoan && (
+        <LoanReopenModal
+          loan={reopeningLoan}
+          onClose={() => setReopeningLoan(null)}
+          onUndo={async () => {
+            const saved = await setLoanStatus(reopeningLoan.id, "active", today);
+            if (saved) setReopeningLoan(null);
+            return saved;
+          }}
+          onRestart={() => {
+            setRestartOf({
+              ...reopeningLoan,
+              annualInterestRate: calculateLoanSnapshot(reopeningLoan, today).currentAnnualInterestRate,
+            });
+            setReopeningLoan(null);
+          }}
+        />
+      )}
       {closingLoan && (
         <LoanClosureModal
           loan={closingLoan}
           onClose={() => setClosingLoan(null)}
-          onSave={(date) => {
-            setLoanStatus(closingLoan.id, "paid_off", date);
-            setClosingLoan(null);
+          onSave={async (date) => {
+            const saved = await setLoanStatus(closingLoan.id, "paid_off", date);
+            if (saved) setClosingLoan(null);
+            return saved;
           }}
         />
       )}
     </div>
+  );
+}
+
+function LoanReopenModal({
+  loan,
+  onClose,
+  onUndo,
+  onRestart,
+}: {
+  loan: Loan;
+  onClose: () => void;
+  onUndo: () => Promise<boolean>;
+  onRestart: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <Modal labelledBy="loan-reopen-title" onClose={onClose}>
+      <div className="glass-card w-full max-w-md space-y-4 rounded-b-none p-5 sm:rounded-2xl">
+        <h2 id="loan-reopen-title" className="text-lg font-semibold">恢復追蹤 {loan.name}</h2>
+        <div className="space-y-2">
+          <p className="text-sm text-muted">重新借款時，原有清償紀錄會保留。新一期自填寫的起算日計息。</p>
+          <button type="button" disabled={saving || !loan.closedAt} onClick={onRestart} className="btn-primary w-full">開始新的追蹤</button>
+        </div>
+        <div className="space-y-2">
+          <p className="text-sm text-muted">如果先前誤記清償，可以撤銷並補算原清償日之後的利息。</p>
+          <button type="button" disabled={saving} className="btn-secondary w-full" onClick={async () => {
+            setSaving(true);
+            const saved = await onUndo();
+            setSaving(false);
+            setFailed(!saved);
+          }}>撤銷清償紀錄</button>
+        </div>
+        {failed && <ErrorAlert message="未能撤銷清償，請確認貸款狀態與瀏覽器儲存空間後重試。" />}
+        <button type="button" onClick={onClose} className="btn-secondary w-full">取消</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -266,7 +329,7 @@ function LoanClosureModal({
 }: {
   loan: Loan;
   onClose: () => void;
-  onSave: (date: string) => void;
+  onSave: (date: string) => Promise<boolean>;
 }) {
   const [error, setError] = useState<string | null>(null);
   const today = todayIsoDate();
@@ -276,14 +339,20 @@ function LoanClosureModal({
     ...(loan.balanceHistory ?? []).map((balance) => balance.effectiveDate),
   ].reduce((latest, date) => (date <= today && date > latest ? date : latest), loan.trackingStartDate);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const date = String(new FormData(event.currentTarget).get("closedAt") ?? "");
     if (!parseIsoDate(date) || date < earliest || date > today) {
       setError("清償日須介於最後一筆本金或繳款紀錄與今天之間。");
       return;
     }
-    onSave(date);
+    setSaving(true);
+    const saved = await onSave(date);
+    setSaving(false);
+    if (!saved) setError("未能儲存清償紀錄，請確認貸款狀態後重試。");
   }
 
   return (
@@ -302,7 +371,7 @@ function LoanClosureModal({
         {error && <ErrorAlert message={error} />}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-secondary">取消</button>
-          <button type="submit" className="btn-primary">確認清償</button>
+          <button type="submit" disabled={saving} className="btn-primary">確認清償</button>
         </div>
       </form>
     </Modal>

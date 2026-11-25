@@ -12,7 +12,7 @@ export function DividendModal({
   onClose,
 }: {
   holdings: HoldingWithMetrics[];
-  onSave: (input: CashDividendInput) => void;
+  onSave: (input: CashDividendInput) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [holdingId, setHoldingId] = useState(holdings[0]?.id ?? "");
@@ -20,10 +20,12 @@ export function DividendModal({
   const [settlementDate, setSettlementDate] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const parsedAmount = Number.parseFloat(amount);
     if (!holdingId) {
       setError("請選擇股票或基金");
@@ -33,14 +35,17 @@ export function DividendModal({
       setError("請輸入有效的實收配息總額");
       return;
     }
-    onSave({
+    setSaving(true);
+    const saved = await onSave({
       holdingId,
       effectiveDate,
       settlementDate: settlementDate || undefined,
       amount: parsedAmount,
       note: note.trim() || undefined,
     });
-    onClose();
+    setSaving(false);
+    if (!saved) setError("這次變更未儲存。請確認資料狀態與瀏覽器儲存空間後重試。");
+    if (saved) onClose();
   }
 
   return (
@@ -137,7 +142,7 @@ export function DividendModal({
           <button type="button" onClick={onClose} className="btn-secondary">
             取消
           </button>
-          <button type="submit" className="btn-primary">
+          <button type="submit" disabled={saving} className="btn-primary">
             儲存配息
           </button>
         </div>

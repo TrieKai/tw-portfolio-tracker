@@ -15,22 +15,27 @@ export function LoanBalanceModal({
 }: {
   loan: Loan;
   currentPrincipal: number;
-  onSave: (balance: number, effectiveDate: string) => void;
+  onSave: (balance: number, effectiveDate: string) => Promise<boolean>;
   onClose: () => void;
 }) {
   const { formatAmount } = useAmountPrivacy();
   const [balance, setBalance] = useState(String(Math.round(currentPrincipal)));
   const [effectiveDate, setEffectiveDate] = useState(todayIsoDate());
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
     const amount = Number.parseFloat(balance);
     if (!Number.isFinite(amount) || amount < 0) {
       setError("目前本金不可小於 0");
       return;
     }
-    onSave(amount, effectiveDate);
+    setSaving(true);
+    const saved = await onSave(amount, effectiveDate);
+    setSaving(false);
+    if (!saved) setError("這次變更未儲存。請確認資料狀態與瀏覽器儲存空間後重試。");
   }
 
   return (
@@ -52,7 +57,7 @@ export function LoanBalanceModal({
         {error ? <p className="text-sm text-rose-500">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
-          <button type="submit" className="btn-primary">儲存本金快照</button>
+          <button type="submit" disabled={saving} className="btn-primary">儲存本金快照</button>
         </div>
       </form>
     </Modal>

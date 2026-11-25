@@ -37,11 +37,7 @@ import { buildLoanReminders } from "@/lib/loans/reminders";
 import { computePortfolioHealth } from "@/lib/portfolio/health";
 import { computeInvestmentWeather } from "@/lib/portfolio/weather";
 import { todayIsoDate } from "@/lib/date/iso-date";
-import {
-  buildHoldingsSnapshot,
-  getPortfolioHistoryDates,
-  trimPriceHistoryAtDate,
-} from "@/lib/portfolio/time-travel";
+import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { PnlValueWithBreakdown } from "@/components/ui/PnlBreakdownTooltip";
 import type { DashboardSectionId } from "@/lib/types/ui-preferences";
 import { DEFAULT_UI_PREFERENCES } from "@/lib/ui/preferences";
@@ -70,18 +66,15 @@ export default function DashboardPage() {
     [storage, travelDate]
   );
 
+  const portfolioHistory = useMemo(() => buildPortfolioHistory(storage), [storage]);
   const historyDates = useMemo(
-    () => getPortfolioHistoryDates(storage.holdings, storage.priceHistory),
-    [storage.holdings, storage.priceHistory]
+    () => portfolioHistory.dates.filter((date) => date <= todayIsoDate()),
+    [portfolioHistory]
   );
   const travelState = useMemo(() => {
     if (!travelDate) return null;
-    const rawHoldings = buildHoldingsSnapshot(
-      storage.holdings,
-      storage.priceHistory,
-      travelDate
-    );
-    const history = trimPriceHistoryAtDate(storage.priceHistory, travelDate);
+    const rawHoldings = portfolioHistory.snapshotOn(travelDate);
+    const history = portfolioHistory.priceHistoryAt(travelDate);
     const enriched = enrichHoldings(rawHoldings);
     const visibleSales = sales.filter((sale) => sale.sellDate <= travelDate);
     const travelSummary = computePortfolioSummary(enriched, visibleSales, {
@@ -124,7 +117,7 @@ export default function DashboardPage() {
       ),
       pnlBreakdowns: buildPortfolioPnlBreakdowns(enriched, history, travelDate),
     };
-  }, [sales, storage.holdings, storage.loans, storage.priceHistory, storage.settings.netAssets, travelDate]);
+  }, [portfolioHistory, sales, storage.loans, storage.settings.netAssets, travelDate]);
 
   if (!ready) {
     return <LoadingSpinner />;
@@ -144,6 +137,7 @@ export default function DashboardPage() {
   const viewFor = (section: DashboardSectionId) =>
     preferences.dashboardLayout.find((item) => item.section === section)?.view ??
     "standard";
+  const monthRate = pnlCalendar.summary.returnRate;
   const shownMonthLabel = travelDate
     ? `${Number(travelDate.slice(5, 7))} 月`
     : formatCurrentMonthZh();
@@ -187,6 +181,7 @@ export default function DashboardPage() {
         onSelectDate={setTravelDate}
         currentSummary={summary}
         selectedSummary={travelState?.summary}
+        historyNotice={portfolioHistory.unknownStartCount ? `${portfolioHistory.unknownStartCount} 筆舊賣出持倉缺少買入日期，未列入歷史快照。` : undefined}
         view={viewFor("timeTravel")}
       />
     ),
@@ -231,7 +226,7 @@ export default function DashboardPage() {
         <h2 id="portfolio-summary-title" className="text-lg font-semibold">資產概況</h2>
         <p className="text-sm text-muted">
           {travelDate
-            ? `回看 ${formatIsoDateZh(travelDate)} · 依目前仍持有的部位與當時可用價格重建`
+            ? `回看 ${formatIsoDateZh(travelDate)} · 依當日持有的部位與可用估值重建`
             : `截至 ${formatIsoDateZh(todayIsoDate())} · 各筆採最新可用估值`}
         </p>
         <PortfolioSummaryCards summary={shownSummary} pnlBreakdowns={shownBreakdowns} view={viewFor("summary")} asOfDate={travelDate ?? undefined} />
@@ -364,10 +359,11 @@ export default function DashboardPage() {
                 {pnlCalendar.summary.pnl > 0 ? "+" : ""}
                 {formatAmount(pnlCalendar.summary.pnl)}
               </span>
-              <span className={`text-sm tabular-nums ${pnlCalendar.summary.returnRate >= 0 ? "text-gain" : "text-loss"}`}>
-                {travelDate ? `${shownMonthLabel}複利` : "本月複利"} {pnlCalendar.summary.returnRate > 0 ? "+" : ""}
-                {pnlCalendar.summary.returnRate.toFixed(2)}%
-              </span>
+              {monthRate !== null && (
+                <span className={`text-sm tabular-nums ${monthRate >= 0 ? "text-gain" : "text-loss"}`}>
+                  {travelDate ? `${shownMonthLabel}複利` : "本月複利"} {monthRate > 0 ? "+" : ""}{monthRate.toFixed(2)}%
+                </span>
+              )}
             </div>
           </div>
           <Link href="/calendar" className="text-sm font-medium text-accent hover:underline">
@@ -387,7 +383,7 @@ export default function DashboardPage() {
       <section className="glass-card p-4 sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-base font-semibold sm:text-lg">
-            持倉市值回推（{travelDate ? `截至 ${formatIsoDateZh(travelDate)}` : "今年度"}）
+            歷史持倉市值（{travelDate ? `截至 ${formatIsoDateZh(travelDate)}` : "今年度"}）
           </h2>
           <Link href="/trends" className="text-sm text-accent hover:underline">
             查看完整趨勢 →
@@ -397,6 +393,8 @@ export default function DashboardPage() {
           holdings={shownRawHoldings}
           priceHistory={shownHistory}
           range={travelDate ? "all" : "ytd"}
+          portfolioHistory={portfolioHistory}
+          asOfDate={travelDate ?? undefined}
         />
       </section>
     ),

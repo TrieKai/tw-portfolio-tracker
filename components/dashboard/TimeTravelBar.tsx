@@ -13,6 +13,7 @@ interface TimeTravelBarProps {
   currentSummary: PortfolioSummary;
   selectedSummary?: PortfolioSummary;
   view?: DashboardCardView;
+  historyNotice?: string;
 }
 
 function formatDate(date: string) {
@@ -25,6 +26,7 @@ export function TimeTravelBar({
   onSelectDate,
   currentSummary,
   selectedSummary,
+  historyNotice,
   view = "standard",
 }: TimeTravelBarProps) {
   const { formatAmount } = useAmountPrivacy();
@@ -119,7 +121,8 @@ export function TimeTravelBar({
         </button>
       </div>
       {active && (
-        <div className="mt-3 border-t border-border/70 pt-3">
+        <div className="mt-3 space-y-2 border-t border-border/70 pt-3">
+          {historyNotice && <p className="text-xs text-muted">{historyNotice}</p>}
           {selectedSummary && (
             <div className="grid gap-2 sm:grid-cols-3">
               <TimeMetric label="當時總資產" value={formatAmount(selectedSummary.totalValue)} />

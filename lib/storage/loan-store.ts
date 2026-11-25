@@ -1,3 +1,4 @@
+import { parseIsoDate } from "@/lib/date/iso-date";
 import type { PortfolioStorage } from "@/lib/types/holding";
 import type {
   CreateLoanPaymentInput,
@@ -81,6 +82,31 @@ export function addLoan(
   return { ...state, loans: [...state.loans, loan] };
 }
 
+/** 從新的起算日另建追蹤紀錄，清償期間的本金與利息維持原狀。 */
+export function restartLoan(
+  state: PortfolioStorage,
+  loanId: string,
+  input: CreateLoanInput,
+  now = new Date().toISOString()
+): PortfolioStorage {
+  const previous = state.loans.find((loan) => loan.id === loanId);
+  if (
+    !previous || previous.status === "active" || !previous.closedAt ||
+    !parseIsoDate(input.trackingStartDate) || input.trackingStartDate <= previous.closedAt ||
+    state.loans.some((loan) => loan.restartedFromLoanId === loanId)
+  ) return state;
+  const next = addLoan(state, {
+    ...input,
+    balanceHistory: undefined,
+    paymentHistory: undefined,
+    rateHistory: undefined,
+  }, now);
+  return {
+    ...next,
+    loans: [...state.loans, { ...next.loans.at(-1)!, restartedFromLoanId: loanId }],
+  };
+}
+
 /** 編輯代表更正契約資料，因此保留被取代的完整版本。 */
 export function editLoan(
   state: PortfolioStorage,
@@ -133,9 +159,16 @@ export function setLoanStatus(
   effectiveDate: string,
   now = new Date().toISOString()
 ): PortfolioStorage {
-  if (!state.loans.some((loan) => loan.id === loanId)) return state;
+  const previous = state.loans.find((loan) => loan.id === loanId);
+  if (!previous || previous.status === status) return state;
+  if (status === "active" && state.loans.some((loan) => loan.restartedFromLoanId === loanId)) return state;
+  if (status !== "active" && (!parseIsoDate(effectiveDate) || effectiveDate < previous.trackingStartDate)) return state;
   return {
     ...state,
+    loanRevisions: [
+      ...state.loanRevisions,
+      { id: newId("loan-revision"), loanId, previous, correctedAt: now },
+    ],
     loans: state.loans.map((loan) =>
       loan.id === loanId
         ? {

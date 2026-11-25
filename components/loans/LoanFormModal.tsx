@@ -73,18 +73,22 @@ function initialRepaymentMethod(loan?: Loan): LoanRepaymentMethod {
 }
 
 export function LoanFormModal({
-  loan,
+  loan: editingLoan,
+  restartOf,
   holdings,
   onSave,
   onClose,
 }: {
   loan?: Loan;
+  restartOf?: Loan;
   holdings: Holding[];
-  onSave: (input: CreateLoanInput) => void;
+  onSave: (input: CreateLoanInput) => Promise<boolean>;
   onClose: () => void;
 }) {
+  const loan = editingLoan ?? restartOf;
+  const [saving, setSaving] = useState(false);
   const [entryMode, setEntryMode] = useState<EntryMode>(
-    loan && isFlexibleLoanType(loan.loanType)
+    restartOf || (loan && isFlexibleLoanType(loan.loanType))
       ? "quick"
       : loan?.contractStartDate
         ? "complete"
@@ -104,15 +108,15 @@ export function LoanFormModal({
   const [linkedHoldingId, setLinkedHoldingId] = useState(
     loan?.linkedHoldingId ?? ""
   );
-  const [balance, setBalance] = useState(String(loan?.openingBalance ?? ""));
+  const [balance, setBalance] = useState(String(editingLoan?.openingBalance ?? ""));
   const [trackingStartDate, setTrackingStartDate] = useState(
-    loan?.trackingStartDate ?? todayIsoDate()
+    editingLoan?.trackingStartDate ?? todayIsoDate()
   );
   const [termMonths, setTermMonths] = useState(
-    loan?.remainingTermMonths ? String(loan.remainingTermMonths) : ""
+    editingLoan?.remainingTermMonths ? String(editingLoan.remainingTermMonths) : ""
   );
   const [firstPaymentDate, setFirstPaymentDate] = useState(
-    loan?.firstPaymentDate ?? ""
+    editingLoan?.firstPaymentDate ?? ""
   );
   const [annualInterestRate, setAnnualInterestRate] = useState(
     String(loan?.annualInterestRate ?? "")
@@ -123,10 +127,10 @@ export function LoanFormModal({
   const [repaymentMethod, setRepaymentMethod] =
     useState<LoanRepaymentMethod>(initialRepaymentMethod(loan));
   const [gracePeriodMonths, setGracePeriodMonths] = useState(
-    loan?.gracePeriodMonths ? String(loan.gracePeriodMonths) : ""
+    editingLoan?.gracePeriodMonths ? String(editingLoan.gracePeriodMonths) : ""
   );
   const [initialFees, setInitialFees] = useState(
-    loan?.initialFees ? String(loan.initialFees) : ""
+    editingLoan?.initialFees ? String(editingLoan.initialFees) : ""
   );
   const [accountLastFour, setAccountLastFour] = useState(
     loan?.accountLastFour ?? ""
@@ -135,7 +139,7 @@ export function LoanFormModal({
     loan?.creditLimit ? String(loan.creditLimit) : ""
   );
   const [maturityDate, setMaturityDate] = useState(
-    loan?.maturityDate ?? ""
+    editingLoan?.maturityDate ?? ""
   );
   const [maintenanceWarningPercent, setMaintenanceWarningPercent] = useState(
     loan?.maintenanceWarningPercent
@@ -214,8 +218,12 @@ export function LoanFormModal({
     }
   }
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
+    if (restartOf?.closedAt && trackingStartDate <= restartOf.closedAt) {
+      return setError("新的追蹤起算日須晚於上一期清償日。");
+    }
     setError(null);
 
     const principal = Number.parseFloat(balance);
@@ -319,7 +327,8 @@ export function LoanFormModal({
     const riskDataComplete =
       !collateralLoan || (hasCollateralDefinition && hasRiskThresholds);
 
-    onSave({
+    setSaving(true);
+    const saved = await onSave({
       name: name.trim(),
       ...(lender.trim() ? { lender: lender.trim() } : {}),
       loanType,
@@ -374,6 +383,8 @@ export function LoanFormModal({
             ? "estimated"
             : "incomplete",
     });
+    setSaving(false);
+    if (!saved) setError("未能儲存貸款。請確認貸款狀態與瀏覽器儲存空間後重試。");
   }
 
   return (
@@ -385,12 +396,14 @@ export function LoanFormModal({
       >
         <div className="sticky top-0 z-10 -mx-4 -mt-4 flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2 sm:-mx-6 sm:-mt-6 sm:px-6">
           <h2 id="loan-form-title" className="text-lg font-semibold">
-            {loan ? "更正貸款資料" : "新增貸款"}
+            {restartOf ? "開始新的貸款追蹤" : editingLoan ? "更正貸款資料" : "新增貸款"}
           </h2>
           <button type="button" onClick={onClose} className="btn-secondary shrink-0">關閉</button>
         </div>
 
-        {!flexibleLoan ? <div className="space-y-3">
+        {restartOf ? (
+          <p className="text-sm leading-relaxed text-muted">填寫重新開始追蹤當日的本金。原有清償紀錄會保留，新一期從指定日期開始計息。</p>
+        ) : !flexibleLoan ? <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2" role="group" aria-label="貸款建立方式">
           <button
             type="button"
@@ -455,7 +468,7 @@ export function LoanFormModal({
         ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label={entryMode === "complete" && !flexibleLoan ? "原始貸款金額" : flexibleLoan && loan ? "起始本金基準（更正用）" : "目前動用／剩餘本金"} required>
+          <Field label={entryMode === "complete" && !flexibleLoan ? "原始貸款金額" : flexibleLoan && editingLoan ? "起始本金基準（更正用）" : "目前動用／剩餘本金"} required>
             <input type="number" min="0" step="1" className="input-field" value={balance} onChange={(event) => setBalance(event.target.value)} />
           </Field>
           <Field label={entryMode === "complete" && !flexibleLoan ? "借款日期" : "本金基準日"} required>
@@ -497,7 +510,7 @@ export function LoanFormModal({
             <div>
               <h3 className="font-medium">額度與到期資訊</h3>
               <p className="mt-1 text-xs text-muted">依銀行或券商契約填寫；不確定可先留白。</p>
-              {loan ? <p className="mt-1 text-xs text-muted">目前動用本金請使用貸款卡片的「更新餘額」，才能保留歷史計息基準。</p> : null}
+              {editingLoan ? <p className="mt-1 text-xs text-muted">目前動用本金請使用貸款卡片的「更新餘額」，才能保留歷史計息基準。</p> : null}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="契約總額度（選填）">
@@ -558,10 +571,10 @@ export function LoanFormModal({
         <p className="rounded-lg border border-border bg-surface-raised/60 p-3 text-xs leading-5 text-muted">
           本金還款只降低負債；利息與貸款費用才會進入融資成本。還款表採月利率預估，損益利息採實際天數／365 日；快速建立不回推未知歷史。
         </p>
-        {error ? <p className="text-sm text-rose-500">{error}</p> : null}
+        {error ? <p role="alert" className="text-sm text-rose-500">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
-          <button type="submit" className="btn-primary">儲存貸款</button>
+          <button type="submit" disabled={saving} className="btn-primary">儲存貸款</button>
         </div>
       </form>
     </Modal>

@@ -156,7 +156,7 @@ export function AddHoldingForm() {
     if (isProperty) {
       const value =
         !Number.isNaN(estimate) && estimate > 0 ? estimate : price;
-      const id = add(
+      const id = await add(
         {
           assetType: "property",
           name: propertyName.trim(),
@@ -177,7 +177,7 @@ export function AddHoldingForm() {
       }
       submittingRef.current = false;
       setSubmitting(false);
-      setError("資料尚未就緒，請重試儲存。");
+      setError("未能儲存持倉，請確認瀏覽器儲存空間後重試。");
       return;
     }
 
@@ -191,7 +191,7 @@ export function AddHoldingForm() {
       return;
     }
 
-    const newId = add({
+    const newId = await add({
       assetType,
       name: lookup.name,
       symbol: lookup.symbol,
@@ -205,7 +205,7 @@ export function AddHoldingForm() {
     if (!newId) {
       submittingRef.current = false;
       setSubmitting(false);
-      setError("資料尚未就緒，請重試儲存。");
+      setError("未能儲存持倉，請確認瀏覽器儲存空間後重試。");
       return;
     }
     router.push("/holdings");

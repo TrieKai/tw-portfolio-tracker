@@ -30,25 +30,70 @@ import type {
 } from "@/lib/types/holding";
 import type { CorporateActionEvent } from "@/lib/corporate-actions/types";
 
+export class UnreadablePortfolioError extends Error {}
+
 export function loadPortfolio(): PortfolioStorage {
   if (typeof window === "undefined") return defaultPortfolioStorage();
 
+  const raw = localStorage.getItem(PORTFOLIO_STORAGE_KEY);
+  if (raw === null) return defaultPortfolioStorage();
   try {
-    const raw = localStorage.getItem(PORTFOLIO_STORAGE_KEY);
-    if (!raw) return defaultPortfolioStorage();
-    const parsed = JSON.parse(raw) as unknown;
-    const normalized = normalizePortfolioStorage(parsed) ?? defaultPortfolioStorage();
-    const repaired = repairCorporateActionPriceHistory(normalized);
-    if (repaired !== normalized) savePortfolio(repaired);
-    return repaired;
+    const normalized = normalizePortfolioStorage(JSON.parse(raw) as unknown);
+    if (normalized) return repairCorporateActionPriceHistory(normalized);
   } catch {
-    return defaultPortfolioStorage();
+    throw new UnreadablePortfolioError("無法讀取本機投資組合資料");
   }
+  throw new UnreadablePortfolioError("無法辨識本機投資組合資料");
 }
 
-export function savePortfolio(state: PortfolioStorage): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(state));
+/** 讀取與寫入須在同一個跨分頁鎖內完成，避免兩個分頁各自覆寫整份資料。 */
+export async function commitPortfolio(
+  update: (latest: PortfolioStorage) => PortfolioStorage | null,
+  publish: (saved: PortfolioStorage) => void,
+  overwriteUnreadable = false
+): Promise<boolean> {
+  const commit = () => {
+    let latest: PortfolioStorage;
+    try {
+      latest = loadPortfolio();
+    } catch (error) {
+      if (!overwriteUnreadable || !(error instanceof UnreadablePortfolioError)) throw error;
+      latest = defaultPortfolioStorage();
+    }
+    const next = update(latest);
+    if (!next) return false;
+    if (next !== latest) {
+      localStorage.setItem(PORTFOLIO_STORAGE_KEY, JSON.stringify(next));
+    }
+    publish(next);
+    return true;
+  };
+
+  if (navigator.locks) return navigator.locks.request(PORTFOLIO_STORAGE_KEY, commit);
+
+  // 非安全環境與舊瀏覽器以 IndexedDB 的寫入交易協調，持倉仍存於 LocalStorage。
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(PORTFOLIO_STORAGE_KEY + "-lock", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("lock");
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction("lock", "readwrite");
+      const ready = tx.objectStore("lock").get(0);
+      tx.oncomplete = () => db.close();
+      tx.onabort = () => {
+        db.close();
+        reject(tx.error);
+      };
+      ready.onsuccess = () => {
+        try {
+          resolve(commit());
+        } catch (error) {
+          reject(error);
+        }
+      };
+    };
+  });
 }
 
 function newId(): string {
@@ -85,6 +130,8 @@ function persistPnlSummariesForDates(
         date: day.date,
         pnl: day.pnl,
         returnRate: day.returnRate,
+        returnBase: day.returnBase,
+        gapStartDate: day.gapStartDate,
         quality: day.quality,
         computedAt,
       };
@@ -322,6 +369,7 @@ function buildSaleRecord(
     name: holding.name,
     symbol: holding.symbol,
     market: holding.market,
+    buyDate: holding.buyDate,
     buyPrice: holding.buyPrice,
     quantity: input.quantity,
     sellPrice: input.sellPrice,
@@ -406,7 +454,13 @@ export function sellHoldings(
   state: PortfolioStorage,
   inputs: SellHoldingInput[]
 ): PortfolioStorage {
-  return inputs.reduce((next, input) => sellHolding(next, input), state);
+  let next = state;
+  for (const input of inputs) {
+    const afterSale = sellHolding(next, input);
+    if (afterSale === next) return state;
+    next = afterSale;
+  }
+  return next;
 }
 
 /** 手動新增現金股利／基金配息，並以標的、除息日與金額避免重複入帳。 */
@@ -564,7 +618,7 @@ function rebaseCurrentPriceBeforeDate(
   };
 }
 
-function corporateActionAdjustmentRatio(action: CorporateActionRecord): number {
+export function corporateActionAdjustmentRatio(action: CorporateActionRecord): number {
   if (
     action.adjustmentRatio !== undefined &&
     Number.isFinite(action.adjustmentRatio) &&

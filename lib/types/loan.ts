@@ -117,6 +117,7 @@ export interface Loan {
   rateHistory?: LoanRateChange[];
   status: LoanStatus;
   closedAt?: string;
+  restartedFromLoanId?: string;
   dataQuality: LoanDataQuality;
   createdAt: string;
   updatedAt: string;
@@ -124,7 +125,7 @@ export interface Loan {
 
 export type CreateLoanInput = Omit<
   Loan,
-  "id" | "status" | "closedAt" | "createdAt" | "updatedAt"
+  "id" | "status" | "closedAt" | "restartedFromLoanId" | "createdAt" | "updatedAt"
 >;
 
 export type EditLoanInput = CreateLoanInput & { id: string };

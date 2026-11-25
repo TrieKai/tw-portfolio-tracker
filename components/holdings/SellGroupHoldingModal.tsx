@@ -17,7 +17,7 @@ export function SellGroupHoldingModal({
   onClose,
 }: {
   group: HoldingGroupWithMetrics;
-  onSave: (inputs: SellHoldingInput[]) => void;
+  onSave: (inputs: SellHoldingInput[]) => Promise<boolean>;
   onClose: () => void;
 }) {
   const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
@@ -31,6 +31,7 @@ export function SellGroupHoldingModal({
   const [sellDate, setSellDate] = useState(todayIsoDate());
   const [fee, setFee] = useState("");
   const [tax, setTax] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const allocation = useMemo(() => {
@@ -62,8 +63,9 @@ export function SellGroupHoldingModal({
     return { proceeds, realizedPnl, isFullSell, cost };
   }, [quantity, sellPrice, fee, tax, allocation, totalQty]);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (saving) return;
     setError(null);
 
     const qty = Number.parseFloat(quantity);
@@ -105,12 +107,15 @@ export function SellGroupHoldingModal({
 
     let distributedFee = 0;
     let distributedTax = 0;
-    onSave(
+    setSaving(true);
+    const saved = await onSave(
       allocated.map((a, index) => {
         const isLast = index === allocated.length - 1;
         const lotFee = isLast
           ? feeAmount - distributedFee
           : feeAmount * (a.quantity / qty);
+    setSaving(false);
+    if (!saved) setError("這次變更未儲存。請確認資料狀態與瀏覽器儲存空間後重試。");
         const lotTax = isLast
           ? taxAmount - distributedTax
           : taxAmount * (a.quantity / qty);
@@ -264,13 +269,13 @@ export function SellGroupHoldingModal({
           </div>
         )}
 
-        {error && <p className="text-sm text-rose-500">{error}</p>}
+        {error && <p role="alert" className="text-sm text-rose-500">{error}</p>}
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="btn-secondary">
             取消
           </button>
-          <button type="submit" className="btn-primary">
+          <button type="submit" disabled={saving} className="btn-primary">
             確認賣出
           </button>
         </div>
