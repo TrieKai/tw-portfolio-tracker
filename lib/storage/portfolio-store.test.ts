@@ -43,6 +43,29 @@ describe("portfolio transaction tracking", () => {
     }
   });
 
+  it("stores corrected valuation totals after editing an acquisition and before prices expire", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2022-11-07T10:00:00.000Z"));
+      const initial = addHolding(defaultPortfolioStorage(), {
+        assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2022-11-02",
+      });
+      const id = initial.holdings[0].id;
+      const priced = applyPriceUpdate(applyPriceUpdate(initial, id, 110, "2022-11-03", "manual"), id, 120, "2022-11-07", "api");
+      const corrected = editHolding(priced, { ...priced.holdings[0], buyPrice: 105, quantity: 80 });
+      expect(corrected.pnlTracking.dailySummaries["2022-11-03"]?.pnl).toBe(400);
+      expect(corrected.pnlTracking.dailySummaries["2022-11-07"]?.pnl).toBe(800);
+      vi.setSystemTime(new Date("2026-11-25T10:00:00.000Z"));
+      const expired = applyPriceUpdate(corrected, id, 130, "2026-11-25", "api");
+      const calendar = buildPnlCalendar(expired, {
+        month: "2022-11", asOfDate: "2022-11-30", filter: { kind: "investment" },
+      });
+      expect(calendar.summary.pnl).toBe(1200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("leaves holdings and history intact until a company action takes effect", () => {
     const opened = addHolding(defaultPortfolioStorage(), {
       assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2020-01-02",
@@ -539,6 +562,10 @@ describe("portfolio transaction tracking", () => {
     const closedBeforeEx = sellHolding(announced, { ...earlierSale, quantity: 100 });
     expect(closedBeforeEx.holdings).toHaveLength(0);
     expect(closedBeforeEx.transactions.find((event) => event.corporateActionEventId === dividend.id)?.amount).toBe(0);
+
+    const corrected = editHolding(announced, { ...announced.holdings[0], quantity: 80 });
+    expect(corrected.transactions.find((event) => event.corporateActionEventId === dividend.id)?.amount).toBe(400);
+    expect(corrected.pnlTracking.dailySummaries["2026-11-10"]?.pnl).toBe(400);
   });
 
 
@@ -587,6 +614,42 @@ describe("portfolio transaction tracking", () => {
     const reconciled = applyCorporateAction(manual, event);
     expect(reconciled.transactions.filter((item) => item.type === "cash_dividend")).toHaveLength(1);
     expect(reconciled.transactions.at(-1)).toMatchObject({ amount: 500, source: "user" });
+  });
+
+  it("retains archived valuation gains and adds a late dividend exactly once", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2022-11-07T10:00:00.000Z"));
+      const initial = addHolding(defaultPortfolioStorage(), { assetType: "stock", symbol: "2330", name: "歷史配息測試",
+        quantity: 100, buyPrice: 100, buyDate: "2022-11-02" });
+      const id = initial.holdings[0].id;
+      const withPrice = applyPriceUpdate(applyPriceUpdate(initial, id, 100, "2022-11-03", "api"), id, 104, "2022-11-04", "api");
+      const input = { holdingId: id, effectiveDate: "2022-11-04", amount: 50 };
+      const paid = addCashDividend(withPrice, input);
+      const day = (state: typeof paid) => buildPnlCalendar(state, {
+        month: "2022-11", asOfDate: "2022-11-30", filter: { kind: "investment" },
+      }).days.find(({ date }) => date === input.effectiveDate);
+      expect(day(paid)).toMatchObject({ pnl: 450, returnRate: 4.5 });
+
+      vi.setSystemTime(new Date("2026-11-25T10:00:00.000Z"));
+      const expire = (state: typeof paid) => applyPriceUpdate(state, id, 130, "2026-11-25", "api");
+      const expired = expire(paid);
+      expect(expired.priceHistory[id].map(({ date }) => date)).toEqual(["2026-11-25"]);
+      expect(day(expired)).toMatchObject({ pnl: 450, returnRate: 4.5 });
+      const additional = addCashDividend(expired, { ...input, amount: 25 });
+      expect(day(additional)).toMatchObject({ pnl: 475, returnRate: 4.75 });
+      expect(addCashDividend(additional, { ...input, amount: 25 })).toBe(additional);
+      const late = addCashDividend(expire(withPrice), input);
+      expect(day(late)).toMatchObject({ pnl: 450, returnRate: null });
+      const official = applyCorporateAction(expire(withPrice), {
+        id: "fixture-late-official-dividend", holdingId: id, symbol: "2330", market: "tse", name: "歷史配息測試",
+        type: "cash_dividend", effectiveDate: input.effectiveDate, source: "twse", exDividendLabel: "除息",
+        stockDividendRatio: 0, subscriptionRatio: 0, cashDividend: 0.5, autoApplicable: true,
+      });
+      expect(day(official)).toMatchObject({ pnl: 450, returnRate: null });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
 });

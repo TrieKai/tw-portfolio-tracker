@@ -270,11 +270,12 @@ export function estimateLoanInterestForPeriod(
 
   const endDate = effectiveEndDate(loan, toDate);
   if (endDate <= fromDate) return 0;
-  let cursor = fromDate > loan.trackingStartDate
+  const startDate = fromDate > loan.trackingStartDate
     ? fromDate
     : loan.trackingStartDate;
-  let principal = principalAtDate(loan, cursor, schedule);
-  let annualInterestRate = interestRateAtDate(loan, cursor);
+  let cursor = startDate;
+  let principal = principalAtDate(loan, startDate, schedule);
+  let annualInterestRate = interestRateAtDate(loan, startDate);
   let interest = 0;
 
   const events = [
@@ -291,7 +292,8 @@ export function estimateLoanInterestForPeriod(
   ].sort((a, b) => a.date.localeCompare(b.date) || a.priority - b.priority);
 
   for (const event of events) {
-    if (event.date <= cursor) continue;
+    // 起算日已讀取最新本金與利率。之後同一天的事件都須套用，事件之間不再計息。
+    if (event.date <= startDate) continue;
     if (event.date > endDate) break;
     const days = daysBetween(cursor, event.date);
     interest += principal * (annualInterestRate / 100) * (days / 365);

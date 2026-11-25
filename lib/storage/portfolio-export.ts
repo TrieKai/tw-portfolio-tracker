@@ -671,11 +671,9 @@ export function mergePortfolioStorage(
     return { ...sale, buyPrice, costBasis, realizedPnl: sale.realizedPnl + (sale.costBasis - costBasis), updatedAt };
   });
 
-  const transactions = mergeManualDividends(mergeRecords(
-    adjustedTransactions({ ...current, transactions: currentTrades.transactions }, corporateActions),
-    adjustedTransactions({ ...incoming, transactions: incomingTrades.transactions }, corporateActions),
-    (event) => event.updatedAt
-  ));
+  const currentTransactions = adjustedTransactions({ ...current, transactions: currentTrades.transactions }, corporateActions);
+  const incomingTransactions = adjustedTransactions({ ...incoming, transactions: incomingTrades.transactions }, corporateActions);
+  const transactions = mergeManualDividends(mergeRecords(currentTransactions, incomingTransactions, (event) => event.updatedAt));
   const pnlEventDates = new Map<string, string[]>();
   for (const event of transactions) {
     if (event.type !== "sell" && event.type !== "cash_dividend") continue;
@@ -717,12 +715,6 @@ export function mergePortfolioStorage(
     for (const date of pnlDatesUsingDifferentPrices(points, imported, dates, earliest)) changedPrices.incoming.add(date);
   }
 
-  const dailySummaries = mergeDailyPnlSummaries(current, incoming, repricedSales, corporateActions, changedPrices);
-  for (const [id, removal] of removals) {
-    for (const point of priceHistory[id] ?? []) {
-      if (point.date >= removal.removedOn) delete dailySummaries[point.date];
-    }
-  }
   const currentHasData = hasPortfolioData(current);
   const result: PortfolioStorage = {
     version: 2,
@@ -736,7 +728,7 @@ export function mergePortfolioStorage(
     transactionRevisions: mergeRecords(current.transactionRevisions, incoming.transactionRevisions),
     pnlTracking: {
       startedAt: current.pnlTracking.startedAt || incoming.pnlTracking.startedAt,
-      dailySummaries,
+      dailySummaries: {},
     },
     priceHistory,
     settings: {
@@ -746,10 +738,21 @@ export function mergePortfolioStorage(
     },
   };
   const reconciled = reconcileCorporateDividends(result);
-  for (const date of reconciled.dates) delete dailySummaries[date];
-  const recalculate = [...new Set([...changedPrices.current, ...changedPrices.incoming])]
-    .filter((date) => !dailySummaries[date]);
-  return persistPnlSummariesForDates(reconciled.storage, recalculate);
+  const { dailySummaries, changedDates } = mergeDailyPnlSummaries(
+    { portfolio: current, transactions: currentTransactions, changedPrices: changedPrices.current },
+    { portfolio: incoming, transactions: incomingTransactions, changedPrices: changedPrices.incoming },
+    reconciled.storage,
+  );
+  for (const [id, removal] of removals) {
+    for (const point of priceHistory[id] ?? []) {
+      if (point.date >= removal.removedOn) delete dailySummaries[point.date];
+    }
+  }
+  const recalculate = [...changedDates].filter((date) => !dailySummaries[date]);
+  return persistPnlSummariesForDates({
+    ...reconciled.storage,
+    pnlTracking: { ...reconciled.storage.pnlTracking, dailySummaries },
+  }, recalculate);
 }
 
 export function applyImportMode(

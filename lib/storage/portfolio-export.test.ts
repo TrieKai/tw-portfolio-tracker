@@ -166,6 +166,36 @@ describe("backup merging", () => {
     }
   });
 
+  it("rebuilds stale totals from the newer acquisition even when both backups have the same quotes", () => {
+    const initial = savedPortfolio();
+    const id = initial.holdings[0].id;
+    const original = applyPriceUpdate(applyPriceUpdate(initial, id, 110, "2026-11-06", "api"), id, 120, "2026-11-09", "api");
+    const corrected = editHolding(original, { ...original.holdings[0], buyPrice: 105, quantity: 80 });
+    const legacy = { ...corrected, pnlTracking: { ...corrected.pnlTracking, dailySummaries: {} } };
+    for (const [local, backup] of [[legacy, original], [original, legacy]]) {
+      const merged = mergePortfolioStorage(local, backup);
+      expect(merged.holdings[0]).toMatchObject({ buyPrice: 105, quantity: 80 });
+      expect(merged.pnlTracking.dailySummaries["2026-11-06"]?.pnl).toBe(400);
+      expect(merged.pnlTracking.dailySummaries["2026-11-09"]?.pnl).toBe(800);
+      const repeated = mergePortfolioStorage(merged, original);
+      expect(repeated.pnlTracking.dailySummaries).toEqual(merged.pnlTracking.dailySummaries);
+    }
+  });
+
+  it("records the combined buy fees when two devices acquire different lots on the same day", () => {
+    const empty = defaultPortfolioStorage();
+    const local = addHolding(empty, { assetType: "stock", symbol: "2330", name: "台積電",
+      quantity: 100, buyPrice: 100, buyDate: "2026-11-02", fee: 25 });
+    const backup = addHolding(empty, { assetType: "fund", symbol: "0101", name: "測試基金",
+      quantity: 10, buyPrice: 40, buyDate: "2026-11-02", fee: 15 });
+    for (const [a, b] of [[local, backup], [backup, local]]) {
+      const merged = mergePortfolioStorage(a, b);
+      expect(merged.holdings).toHaveLength(2);
+      expect(merged.pnlTracking.dailySummaries["2026-11-02"]).toMatchObject({ pnl: -40, returnRate: null });
+      expect(mergePortfolioStorage(merged, b).pnlTracking.dailySummaries).toEqual(merged.pnlTracking.dailySummaries);
+    }
+  });
+
   it("does not restore a holding already sold in full", () => {
     const older = savedPortfolio();
     const sold = sellHolding(older, {
@@ -219,6 +249,36 @@ describe("backup merging", () => {
         month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" },
       });
       expect(calendar.days.find((day) => day.date === input.effectiveDate)?.pnl).toBe(500);
+    }
+  });
+
+  it("merges distinct dividends without losing the same day's archived valuation", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2022-11-07T10:00:00.000Z"));
+      const stock = { assetType: "stock" as const, quantity: 100, buyPrice: 100, buyDate: "2022-11-02" };
+      const a = addHolding(defaultPortfolioStorage(), { ...stock, symbol: "2330", name: "台積電" });
+      const initial = addHolding(a, { ...stock, symbol: "2317", name: "鴻海" });
+      const [id, other] = initial.holdings.map((holding) => holding.id);
+      const date = "2022-11-04";
+      const priced = applyPriceUpdate(applyPriceUpdate(initial, id, 100, "2022-11-03", "api"), id, 104, date, "api");
+      const local = addCashDividend(priced, { holdingId: id, effectiveDate: date, amount: 50 });
+      const backup = addCashDividend(priced, { holdingId: other, effectiveDate: date, amount: 25 });
+      expect(mergePortfolioStorage(local, backup).pnlTracking.dailySummaries[date].pnl).toBe(475);
+      vi.setSystemTime(new Date("2026-11-25T10:00:00.000Z"));
+      const expire = (state: typeof local) => applyPriceUpdate(state, id, 130, "2026-11-25", "api");
+      for (const merged of [mergePortfolioStorage(expire(local), expire(backup)), mergePortfolioStorage(expire(backup), expire(local))]) {
+        expect(merged.pnlTracking.dailySummaries[date]).toMatchObject({ pnl: 475, returnRate: null });
+        const repeated = mergePortfolioStorage(merged, backup);
+        expect(repeated.pnlTracking.dailySummaries[date].pnl).toBe(475);
+        const calendar = buildPnlCalendar(repeated, {
+          month: "2022-11", asOfDate: "2022-11-30", filter: { kind: "investment" },
+        });
+        expect(calendar.days.find((day) => day.date === date)?.pnl).toBe(475);
+        expect(repeated.transactions.filter((event) => event.type === "cash_dividend")).toHaveLength(2);
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 

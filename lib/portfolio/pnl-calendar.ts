@@ -1,4 +1,5 @@
 import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
+import { hasNewerTradeOnSummaryDate } from "@/lib/portfolio/dividend-pnl";
 import { linkSaleEvents } from "@/lib/portfolio/sale-events";
 import type {
   AssetType,
@@ -587,10 +588,15 @@ export function buildPnlCalendar(
     }
   );
   const recentDays = computedDays.filter((day) => {
-    if (!day.saleWithoutPriorPrice || options.filter.kind !== "investment") return true;
+    if (options.filter.kind !== "investment") return true;
     const saved = storage.pnlTracking.dailySummaries[day.date];
-    // 行情過期後沿用曾經算出的當日損益，避免再次計入整段持有期間的價差。
-    return !saved || saved.saleWithoutPriorPrice || saved.returnRate === null || saved.returnBase === undefined;
+    if (!saved) return true;
+    // 明細只剩配息時，舊摘要仍包含當時可取得的估值。
+    if (day.date < retentionStart && day.pricedHoldingCount < day.totalHoldingCount &&
+        day.contributions.some((item) => item.dividend > 0) &&
+        !hasNewerTradeOnSummaryDate(storage.transactions, saved)) return false;
+    // 缺少成交前的行情時，避免再次計入整段持有期間的價差。
+    return !day.saleWithoutPriorPrice || !!saved.saleWithoutPriorPrice || saved.returnRate === null || saved.returnBase === undefined;
   });
   const computedDates = new Set(recentDays.map((day) => day.date));
   const persistedDays: PnlCalendarDay[] =

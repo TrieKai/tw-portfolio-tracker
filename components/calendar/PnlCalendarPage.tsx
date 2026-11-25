@@ -344,8 +344,13 @@ export function PnlCalendarPage() {
     }
     return Array.from(options.values());
   }, [investmentHoldings, storage.holdingRemovals, storage.transactions, storage.sales]);
-  const filter = useMemo(() => filterFromValue(filterValue), [filterValue]);
-  const showNetPerformance = performanceView === "net" && filter.kind === "investment";
+  const hasAssetRecords = filterHoldings.length > 0;
+  const hasInvestmentHistory = hasAssetRecords || Object.keys(storage.pnlTracking.dailySummaries).length > 0;
+  const hasInvestmentLoans = storage.loans.some((loan) => loan.investmentUsePercent > 0);
+  const financingOnly = !hasInvestmentHistory && hasInvestmentLoans;
+  const activeFilterValue = hasAssetRecords ? filterValue : "investment";
+  const filter = useMemo(() => filterFromValue(activeFilterValue), [activeFilterValue]);
+  const showNetPerformance = (financingOnly || performanceView === "net") && filter.kind === "investment";
   const calendar = useMemo(
     () =>
       buildPnlCalendar(storage, {
@@ -410,7 +415,7 @@ export function PnlCalendarPage() {
 
   if (!ready) return <LoadingSpinner />;
 
-  if (filterHoldings.length === 0) {
+  if (!hasInvestmentHistory && !hasInvestmentLoans) {
     return (
       <div className="space-y-6">
         <PageHeader title="損益日曆" description="查看每日投資損益，也可切換至扣息後績效。" />
@@ -427,7 +432,7 @@ export function PnlCalendarPage() {
   const completeness = hasValuations
     ? (calendar.summary.completeDayCount / calendar.summary.dataDayCount) * 100
     : 0;
-  const isEstimatedMonth = hasValuations &&
+  const isEstimatedMonth = hasAssetRecords && hasValuations &&
     (!storage.pnlTracking.startedAt || month < storage.pnlTracking.startedAt.slice(0, 7));
 
   function chooseMonth(next: string) {
@@ -451,8 +456,8 @@ export function PnlCalendarPage() {
     <div className="space-y-6">
       <PageHeader
         title="損益日曆"
-        description="查看每日投資損益，也可切換至扣息後績效。"
-        action={
+        description={financingOnly ? "查看投資用途貸款的利息、費用與對帳調整。" : "查看每日投資損益，也可切換至扣息後績效。"}
+        action={financingOnly ? <Link href="/loans" className="btn-secondary">查看貸款紀錄</Link> : hasAssetRecords ? (
           <div className="flex w-full gap-2 sm:w-auto">
             <button
               type="button"
@@ -471,7 +476,7 @@ export function PnlCalendarPage() {
               {loadingMonth === month ? "載入中…" : "補齊所選月份"}
             </button>
           </div>
-        }
+        ) : undefined}
       />
 
       <section className="glass-card space-y-4 p-4 sm:p-5">
@@ -514,7 +519,7 @@ export function PnlCalendarPage() {
                 回到本月
               </button>
             )}
-            <select
+            {hasAssetRecords && <select
               value={filterValue}
               onChange={(event) => {
                 setFilterValue(event.target.value);
@@ -531,11 +536,11 @@ export function PnlCalendarPage() {
                   {holding.name}（{holding.symbol}）
                 </option>
               ))}
-            </select>
+            </select>}
           </div>
         </div>
 
-        {filter.kind === "investment" ? (
+        {filter.kind === "investment" && !financingOnly && (hasAssetRecords || hasInvestmentLoans) ? (
           <div className="grid grid-cols-2 gap-2 sm:max-w-xs" role="group" aria-label="損益口徑">
             <button type="button" onClick={() => setPerformanceView("gross")} aria-pressed={performanceView === "gross"} className={performanceView === "gross" ? "btn-primary" : "btn-secondary"}>投資損益</button>
             <button type="button" onClick={() => setPerformanceView("net")} aria-pressed={performanceView === "net"} className={performanceView === "net" ? "btn-primary" : "btn-secondary"}>扣息後</button>
@@ -556,7 +561,12 @@ export function PnlCalendarPage() {
 
       {hasValuations ? (
         <section className="metric-grid-container" aria-label="所選月份損益摘要">
-          <div className="metric-grid">
+          {financingOnly ? <SummaryCard
+            label="融資成本影響"
+            value={maskAmount(formatFinancingCostImpact(calendar.summary.financingCost ?? 0))}
+            className={pnlClass(calendar.summary.pnl)}
+            description="依貸款本金、利率與繳款紀錄計算"
+          /> : <div className="metric-grid">
             <SummaryCard
               label={showNetPerformance ? "扣息後淨損益" : "投資損益"}
               value={formatSignedAmount(calendar.summary.pnl)}
@@ -574,7 +584,7 @@ export function PnlCalendarPage() {
               value={showNetPerformance
                 ? maskAmount(formatFinancingCostImpact(calendar.summary.financingCost ?? 0))
                 : `${calendar.summary.gainDayCount}／${calendar.summary.lossDayCount}`}
-              className={showNetPerformance ? "text-loss" : undefined}
+              className={showNetPerformance ? pnlClass(-(calendar.summary.financingCost ?? 0)) : undefined}
               description={showNetPerformance ? "依貸款本金、利息與繳款紀錄計算" : `共 ${calendar.summary.dataDayCount} 個估值日`}
             />
             <SummaryCard
@@ -582,12 +592,12 @@ export function PnlCalendarPage() {
               value={`${completeness.toFixed(0)}%`}
               description={`${calendar.summary.completeDayCount}／${calendar.summary.dataDayCount} 日完整`}
             />
-          </div>
+          </div>}
         </section>
       ) : (
         <EmptyState
           title={loadingMonth === month ? "正在載入所選月份的資料" : "所選範圍尚無損益資料"}
-          description={canBackfill
+          description={financingOnly ? "所選月份沒有投資用途的融資成本，可切換月份查看其他紀錄。" : canBackfill
             ? "可補齊所選月份和上月底的估值價格，再查看日、週與月損益。"
             : hasHoldingsForMonth
               ? "可在持倉頁手動補入價格。自動歷史查詢支援上市股票和境內基金，價格保留近三年。"
@@ -606,7 +616,7 @@ export function PnlCalendarPage() {
       </section>
 
       <p className="text-xs leading-5 text-muted">
-        已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」包含舊資料回算或融資成本估算，「區間」表示自買入日至首次估值，或中間有平日缺少估值，「缺前收」表示賣出僅能列示已確認的成交損益，比例標籤代表只有部分資產更新。非交易日的利息會計入週與月合計。
+        {financingOnly ? "非交易日的利息也會計入每週與每月的融資成本。" : "已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」包含舊資料回算或融資成本估算，「區間」表示自買入日至首次估值，或中間有平日缺少估值，「缺前收」表示賣出僅能列示已確認的成交損益，比例標籤代表只有部分資產更新。非交易日的利息會計入週與月合計。"}
       </p>
 
       {selection ? (

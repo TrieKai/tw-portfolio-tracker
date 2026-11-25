@@ -47,7 +47,10 @@ function DayDetail({
   transactions: PortfolioTransaction[];
   showSummary?: boolean;
 }) {
-  const { formatSignedAmount, formatQuoteAmount, maskAmount } = useAmountPrivacy();
+  const { formatAmount, formatSignedAmount, formatQuoteAmount, maskAmount } = useAmountPrivacy();
+  const dayDividends = transactions.filter((event) =>
+    event.type === "cash_dividend" && event.date === day.date && (event.amount ?? 0) > 0
+  );
   return (
     <section className="space-y-4">
       {showSummary ? (
@@ -70,20 +73,35 @@ function DayDetail({
       ) : null}
 
       {day.contributions.length === 0 ? (
-        <p className="rounded-xl border border-border p-4 text-sm text-muted">
-          {day.financingCost && Math.abs(day.financingCost) > 1e-9
-            ? `這一天只有融資成本調整 ${maskAmount(formatFinancingCostImpact(day.financingCost))}。`
-            : "這一天只有已保存的總額，逐資產明細已超過保存期限。"}
-        </p>
+        <div className="rounded-xl border border-border p-4">
+          <p className="text-sm text-muted">
+            {day.financingCost && Math.abs(day.financingCost) > 1e-9 && day.grossPnl === 0 && !dayDividends.length
+              ? `這一天只有融資成本調整 ${maskAmount(formatFinancingCostImpact(day.financingCost))}。`
+              : "日損益總額已保存，歷史估值明細已超過保存期限。"}
+          </p>
+          {dayDividends.length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-sm font-semibold">當日配息</h3>
+              <ul aria-label="當日配息" className="mt-2 divide-y divide-border border-t border-border">
+                {dayDividends.map((event) => (
+                  <li key={event.id} className="flex items-start justify-between gap-3 py-3 last:pb-0">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-medium">{event.name}（{event.symbol}）</p>
+                      <p className="mt-1 text-xs text-muted">
+                        {event.settlementDate ? `實際入帳 ${event.settlementDate}` : "未填實際入帳日"}
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-sm font-medium tabular-nums">{formatAmount(event.amount ?? 0)}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="space-y-3">
           {day.contributions.map((contribution) => {
-            const dividendEvents = transactions.filter(
-              (transaction) =>
-                contribution.holdingIds.includes(transaction.holdingId) &&
-                transaction.type === "cash_dividend" &&
-                transaction.date === day.date
-            );
+            const dividendEvents = dayDividends.filter((event) => contribution.holdingIds.includes(event.holdingId));
             return (
               <article
                 key={`${contribution.assetType}:${contribution.market ?? ""}:${contribution.symbol}`}

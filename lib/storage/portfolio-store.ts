@@ -16,6 +16,7 @@ import { corporateActionAdjustmentRatio, costOnDate, holdingActions, holdingSale
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import { corporateEventForLot, dividendShareCount, isDividendDateInPosition, listDividendLots } from "@/lib/portfolio/dividend-lots";
 import { reconcileCorporateDividends } from "@/lib/portfolio/corporate-dividends";
+import { applyDividendPnlChange, dividendPnlByDate, dividendPnlChange, hasNewerTradeOnSummaryDate } from "@/lib/portfolio/dividend-pnl";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import type {
   CorporateActionRecord,
@@ -168,6 +169,22 @@ function persistPricePnlSummaries(state: PortfolioStorage, holding: Holding, cha
   return persistPnlSummariesForDates({
     ...state, pnlTracking: { ...state.pnlTracking, dailySummaries },
   }, [...affected]);
+}
+
+function persistDividendPnlSummaries(before: PortfolioStorage, after: PortfolioStorage, dates: string[]): PortfolioStorage {
+  const dailySummaries = { ...after.pnlTracking.dailySummaries };
+  const savedDates = [...new Set(dates)].filter((date) => dailySummaries[date]);
+  if (savedDates.length) {
+    const oldDividends = dividendPnlByDate(before.transactions);
+    const newDividends = dividendPnlByDate(after.transactions);
+    const computedAt = new Date().toISOString();
+    for (const date of savedDates) {
+      if (hasNewerTradeOnSummaryDate(before.transactions, dailySummaries[date])) continue;
+      const change = dividendPnlChange(oldDividends.get(date), newDividends.get(date));
+      dailySummaries[date] = applyDividendPnlChange(dailySummaries[date], change, computedAt);
+    }
+  }
+  return persistPnlSummariesForDates({ ...after, pnlTracking: { ...after.pnlTracking, dailySummaries } }, dates);
 }
 
 function hasHandledCorporateAction(
@@ -363,11 +380,12 @@ export function editHolding(
   );
   if (!originalTransaction) return next;
 
-  const tradeChanged =
+  const positionChanged =
     instrumentChanged ||
     costChanged ||
     existingHolding.quantity !== input.quantity ||
-    dateChanged ||
+    dateChanged;
+  const tradeChanged = positionChanged ||
     (input.fee !== undefined && input.fee !== originalTransaction.fee);
   // 編輯畫面上的數量是目前餘額；若曾部分賣出，只把餘額差額回推至原始交易。
   const correctedOpeningQuantity =
@@ -408,7 +426,7 @@ export function editHolding(
     originalTransaction.date < correctedTransaction.date
       ? originalTransaction.date
       : correctedTransaction.date;
-  return {
+  const corrected = {
     ...next,
     transactionRevisions: [
       ...next.transactionRevisions,
@@ -419,15 +437,26 @@ export function editHolding(
         correctedAt: now,
       },
     ],
-    pnlTracking: {
-      ...next.pnlTracking,
-      dailySummaries: Object.fromEntries(
-        Object.entries(next.pnlTracking.dailySummaries).filter(
-          ([date]) => date < recalculateFrom
-        )
-      ),
-    },
   };
+  const reconciled = reconcileCorporateDividends(corrected, input.id);
+  const affectedDates = new Set([originalTransaction.date, correctedTransaction.date, ...reconciled.dates]);
+  if (positionChanged) {
+    for (const { date } of state.priceHistory[input.id] ?? []) {
+      if (date >= recalculateFrom) affectedDates.add(date);
+    }
+    for (const event of reconciled.storage.transactions) {
+      if (event.holdingId === input.id && event.date >= recalculateFrom &&
+          (event.type === "sell" || event.type === "cash_dividend")) affectedDates.add(event.date);
+    }
+  }
+  // 保留可直接核對的其他摘要，已變更的購買基準則立即重算，避免明細到期後遺失。
+  const earliest = priceHistoryStartDate();
+  const dailySummaries = Object.fromEntries(Object.entries(reconciled.storage.pnlTracking.dailySummaries)
+    .filter(([date]) => !affectedDates.has(date) && (!positionChanged || date < recalculateFrom || date >= earliest)));
+  return persistPnlSummariesForDates({
+    ...reconciled.storage,
+    pnlTracking: { ...reconciled.storage.pnlTracking, dailySummaries },
+  }, [...affectedDates]);
 }
 
 function buildSaleRecord(
@@ -608,7 +637,7 @@ export function addCashDividend(
       },
     ],
   };
-  return persistPnlSummariesForDates(next, [input.effectiveDate]);
+  return persistDividendPnlSummaries(state, next, [input.effectiveDate]);
 }
 
 export function removeHolding(
@@ -1040,7 +1069,13 @@ export function applyCorporateAction(
 
   const finalize = (portfolio: PortfolioStorage) => {
     const reconciled = reconcileCorporateDividends(portfolio, lot.id);
-    return persistPnlSummariesForDates(reconciled.storage, [event.effectiveDate, ...reconciled.dates]);
+    const dates = [event.effectiveDate, ...reconciled.dates];
+    if (ratio <= 0 || !holding) return persistDividendPnlSummaries(state, reconciled.storage, dates);
+    const dailySummaries = { ...reconciled.storage.pnlTracking.dailySummaries };
+    for (const date of dates) delete dailySummaries[date];
+    return persistPnlSummariesForDates({
+      ...reconciled.storage, pnlTracking: { ...reconciled.storage.pnlTracking, dailySummaries },
+    }, dates);
   };
   if (ratio <= 0 || !holding) return finalize(withRecord);
 

@@ -296,6 +296,50 @@ describe("loan calculations", () => {
     );
   });
 
+  it("uses the new principal and final rate together after a same-day change", () => {
+    const repriced = loan({ repaymentMethod: "revolving", remainingTermMonths: undefined, rateType: "floating",
+      balanceHistory: [{ effectiveDate: "2026-01-16", balance: 60_000, recordedAt: "2026-01-16T03:00:00.000Z" }],
+      rateHistory: [
+        { id: "final-rate", effectiveDate: "2026-01-16", annualInterestRate: 3, createdAt: "2026-01-16T04:00:00.000Z" },
+        { id: "older-rate", effectiveDate: "2026-01-16", annualInterestRate: 4, createdAt: "2026-01-16T02:00:00.000Z" },
+      ],
+    });
+    const expected = (120_000 * 0.06 * 15 + 60_000 * 0.03 * 15) / 365;
+    const daily = buildDailyInvestmentFinancingCosts([repriced], "2026-01-01", "2026-01-31");
+    expect(daily["2026-01-16"]).toBeCloseTo((120_000 * 0.06) / 365, 5);
+    expect(daily["2026-01-17"]).toBeCloseTo((60_000 * 0.03) / 365, 5);
+    expect(Object.values(daily).reduce((total, cost) => total + cost, 0)).toBeCloseTo(expected, 4);
+    const snapshot = calculateLoanSnapshot(repriced, "2026-01-31");
+    expect(snapshot.currentPrincipal).toBe(60_000);
+    expect(snapshot.currentAnnualInterestRate).toBe(3);
+    expect(snapshot.estimatedFinancingCostToDate).toBeCloseTo(expected, 5);
+    expect(calculatePortfolioLoanSummary([repriced], { asOfDate: "2026-01-31" }).investmentFinancingCostToDate)
+      .toBeCloseTo(expected, 5);
+
+    const withReceipt = { ...repriced, paymentHistory: [{ id: "receipt", paymentDate: "2026-02-01",
+      principalPaid: 0, interestPaid: 350, feePaid: 10, subsidyReceived: 5,
+      interestPeriodStartDate: "2026-01-01", interestPeriodEndDate: "2026-01-31", createdAt: "2026-02-01T02:00:00.000Z",
+    }] };
+    const withReceiptDaily = buildDailyInvestmentFinancingCosts([withReceipt], "2026-01-01", "2026-02-01");
+    const costAfterReceipt = 350 + 10 - 5 + (60_000 * 0.03) / 365;
+    expect(withReceiptDaily["2026-02-01"]).toBeCloseTo(costAfterReceipt - expected, 5);
+    expect(Object.values(withReceiptDaily).reduce((total, cost) => total + cost, 0)).toBeCloseTo(costAfterReceipt, 4);
+    expect(calculateLoanSnapshot(withReceipt, "2026-02-01").estimatedFinancingCostToDate).toBeCloseTo(costAfterReceipt, 5);
+  });
+
+  it("uses a recorded balance over the scheduled principal due on the same date", () => {
+    const scheduled = loan({ repaymentMethod: "equal_principal" });
+    const recorded = { ...scheduled, balanceHistory: [{ effectiveDate: "2026-02-01", balance: 80_000,
+      recordedAt: "2026-02-01T10:00:00.000Z" }] };
+    expect(buildLoanSchedule(recorded)[0].remainingPrincipal).toBe(110_000);
+    const expected = (120_000 * 0.06 * 31 + 80_000 * 0.06 * 10) / 365;
+    const daily = buildDailyInvestmentFinancingCosts([recorded], "2026-01-01", "2026-02-11");
+    expect(Object.values(daily).reduce((total, cost) => total + cost, 0)).toBeCloseTo(expected, 4);
+    const snapshot = calculateLoanSnapshot(recorded, "2026-02-11");
+    expect(snapshot.currentPrincipal).toBe(80_000);
+    expect(snapshot.estimatedFinancingCostToDate).toBeCloseTo(expected, 5);
+  });
+
   it("true-ups estimated interest to the actual statement amount", () => {
     const reconciled = loan({
       remainingTermMonths: undefined,
