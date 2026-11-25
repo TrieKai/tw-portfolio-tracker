@@ -1,5 +1,6 @@
 import { parseIsoDate } from "@/lib/date/iso-date";
 import { buildLoanSchedule } from "@/lib/loans/calculations";
+import { loanPaymentsInTracking } from "@/lib/loans/history";
 import {
   calculateLoanCollateralValuation,
   hasCollateralRisk,
@@ -34,7 +35,8 @@ export function buildLoanReminders(
   for (const loan of loans) {
     if (!isOpenAt(loan, asOfDate)) continue;
     const recordedByDate = new Map<string, number>();
-    for (const payment of loan.paymentHistory ?? []) {
+    const payments = loanPaymentsInTracking(loan);
+    for (const payment of payments) {
       if (payment.installmentDueDate) continue;
       const paid = recordedByDate.get(payment.paymentDate) ?? 0;
       recordedByDate.set(payment.paymentDate, paid + payment.principalPaid + payment.interestPaid);
@@ -135,7 +137,7 @@ export function buildLoanReminders(
       }
     }
 
-    const unreconciledCount = (loan.paymentHistory ?? []).filter(
+    const unreconciledCount = payments.filter(
       (payment) =>
         payment.interestPaid > 0 &&
         (!payment.interestPeriodStartDate || !payment.interestPeriodEndDate)

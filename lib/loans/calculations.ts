@@ -10,6 +10,7 @@ import type {
   LoanSnapshot,
   PortfolioLoanSummary,
 } from "@/lib/types/loan";
+import { isDateInLoanTracking, loanPaymentsInTracking } from "@/lib/loans/history";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -92,9 +93,10 @@ function orderedRateChanges(loan: Loan) {
 }
 
 export function interestRateAtDate(loan: Loan, asOfDate: string): number {
+  const date = effectiveEndDate(loan, asOfDate);
   let rate = loan.annualInterestRate;
   for (const change of orderedRateChanges(loan)) {
-    if (change.effectiveDate > asOfDate) break;
+    if (change.effectiveDate > date) break;
     rate = change.annualInterestRate;
   }
   return Math.max(0, rate);
@@ -102,7 +104,7 @@ export function interestRateAtDate(loan: Loan, asOfDate: string): number {
 
 function installmentCredits(loan: Loan) {
   const credits = new Map<string, { principal: number; interest: number; beforeDuePrincipal: number; postedLate: boolean }>();
-  for (const payment of loan.paymentHistory ?? []) {
+  for (const payment of loanPaymentsInTracking(loan)) {
     const dueDate = payment.installmentDueDate;
     if (!dueDate || payment.principalPaid + payment.interestPaid <= 0) continue;
     const credit = credits.get(dueDate) ?? { principal: 0, interest: 0, beforeDuePrincipal: 0, postedLate: false };
@@ -232,7 +234,7 @@ export function loanInstallmentOptions(loan: Loan): LoanScheduleRow[] {
 }
 
 function effectiveEndDate(loan: Loan, asOfDate: string): string {
-  if (loan.closedAt && loan.closedAt < asOfDate) return loan.closedAt;
+  if (loan.status !== "active" && loan.closedAt && loan.closedAt < asOfDate) return loan.closedAt;
   return asOfDate;
 }
 
@@ -347,7 +349,7 @@ export function estimateLoanFinancingCostForPeriod(
   const priorStatements: StatementPeriod[] = [];
   const currentStatements: StatementPeriod[] = [];
   let payments = 0;
-  for (const payment of loan.paymentHistory ?? []) {
+  for (const payment of loanPaymentsInTracking(loan)) {
     if (payment.paymentDate > toDate) continue;
     const belongsToPeriod = payment.paymentDate > fromDate;
     if (belongsToPeriod) payments += payment.feePaid - payment.subsidyReceived;
@@ -377,11 +379,13 @@ export function calculateLoanEffectiveApr(loan: Loan): number | null {
   if (
     loan.rateType !== "fixed" ||
     isFlexiblePrincipalLoan(loan) ||
-    (loan.rateHistory?.length ?? 0) > 0
+    loan.rateHistory?.some((change) => isDateInLoanTracking(loan, change.effectiveDate))
   ) {
     return null;
   }
-  const schedule = buildLoanSchedule({ ...loan, balanceHistory: undefined, paymentHistory: undefined, closedAt: undefined });
+  const schedule = buildLoanSchedule({
+    ...loan, balanceHistory: undefined, paymentHistory: undefined, rateHistory: undefined, closedAt: undefined,
+  });
   const netProceeds = loan.openingBalance - (loan.initialFees ?? 0);
   if (schedule.length === 0 || netProceeds <= 0) return null;
   const payments = schedule.map((row) => row.payment);

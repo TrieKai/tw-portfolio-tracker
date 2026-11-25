@@ -402,6 +402,7 @@ function normalizeLoan(raw: unknown): Loan | null {
     ...(paymentImportReviews ? { paymentImportReviews } : {}),
     ...(rateHistory ? { rateHistory } : {}),
     status,
+    ...(typeof raw.statusUpdatedAt === "string" && raw.statusUpdatedAt ? { statusUpdatedAt: raw.statusUpdatedAt } : {}),
     ...(typeof raw.closedAt === "string" && normalizeToIsoDate(raw.closedAt)
       ? { closedAt: normalizeToIsoDate(raw.closedAt) }
       : {}),

@@ -125,17 +125,19 @@ export interface Loan {
   rateHistory?: LoanRateChange[];
   status: LoanStatus;
   closedAt?: string;
+  /** 清償、轉貸與恢復追蹤的版本。 */
+  statusUpdatedAt?: string;
   restartedFromLoanId?: string;
   dataQuality: LoanDataQuality;
   createdAt: string;
   updatedAt: string;
-  /** 契約或狀態調整的版本，與本金、利率及繳款事件分開。 */
+  /** 契約調整的版本，與追蹤狀態及帳務事件分開。 */
   contractUpdatedAt?: string;
 }
 
 export type CreateLoanInput = Omit<
   Loan,
-  "id" | "status" | "closedAt" | "restartedFromLoanId" | "createdAt" | "updatedAt" | "contractUpdatedAt"
+  "id" | "status" | "closedAt" | "statusUpdatedAt" | "restartedFromLoanId" | "createdAt" | "updatedAt" | "contractUpdatedAt"
 >;
 
 export type EditLoanInput = CreateLoanInput & { id: string };

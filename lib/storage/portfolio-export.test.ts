@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { addCashDividend, addHolding, applyCorporateAction, applyManualCorporateAction, applyPriceUpdate, editHolding, removeHolding, sellHolding } from "@/lib/storage/portfolio-store";
-import { addLoan, recordLoanBalance, recordLoanPayment, recordLoanRateChange, restartLoan, setLoanStatus } from "@/lib/storage/loan-store";
-import { applyImportMode, buildExportFile, mergePortfolioStorage, parseImportPayload, PortfolioImportReviewRequired } from "@/lib/storage/portfolio-export";
-import { calculateLoanSnapshot, calculatePortfolioLoanSummary, estimateLoanFinancingCostForPeriod } from "@/lib/loans/calculations";
+import { addLoan, editLoan, recordLoanBalance, recordLoanPayment, recordLoanRateChange, restartLoan, setLoanStatus } from "@/lib/storage/loan-store";
+import { applyImportMode, buildExportFile, mergePortfolioStorage, parseImportPayload, PortfolioImportLoanPhaseConflict, PortfolioImportReviewRequired } from "@/lib/storage/portfolio-export";
+import { buildDailyInvestmentFinancingCosts, calculateLoanSnapshot, calculatePortfolioLoanSummary, estimateLoanFinancingCostForPeriod } from "@/lib/loans/calculations";
 import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { defaultPortfolioStorage, hasPortfolioData } from "@/lib/storage/parse-portfolio";
@@ -552,6 +552,57 @@ describe("backup merging", () => {
     });
   });
 
+  it("combines a newer contract correction with an independently recorded closure", () => {
+    const initial = savedPortfolio();
+    const original = initial.loans[0];
+    const closed = setLoanStatus(initial, original.id, "paid_off", "2026-11-10", "2026-11-11T00:00:00.000Z");
+    const corrected = editLoan(initial, { ...original, name: "更新後的貸款名稱" }, "2026-11-20T00:00:00.000Z");
+    const legacy = (state: typeof initial) => ({ ...state, loans: state.loans.map((loan) => ({ ...loan, statusUpdatedAt: undefined })) });
+    for (const [local, backup] of [[closed, corrected], [corrected, closed], [legacy(closed), legacy(corrected)]]) {
+      const merged = mergePortfolioStorage(local, backup);
+      expect(merged.loans[0]).toMatchObject({ name: "更新後的貸款名稱", status: "paid_off", closedAt: "2026-11-10" });
+      expect(calculateLoanSnapshot(merged.loans[0], "2026-11-25").currentPrincipal).toBe(0);
+      const serialized = parseImportPayload(JSON.parse(JSON.stringify(buildExportFile(merged))));
+      if (!serialized.ok) throw new Error(serialized.error);
+      expect(mergePortfolioStorage(serialized.portfolio, corrected).loans[0].status).toBe("paid_off");
+    }
+    const reopened = setLoanStatus(closed, original.id, "active", "2026-11-23", "2026-11-23T00:00:00.000Z");
+    for (const [a, b] of [[closed, reopened], [legacy(reopened), legacy(closed)]]) {
+      expect(mergePortfolioStorage(a, b).loans[0]).toMatchObject({ status: "active", closedAt: undefined });
+    }
+    const lateClosure = setLoanStatus(initial, original.id, "paid_off", "2026-11-10", "2026-11-24T00:00:00.000Z");
+    const legacyLateClosure = { ...lateClosure, loans: lateClosure.loans.map((loan) => ({ ...loan,
+      statusUpdatedAt: undefined, contractUpdatedAt: loan.updatedAt })) };
+    for (const source of [lateClosure, legacyLateClosure]) {
+      expect(mergePortfolioStorage(source, corrected).loans[0])
+        .toMatchObject({ name: "更新後的貸款名稱", status: "paid_off", closedAt: "2026-11-10" });
+      expect(mergePortfolioStorage(corrected, source).loans[0])
+        .toMatchObject({ name: "更新後的貸款名稱", status: "paid_off", closedAt: "2026-11-10" });
+    }
+  });
+
+  it("preserves out-of-range receipts for reference without charging them after closure", () => {
+    const initial = savedPortfolio();
+    const id = initial.loans[0].id;
+    const closed = setLoanStatus(initial, id, "paid_off", "2026-11-10", "2026-11-11T00:00:00.000Z");
+    const recorded = recordLoanPayment(closed, id, { paymentDate: "2026-11-10", principalPaid: 0, interestPaid: 0,
+      feePaid: 20, subsidyReceived: 0 }, "2026-11-11T01:00:00.000Z");
+    const rated = recordLoanRateChange(initial, id, { effectiveDate: "2026-11-13", annualInterestRate: 8 }, "2026-11-16T00:00:00.000Z");
+    const backup = recordLoanPayment(rated, id, { paymentDate: "2026-11-15", principalPaid: 1000,
+      remainingPrincipalAfter: 99000, interestPaid: 100, feePaid: 50, subsidyReceived: 0,
+      interestPeriodStartDate: "2026-11-02", interestPeriodEndDate: "2026-11-14" }, "2026-11-16T01:00:00.000Z");
+    for (const [a, b] of [[recorded, backup], [backup, recorded]]) {
+      const merged = mergePortfolioStorage(a, b);
+      const loan = merged.loans[0];
+      expect(loan.paymentHistory?.map((item) => item.paymentDate)).toEqual(["2026-11-10", "2026-11-15"]);
+      expect(calculateLoanSnapshot(loan, "2026-11-25")).toMatchObject({ currentPrincipal: 0, currentAnnualInterestRate: 3 });
+      expect(buildDailyInvestmentFinancingCosts(merged.loans, "2026-11-11", "2026-11-25")).toEqual({});
+      expect(estimateLoanFinancingCostForPeriod(loan, "2026-11-01", "2026-11-25"))
+        .toBe(estimateLoanFinancingCostForPeriod(recorded.loans[0], "2026-11-01", "2026-11-10"));
+      expect(estimateLoanFinancingCostForPeriod(loan, "2026-11-09", "2026-11-10")).toBeGreaterThan(20);
+    }
+  });
+
 
   it("requires review before charging the same loan payment twice and remembers the chosen records", () => {
     const initial = savedPortfolio();
@@ -695,6 +746,40 @@ describe("backup merging", () => {
     expect(third).toMatchObject({ openingBalance: 20_000, status: "active" });
     expect(combined.loanRevisions.filter((revision) => revision.previous.restartedFromLoanId === original.id))
       .toEqual(expect.arrayContaining([expect.objectContaining({ loanId: second.id, previous: expect.objectContaining({ id: second.id }) })]));
+  });
+
+  it("uses a recorded compatible closure when another device closes the previous phase later", () => {
+    const initial = savedPortfolio();
+    const original = initial.loans[0];
+    const closed = setLoanStatus(initial, original.id, "paid_off", "2026-11-06", "2026-11-07T00:00:00.000Z");
+    const successor = restartLoan(closed, original.id, {
+      ...original, trackingStartDate: "2026-11-10", openingBalance: 50_000,
+    }, "2026-11-11T00:00:00.000Z");
+    const reopened = setLoanStatus(closed, original.id, "active", "2026-11-18", "2026-11-18T00:00:00.000Z");
+    const laterClosure = setLoanStatus(reopened, original.id, "paid_off", "2026-11-16", "2026-11-19T00:00:00.000Z");
+    for (const [local, backup] of [[successor, laterClosure], [laterClosure, successor]]) {
+      const merged = mergePortfolioStorage(local, backup);
+      expect(merged.loans.find((loan) => loan.id === original.id)?.closedAt).toBe("2026-11-06");
+      const costs = buildDailyInvestmentFinancingCosts(merged.loans, "2026-11-07", "2026-11-15");
+      expect(costs["2026-11-08"]).toBeUndefined();
+      expect(costs["2026-11-12"]).toBeCloseTo(50_000 * 0.03 / 365, 5);
+      expect(calculatePortfolioLoanSummary(merged.loans, { asOfDate: "2026-11-12" }).totalDebt).toBe(50_000);
+      expect(mergePortfolioStorage(merged, laterClosure).loans).toEqual(merged.loans);
+    }
+  });
+
+  it("reports a phase overlap when the backup has no recorded date that can resolve it", () => {
+    const initial = savedPortfolio();
+    const original = initial.loans[0];
+    const closed = setLoanStatus(initial, original.id, "paid_off", "2026-11-06", "2026-11-07T00:00:00.000Z");
+    const restarted = restartLoan(closed, original.id, {
+      ...original, trackingStartDate: "2026-11-10", openingBalance: 50_000,
+    }, "2026-11-11T00:00:00.000Z");
+    const inconsistent = { ...restarted, loanRevisions: [], loans: [
+      { ...restarted.loans[0], closedAt: "2026-11-16" }, restarted.loans[1],
+    ] };
+    expect(() => applyImportMode(initial, inconsistent, "replace")).toThrow(PortfolioImportLoanPhaseConflict);
+    expect(() => applyImportMode(initial, inconsistent, "merge")).toThrow(/追蹤日期重疊/);
   });
 
 });

@@ -11,6 +11,7 @@ import type { Loan, LoanPaymentRecord } from "@/lib/types/loan";
 import type { RecordImportReview } from "@/lib/types/portfolio-import";
 import { decodePortfolioStorage, hasPortfolioData, type PortfolioDecodeResult } from "@/lib/storage/parse-portfolio";
 import { isRecord } from "@/lib/storage/portfolio-shape";
+import { resolveLoanVersions } from "@/lib/loans/history";
 
 /** 匯出檔外層格式（含版本與時間戳，方便日後遷移） */
 export interface PortfolioExportFile {
@@ -160,12 +161,21 @@ export interface LoanPaymentImportConflict {
 export type PortfolioImportConflict = SaleImportConflict | LoanPaymentImportConflict;
 
 export type PortfolioImportResult =
-  | { status: "saved" | "failed" }
+  | { status: "saved" }
+  | { status: "failed"; message?: string }
   | { status: "review"; conflicts: PortfolioImportConflict[] };
 
 export class PortfolioImportReviewRequired extends Error {
   constructor(readonly conflicts: PortfolioImportConflict[]) {
     super("請先核對備份中的交易紀錄");
+  }
+}
+
+export class PortfolioImportLoanPhaseConflict extends Error {
+  constructor(loan: Loan, successor?: Loan) {
+    super(successor
+      ? `「${loan.name}」與「${successor.name}」的追蹤日期重疊。請核對上一段清償日與下一段本金基準日，再重新匯入。`
+      : `「${loan.name}」的本金基準日晚於清償日。請核對兩個日期後重新匯入。`);
   }
 }
 
@@ -347,7 +357,13 @@ function mergeLoans(current: PortfolioStorage, incoming: PortfolioStorage, choic
     const localVersion = local.contractUpdatedAt ?? local.updatedAt;
     const backupVersion = backup.contractUpdatedAt ?? backup.updatedAt;
     // 合約時間相同時保留本機，避免只同步了事件就取代合約資料。
-    const contract = backupVersion > localVersion ? backup : local;
+    const latestContract = backupVersion > localVersion ? backup : local;
+    const localStatusAt = local.statusUpdatedAt ?? local.createdAt;
+    const backupStatusAt = backup.statusUpdatedAt ?? backup.createdAt;
+    const status = backupStatusAt > localStatusAt ||
+      (backupStatusAt === localStatusAt && local.status === "active" && backup.status !== "active") ? backup : local;
+    const contract = status.status !== "active" && status.closedAt && latestContract.trackingStartDate > status.closedAt
+      ? status : latestContract;
     const balanceByDate = new Map((local.balanceHistory ?? []).map((entry) => [entry.effectiveDate, entry]));
     for (const entry of backup.balanceHistory ?? []) {
       const existing = balanceByDate.get(entry.effectiveDate);
@@ -367,6 +383,9 @@ function mergeLoans(current: PortfolioStorage, incoming: PortfolioStorage, choic
       (review) => review.reviewedAt);
     return {
       ...contract,
+      status: status.status,
+      closedAt: status.status === "active" ? undefined : status.closedAt,
+      statusUpdatedAt: status.statusUpdatedAt,
       updatedAt: backup.updatedAt > local.updatedAt ? backup.updatedAt : local.updatedAt,
       balanceHistory: balanceHistory.length ? balanceHistory : undefined,
       rateHistory: rateHistory.length ? rateHistory : undefined,
@@ -376,7 +395,14 @@ function mergeLoans(current: PortfolioStorage, incoming: PortfolioStorage, choic
   };
 
   const merged = new Map<string, Loan>();
-  const closed = new Map<string, Loan>();
+  const closures = new Map<string, Loan[]>();
+  const rememberClosure = (loan: Loan) => {
+    if (loan.status === "active" || !loan.closedAt) return;
+    const known = closures.get(loan.id) ?? [];
+    known.push(loan);
+    closures.set(loan.id, known);
+  };
+  for (const revision of revisions) rememberClosure(revision.previous);
   const paymentIds = { local: new Map<string, Set<string>>(), backup: new Map<string, Set<string>>() };
   for (const [side, state] of [["local", current], ["backup", incoming]] as const) {
     for (const original of state.loans) {
@@ -386,32 +412,33 @@ function mergeLoans(current: PortfolioStorage, incoming: PortfolioStorage, choic
         for (const payment of loan.paymentHistory) ids.add(payment.id);
         paymentIds[side].set(loan.id, ids);
       }
-      const contractRevisions = state.loanRevisions.filter((revision) => revision.loanId === original.id)
-        .map((revision) => revision.correctedAt);
-      const events = [
-        ...(loan.balanceHistory ?? []).map((entry) => entry.recordedAt),
-        ...(loan.rateHistory ?? []).map((entry) => entry.createdAt),
-        ...(loan.paymentHistory ?? []).flatMap((entry) => [entry.createdAt, entry.installmentAssignedAt]),
-      ];
-      const legacy = [...contractRevisions, events.includes(loan.updatedAt) ? loan.createdAt : loan.updatedAt].sort().at(-1)!;
-      const versioned = { ...loan, contractUpdatedAt: loan.contractUpdatedAt ?? legacy };
+      const revisions = state.loanRevisions.filter((revision) => revision.loanId === original.id);
+      const versioned = { ...loan, ...resolveLoanVersions(loan, revisions) };
       const existing = merged.get(loan.id);
       merged.set(loan.id, existing ? mergePair(existing, versioned) : versioned);
-      if (loan.status !== "active" && loan.closedAt &&
-          (!closed.has(loan.id) || versioned.contractUpdatedAt > closed.get(loan.id)!.contractUpdatedAt!)) {
-        closed.set(loan.id, versioned);
-      }
+      rememberClosure(versioned);
     }
   }
   const loans = [...merged.values()];
-  const restartedParents = new Set(loans.map((loan) => loan.restartedFromLoanId));
+  const successors = new Map(loans.map((loan) => [loan.restartedFromLoanId, loan]));
   const conflicts: LoanPaymentImportConflict[] = [];
   return {
     loans: loans.map((loan) => {
-      const prior = closed.get(loan.id);
-      const versionedLoan = loan.status === "active" && prior && restartedParents.has(loan.id)
-        ? { ...loan, status: prior.status, closedAt: prior.closedAt }
-        : loan;
+      const successor = successors.get(loan.id);
+      let versionedLoan = loan;
+      if (successor && (loan.status === "active" || !loan.closedAt ||
+          loan.closedAt >= successor.trackingStartDate || loan.closedAt < loan.trackingStartDate)) {
+        // 新階段已從真實記錄的日期開始。選擇能銜接的清償版本，避免依相鄰日期捏造清償日。
+        const prior = (closures.get(loan.id) ?? [])
+          .filter((item) => item.closedAt! < successor.trackingStartDate && item.closedAt! >= loan.trackingStartDate)
+          .sort((a, b) => (b.statusUpdatedAt ?? b.updatedAt).localeCompare(a.statusUpdatedAt ?? a.updatedAt) ||
+            a.closedAt!.localeCompare(b.closedAt!))[0];
+        if (!prior) throw new PortfolioImportLoanPhaseConflict(loan, successor);
+        versionedLoan = { ...loan, status: prior.status, closedAt: prior.closedAt, statusUpdatedAt: prior.statusUpdatedAt ?? prior.updatedAt };
+      }
+      if (versionedLoan.status !== "active" && versionedLoan.closedAt && versionedLoan.closedAt < versionedLoan.trackingStartDate) {
+        throw new PortfolioImportLoanPhaseConflict(versionedLoan);
+      }
       return reviewLoanPayments(versionedLoan, paymentIds.local.get(loan.id), paymentIds.backup.get(loan.id), choices, conflicts);
     }),
     loanRevisions: revisions,

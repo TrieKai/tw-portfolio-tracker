@@ -1,6 +1,6 @@
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { loanInstallmentOptions } from "@/lib/loans/calculations";
-import { earliestLoanClosureDate, isDateInLoanTracking, loanActualEntryEndDate, recordedPrincipalOn } from "@/lib/loans/history";
+import { earliestLoanClosureDate, isDateInLoanTracking, loanActualEntryEndDate, loanTrackingStartIssue, recordedPrincipalOn, resolveLoanVersions } from "@/lib/loans/history";
 import type { PortfolioStorage } from "@/lib/types/holding";
 import type {
   CreateLoanPaymentInput,
@@ -78,6 +78,7 @@ export function addLoan(
     ...normalized,
     id: newId("loan"),
     status: "active",
+    statusUpdatedAt: now,
     createdAt: now,
     updatedAt: now,
     contractUpdatedAt: now,
@@ -94,8 +95,7 @@ export function restartLoan(
 ): PortfolioStorage {
   const previous = state.loans.find((loan) => loan.id === loanId);
   if (
-    !previous || previous.status === "active" || !previous.closedAt ||
-    !parseIsoDate(input.trackingStartDate) || input.trackingStartDate <= previous.closedAt ||
+    !previous || loanTrackingStartIssue(input.trackingStartDate, previous) ||
     state.loans.some((loan) => loan.restartedFromLoanId === loanId)
   ) return state;
   const next = addLoan(state, {
@@ -119,13 +119,18 @@ export function editLoan(
 ): PortfolioStorage {
   const previous = state.loans.find((loan) => loan.id === input.id);
   if (!previous) return state;
+  const predecessor = state.loans.find((loan) => loan.id === previous.restartedFromLoanId);
+  if (loanTrackingStartIssue(input.trackingStartDate, predecessor, previous.closedAt)) return state;
   const normalized = normalizeLoanInput(input);
+  const { statusUpdatedAt } = resolveLoanVersions(previous, state.loanRevisions.filter((revision) => revision.loanId === previous.id));
   const next: Loan = {
     ...previous,
     ...normalized,
     id: previous.id,
     status: previous.status,
     closedAt: previous.closedAt,
+    statusUpdatedAt,
+    restartedFromLoanId: previous.restartedFromLoanId,
     createdAt: previous.createdAt,
     updatedAt: now,
     contractUpdatedAt: now,
@@ -169,7 +174,12 @@ export function setLoanStatus(
   if (status === "active" && state.loans.some((loan) => loan.restartedFromLoanId === loanId)) return state;
   const today = todayIsoDate();
   if (status !== "active" && (!parseIsoDate(effectiveDate) || effectiveDate > today ||
-      effectiveDate < earliestLoanClosureDate(previous, today))) return state;
+      effectiveDate < earliestLoanClosureDate(previous, today) ||
+      state.loans.some((loan) => loan.restartedFromLoanId === loanId && loan.trackingStartDate <= effectiveDate))) return state;
+  const versions = resolveLoanVersions(previous, state.loanRevisions.filter((revision) => revision.loanId === loanId));
+  const previousVersion = Date.parse(versions.statusUpdatedAt);
+  const statusUpdatedAt = Number.isFinite(previousVersion) && Date.parse(now) <= previousVersion
+    ? new Date(previousVersion + 1).toISOString() : now;
   return {
     ...state,
     loanRevisions: [
@@ -182,8 +192,9 @@ export function setLoanStatus(
             ...loan,
             status,
             closedAt: status === "active" ? undefined : effectiveDate,
+            statusUpdatedAt,
             updatedAt: now,
-            contractUpdatedAt: now,
+            contractUpdatedAt: versions.contractUpdatedAt,
           }
         : loan
     ),
@@ -311,7 +322,7 @@ export function assignLoanPaymentInstallment(
 ): PortfolioStorage {
   const loan = state.loans.find((item) => item.id === loanId);
   const payment = loan?.paymentHistory?.find((entry) => entry.id === paymentId);
-  if (!loan || !payment || payment.installmentDueDate === dueDate) return state;
+  if (!loan || !payment || !isDateInLoanTracking(loan, payment.paymentDate) || payment.installmentDueDate === dueDate) return state;
   if (dueDate && !loanInstallmentOptions(loan).some((row) => row.paymentDate === dueDate)) return state;
   const updated: Loan = {
     ...loan,

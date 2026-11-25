@@ -107,7 +107,7 @@ export function PortfolioDataPanel() {
       return;
     }
     if (result.status === "failed") {
-      setMessage({ type: "error", text: "未能儲存備份資料。若本機資料已損毀，可選擇取代全部。也請確認瀏覽器儲存空間。" });
+      setMessage({ type: "error", text: result.message ?? "未能儲存備份資料。若本機資料已損毀，可選擇取代全部。也請確認瀏覽器儲存空間。" });
       return;
     }
     setMessage({
@@ -231,7 +231,7 @@ export function PortfolioDataPanel() {
                     choices={choices} disabled={importing} onChoose={chooseRecord} />
                 </div>
               )}
-              {message?.type === "error" && <p role="alert" className="mt-3 text-sm text-loss">{message.text}</p>}
+              {message?.type === "error" && <p role="alert" className="mt-3 break-words text-sm text-rose-700 dark:text-rose-300">{message.text}</p>}
             </div>
             <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3">
               <button
@@ -311,7 +311,7 @@ function SaleReview({
               </label>
             ))}
             {conflict.canKeepLocal === false && conflict.canKeepBackup === false && (
-              <p role="alert" className="text-sm text-loss">兩邊的成交都超過可確認的持倉，請先更正交易資料。</p>
+              <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">兩邊的成交都超過可確認的持倉，請先更正交易資料。</p>
             )}
             {conflict.canKeepBoth && (
               <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg bg-surface-raised px-3 py-2 text-sm">

@@ -14,7 +14,7 @@ import { ErrorAlert } from "@/components/ui/ErrorAlert";
 import { Modal } from "@/components/ui/Modal";
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot, loanInstallmentOptions } from "@/lib/loans/calculations";
-import { earliestLoanClosureDate } from "@/lib/loans/history";
+import { earliestLoanClosureDate, isDateInLoanTracking } from "@/lib/loans/history";
 import {
   calculateLoanCollateralValuation,
   calculatePortfolioLoanRiskSummary,
@@ -216,6 +216,7 @@ export function LoanManager() {
         <LoanFormModal
           loan={editingLoan ?? undefined}
           restartOf={restartOf ?? undefined}
+          predecessor={loans.find((loan) => loan.id === editingLoan?.restartedFromLoanId)}
           holdings={storage.holdings}
           onSave={saveLoan}
           onClose={() => { setEditingLoan(null); setRestartOf(null); setFormOpen(false); }}
@@ -435,7 +436,7 @@ function LoanCard({
 
       <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <Stat label="目前本金" value={formatAmount(snapshot.currentPrincipal)} />
-        <Stat label="目前年利率" value={`${snapshot.currentAnnualInterestRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`} />
+        <Stat label={loan.closedAt ? "結束追蹤時年利率" : "目前年利率"} value={`${snapshot.currentAnnualInterestRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`} />
         <Stat label="實質年利率" value={snapshot.effectiveAprPercent === null ? "—" : `${snapshot.effectiveAprPercent.toFixed(2)}%`} sub={snapshot.effectiveAprPercent === null ? "未來利率或現金流不固定" : "含開辦費的年化估算"} />
         <Stat label="下次應繳預估" value={snapshot.nextPayment ? formatAmount(snapshot.nextPayment.payment) : "—"} sub={snapshot.nextPayment?.paymentDate} />
         <Stat
@@ -595,21 +596,31 @@ function LoanHistoryDetails({ loan }: { loan: Loan }) {
             {payments.slice(0, visiblePayments).map((payment) => {
               const cashOutflow = payment.principalPaid + payment.interestPaid + payment.feePaid - payment.subsidyReceived;
               const reconciled = !!payment.interestPeriodStartDate && !!payment.interestPeriodEndDate;
+              const tracked = isDateInLoanTracking(loan, payment.paymentDate);
+              const status = !tracked
+                ? "超出追蹤期間，僅供核對"
+                : reconciled
+                  ? `已對帳 ${payment.interestPeriodStartDate}～${payment.interestPeriodEndDate}`
+                  : payment.interestPaid > 0 ? "尚未指定計息期間，損益仍採估算" : "本次無利息對帳";
+              const statusColor = !tracked || (!reconciled && payment.interestPaid === 0)
+                ? "text-muted" : reconciled ? "text-emerald-600 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300";
               const editing = editingPaymentId === payment.id;
               return (
                 <div key={payment.id} className="rounded-lg bg-surface-raised p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{payment.paymentDate}</span><span className="tabular-nums">實付 {formatAmount(cashOutflow)}</span></div>
                   {payment.installmentDueDate && <p className="mt-1 text-xs text-muted">對應期別 {payment.installmentDueDate}</p>}
                   <p className="mt-1 text-xs text-muted">本金 {formatAmount(payment.principalPaid)} · 利息 {formatAmount(payment.interestPaid)} · 費用 {formatAmount(payment.feePaid)}{payment.subsidyReceived > 0 ? ` · 補貼 ${formatAmount(payment.subsidyReceived)}` : ""}</p>
-                  <p className={`mt-1 text-xs ${reconciled ? "text-emerald-600 dark:text-emerald-300" : payment.interestPaid > 0 ? "text-amber-600 dark:text-amber-300" : "text-muted"}`}>{reconciled ? `已對帳 ${payment.interestPeriodStartDate}～${payment.interestPeriodEndDate}` : payment.interestPaid > 0 ? "尚未指定計息期間，損益仍採估算" : "本次無利息對帳"}{payment.remainingPrincipalAfter !== undefined ? ` · 餘額 ${formatAmount(payment.remainingPrincipalAfter)}` : ""}</p>
+                  <p className={`mt-1 text-xs ${statusColor}`}>
+                    {status}{payment.remainingPrincipalAfter !== undefined ? ` · 餘額 ${formatAmount(payment.remainingPrincipalAfter)}` : ""}
+                  </p>
                   {payment.note && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted">{payment.note}</p>}
-                  {(installments.length > 0 || payment.installmentDueDate) && (
+                  {tracked && (installments.length > 0 || payment.installmentDueDate) && (
                     <button type="button" className="btn-secondary mt-2 text-sm" aria-expanded={editing}
                       onClick={(event) => { assignmentTrigger.current = event.currentTarget; setEditingPaymentId(editing ? null : payment.id); }}>
                       {payment.installmentDueDate ? "更改期別" : "指定期別"}
                     </button>
                   )}
-                  {editing && <LoanInstallmentEditForm installments={installments} payment={payment}
+                  {tracked && editing && <LoanInstallmentEditForm installments={installments} payment={payment}
                     onCancel={closeAssignment}
                     onSave={async (dueDate) => {
                       const saved = await assignLoanPaymentInstallment(loan.id, payment.id, dueDate);
@@ -629,7 +640,15 @@ function LoanHistoryDetails({ loan }: { loan: Loan }) {
         {rates.length > 0 ? (
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted">利率異動</p>
-            {rates.slice(0, visibleRates).map((change) => <div key={change.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-raised p-3 text-sm"><span className="min-w-0 break-words">{change.effectiveDate}{change.note ? ` · ${change.note}` : ""}</span><span className="font-medium tabular-nums">{change.annualInterestRate}%</span></div>)}
+            {rates.slice(0, visibleRates).map((change) => (
+              <div key={change.id} className="rounded-lg bg-surface-raised p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="min-w-0 break-words">{change.effectiveDate}{change.note ? ` · ${change.note}` : ""}</span>
+                  <span className="font-medium tabular-nums">{change.annualInterestRate}%</span>
+                </div>
+                {!isDateInLoanTracking(loan, change.effectiveDate) && <p className="mt-1 text-xs text-muted">超出追蹤期間，僅供核對</p>}
+              </div>
+            ))}
             {visibleRates < rates.length && (
               <button type="button" className="btn-secondary text-sm" onClick={() => setVisibleRates((count) => count + HISTORY_BATCH_SIZE)}>
                 顯示更早的利率異動（還有 {rates.length - visibleRates} 筆）

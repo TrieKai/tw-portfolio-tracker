@@ -97,6 +97,18 @@ describe("loan store", () => {
     expect(buildDailyInvestmentFinancingCosts(undone.loans, "2026-09-05", "2026-09-06")["2026-09-05"]).toBeGreaterThan(0);
   });
 
+  it("keeps tracking date edits within the recorded phase boundaries", () => {
+    const added = addLoan(defaultPortfolioStorage(), input);
+    const id = added.loans[0].id;
+    const closed = setLoanStatus(added, id, "paid_off", "2026-09-03");
+    const restarted = restartLoan(closed, id, { ...input, trackingStartDate: "2026-09-10" });
+    const [parent, child] = restarted.loans;
+    expect(editLoan(restarted, { ...child, trackingStartDate: "2026-09-03" })).toBe(restarted);
+    expect(editLoan(restarted, { ...parent, trackingStartDate: "2026-09-04" })).toBe(restarted);
+    expect(editLoan(restarted, { ...child, trackingStartDate: "2026-09-04" }).loans[1].trackingStartDate)
+      .toBe("2026-09-04");
+  });
+
   it("records and replaces a dated balance snapshot", () => {
     const added = addLoan(defaultPortfolioStorage(), input);
     const loanId = added.loans[0].id;

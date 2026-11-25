@@ -427,6 +427,14 @@ describe("loan calculations", () => {
     expect(calculateLoanEffectiveApr(loan({ rateType: "floating" }))).toBeNull();
   });
 
+  it("preserves the fixed-contract APR when a retained rate date falls after payoff", () => {
+    const closed = loan({ status: "paid_off", closedAt: "2026-05-01", initialFees: 2_000 });
+    const laterRate = { ...closed, rateHistory: [{ id: "out-of-range", effectiveDate: "2026-05-15",
+      annualInterestRate: 12, createdAt: "2026-05-15T00:00:00.000Z" }] };
+    expect(calculateLoanEffectiveApr(closed)).not.toBeNull();
+    expect(calculateLoanEffectiveApr(laterRate)).toBe(calculateLoanEffectiveApr(closed));
+  });
+
   it("carries an actual balance correction into later installment estimates", () => {
     const base = loan();
     const schedule = buildLoanSchedule(base);

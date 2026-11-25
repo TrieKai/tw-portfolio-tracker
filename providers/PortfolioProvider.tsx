@@ -58,6 +58,7 @@ import {
 } from "@/lib/portfolio/pnl-breakdown";
 import {
   applyImportMode,
+  PortfolioImportLoanPhaseConflict,
   PortfolioImportReviewRequired,
   type PortfolioImportMode,
   type PortfolioImportResult,
@@ -1028,6 +1029,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
           try {
             return applyImportMode(latest, incoming, mode, choices);
           } catch (error) {
+            if (error instanceof PortfolioImportLoanPhaseConflict) {
+              result = { status: "failed", message: error.message };
+              return null;
+            }
             if (!(error instanceof PortfolioImportReviewRequired)) throw error;
             result = { status: "review", conflicts: error.conflicts };
             return null;

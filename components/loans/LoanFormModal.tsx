@@ -3,7 +3,8 @@
 import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
-import { todayIsoDate } from "@/lib/date/iso-date";
+import { addDaysToIsoDate, todayIsoDate } from "@/lib/date/iso-date";
+import { loanTrackingStartIssue } from "@/lib/loans/history";
 import {
   LOAN_PURPOSE_LABELS,
   LOAN_TYPE_LABELS,
@@ -75,17 +76,23 @@ function initialRepaymentMethod(loan?: Loan): LoanRepaymentMethod {
 export function LoanFormModal({
   loan: editingLoan,
   restartOf,
+  predecessor,
   holdings,
   onSave,
   onClose,
 }: {
   loan?: Loan;
   restartOf?: Loan;
+  predecessor?: Loan;
   holdings: Holding[];
   onSave: (input: CreateLoanInput) => Promise<boolean>;
   onClose: () => void;
 }) {
   const loan = editingLoan ?? restartOf;
+  const previousPhase = restartOf ?? predecessor;
+  const earliestStart = previousPhase?.closedAt ? addDaysToIsoDate(previousPhase.closedAt, 1) : undefined;
+  const today = todayIsoDate();
+  const latestStart = editingLoan?.closedAt && editingLoan.closedAt < today ? editingLoan.closedAt : today;
   const [saving, setSaving] = useState(false);
   const [entryMode, setEntryMode] = useState<EntryMode>(
     restartOf || (loan && isFlexibleLoanType(loan.loanType))
@@ -221,9 +228,8 @@ export function LoanFormModal({
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (saving) return;
-    if (restartOf?.closedAt && trackingStartDate <= restartOf.closedAt) {
-      return setError("新的追蹤起算日須晚於上一期清償日。");
-    }
+    const dateIssue = loanTrackingStartIssue(trackingStartDate, previousPhase, editingLoan?.closedAt);
+    if (dateIssue) return setError(dateIssue);
     setError(null);
 
     const principal = Number.parseFloat(balance);
@@ -472,7 +478,14 @@ export function LoanFormModal({
             <input type="number" min="0" step="1" className="input-field" value={balance} onChange={(event) => setBalance(event.target.value)} />
           </Field>
           <Field label={entryMode === "complete" && !flexibleLoan ? "借款日期" : "本金基準日"} required>
-            <DatePicker value={trackingStartDate} onChange={setTrackingStartDate} max={todayIsoDate()} />
+            <DatePicker value={trackingStartDate} onChange={setTrackingStartDate} min={earliestStart} max={latestStart} required />
+            {(earliestStart || editingLoan?.closedAt) && (
+              <span className="text-xs text-muted">
+                {earliestStart ? `最早 ${earliestStart}（上一段清償後）` : null}
+                {earliestStart && editingLoan?.closedAt ? " · " : null}
+                {editingLoan?.closedAt ? `最晚 ${latestStart}（清償日）` : null}
+              </span>
+            )}
           </Field>
           {repaymentMethod !== "revolving" ? <Field label={entryMode === "complete" && !flexibleLoan ? "還款期數（月）" : "剩餘期數（月，選填）"} required={entryMode === "complete" && !flexibleLoan}>
             <input type="number" min="1" step="1" className="input-field" value={termMonths} onChange={(event) => setTermMonths(event.target.value)} />
