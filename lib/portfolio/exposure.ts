@@ -9,6 +9,7 @@
 import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
 import { resolveLeverage } from "@/lib/portfolio/leverage";
 import { calculateLoanSnapshot } from "@/lib/loans/calculations";
+import { loansWithConsistentPhases } from "@/lib/loans/phases";
 import { todayIsoDate } from "@/lib/date/iso-date";
 import type {
   AssetType,
@@ -58,7 +59,7 @@ export function sumPropertyMortgages(
   loans: Loan[],
   asOfDate: string = todayIsoDate()
 ): number {
-  return loans.reduce((sum, loan) => {
+  return loansWithConsistentPhases(loans).reduce((sum, loan) => {
     if (loan.purpose !== "property") return sum;
     return sum + calculateLoanSnapshot(loan, asOfDate).currentPrincipal;
   }, 0);
@@ -107,7 +108,7 @@ export function computePortfolioExposure(
   asOfDate: string = todayIsoDate()
 ): PortfolioExposureSummary {
   const groups = groupHoldingsWithMetrics(holdings);
-  const loanSnapshots = loans.map((loan) => calculateLoanSnapshot(loan, asOfDate));
+  const loanSnapshots = loansWithConsistentPhases(loans).map((loan) => calculateLoanSnapshot(loan, asOfDate));
   const propertyMortgages = sumPropertyMortgages(loans, asOfDate);
   const totalLiabilities = loanSnapshots.reduce(
     (sum, snapshot) => sum + snapshot.currentPrincipal,

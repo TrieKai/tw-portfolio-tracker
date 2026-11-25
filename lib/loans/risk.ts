@@ -1,5 +1,6 @@
 import { parseIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot } from "@/lib/loans/calculations";
+import { loansWithConsistentPhases } from "@/lib/loans/phases";
 import type { Holding } from "@/lib/types/holding";
 import type {
   Loan,
@@ -174,7 +175,7 @@ export function calculatePortfolioLoanRiskSummary(
   holdings: Holding[],
   asOfDate: string
 ): PortfolioLoanRiskSummary {
-  const monitoredLoans = loans.filter(
+  const monitoredLoans = loansWithConsistentPhases(loans).filter(
     (loan) =>
       hasFlexibleCredit(loan) &&
       loan.trackingStartDate <= asOfDate &&

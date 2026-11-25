@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 import { AmountVisibilityToggle } from "@/components/ui/AmountVisibilityToggle";
+import { conflictingLoanPhaseIds } from "@/lib/loans/phases";
 import {
   UiPreferencesProvider,
   useUiPreferences,
@@ -31,12 +32,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function AppShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { ready, holdings, updateAll, batchStatus, batchMessage, storageMode, syncStatus } = usePortfolio();
+  const { ready, holdings, loans, updateAll, batchStatus, batchMessage, storageMode, syncStatus } = usePortfolio();
   const { preferences } = useUiPreferences();
   const [aiLayoutOpen, setAiLayoutOpen] = useState(false);
   const settings = useRef<HTMLDivElement>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const isUpdating = batchStatus === "loading";
+  const loanPhaseConflictCount = useMemo(() => conflictingLoanPhaseIds(loans).size, [loans]);
 
   return (
     <div
@@ -139,6 +141,19 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
       </header>
 
       <main id="main-content" tabIndex={-1} className="app-main main-with-bottom-nav mx-auto w-full max-w-7xl flex-1 px-4 pt-6 sm:px-6 sm:pt-8">
+        {ready && loanPhaseConflictCount > 0 ? (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-x-5 gap-y-2 rounded-xl border border-amber-600/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/30 dark:text-amber-200">
+            <div role="status">
+              <p className="font-semibold">貸款日期待核對</p>
+              <p className="mt-1">有 {loanPhaseConflictCount} 段貸款的日期需要核對。目前合計僅納入日期一致的貸款。</p>
+            </div>
+            {pathname !== "/loans" ? (
+              <Link className="inline-flex min-h-10 items-center font-semibold underline underline-offset-4" href="/loans">
+                核對貸款日期
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
         {children}
       </main>
 

@@ -15,6 +15,7 @@ import { Modal } from "@/components/ui/Modal";
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot, loanInstallmentOptions } from "@/lib/loans/calculations";
 import { earliestLoanClosureDate, isDateInLoanTracking } from "@/lib/loans/history";
+import { conflictingLoanPhaseIds } from "@/lib/loans/phases";
 import {
   calculateLoanCollateralValuation,
   calculatePortfolioLoanRiskSummary,
@@ -63,6 +64,7 @@ export function LoanManager() {
   const paymentLoan = loans.find((loan) => loan.id === paymentEntry?.loanId);
   const rateLoan = loans.find((loan) => loan.id === rateLoanId);
   const today = todayIsoDate();
+  const conflictingPhases = useMemo(() => conflictingLoanPhaseIds(loans), [loans]);
   const snapshots = useMemo(
     () => loans.map((loan) => calculateLoanSnapshot(loan, today)),
     [loans, today]
@@ -72,12 +74,12 @@ export function LoanManager() {
   const riskByLoanId = useMemo(
     () =>
       new Map(
-        loans.map((loan) => [
+        loans.filter((loan) => !conflictingPhases.has(loan.id)).map((loan) => [
           loan.id,
           calculateLoanCollateralValuation(loan, storage.holdings, today),
         ])
       ),
-    [loans, storage.holdings, today]
+    [loans, conflictingPhases, storage.holdings, today]
   );
   const riskSummary = useMemo(
     () => calculatePortfolioLoanRiskSummary(loans, storage.holdings, today),
@@ -182,6 +184,7 @@ export function LoanManager() {
                 snapshot={snapshot}
                 linkedHoldingName={storage.holdings.find((holding) => holding.id === snapshot.loan.linkedHoldingId)?.name}
                 risk={riskByLoanId.get(snapshot.loan.id)}
+                phaseConflict={conflictingPhases.has(snapshot.loan.id)}
                 onEdit={() => setEditingLoan(snapshot.loan)}
                 onRecordPayment={() => setPaymentEntry({ loanId: snapshot.loan.id })}
                 onRecordRate={() => setRateLoanId(snapshot.loan.id)}
@@ -203,6 +206,7 @@ export function LoanManager() {
                 snapshot={snapshot}
                 linkedHoldingName={storage.holdings.find((holding) => holding.id === snapshot.loan.linkedHoldingId)?.name}
                 risk={riskByLoanId.get(snapshot.loan.id)}
+                phaseConflict={conflictingPhases.has(snapshot.loan.id)}
                 onEdit={() => setEditingLoan(snapshot.loan)}
                 onRecordPayment={snapshot.loan.closedAt ? () => setPaymentEntry({ loanId: snapshot.loan.id }) : undefined}
                 onReopen={loans.some((loan) => loan.restartedFromLoanId === snapshot.loan.id) ? undefined : () => setReopeningLoan(snapshot.loan)}
@@ -382,6 +386,7 @@ function LoanCard({
   snapshot,
   linkedHoldingName,
   risk,
+  phaseConflict,
   onEdit,
   onPaidOff,
   onReopen,
@@ -392,6 +397,7 @@ function LoanCard({
   snapshot: ReturnType<typeof calculateLoanSnapshot>;
   linkedHoldingName?: string;
   risk?: LoanCollateralValuation;
+  phaseConflict: boolean;
   onEdit: () => void;
   onPaidOff?: () => void;
   onReopen?: () => void;
@@ -402,7 +408,7 @@ function LoanCard({
   const { formatAmount } = useAmountPrivacy();
   const { loan } = snapshot;
   const flexibleCredit = hasFlexibleCredit(loan);
-  const showSchedule = loan.status === "active" && !flexibleCredit;
+  const showSchedule = !phaseConflict && loan.status === "active" && !flexibleCredit;
   const today = todayIsoDate();
   const futureSchedule = showSchedule
     ? snapshot.schedule.filter((row) => row.paymentDate > today && row.payment > 0)
@@ -415,6 +421,7 @@ function LoanCard({
             <h3 className="font-semibold">{loan.name}</h3>
             <Badge>{LOAN_TYPE_LABELS[loan.loanType]}</Badge>
             <Badge warn={loan.dataQuality !== "complete"}>{LOAN_QUALITY_LABELS[loan.dataQuality]}</Badge>
+            {phaseConflict ? <Badge warn>日期待核對</Badge> : null}
             {flexibleCredit && risk ? <RiskBadge level={risk.riskLevel} /> : null}
           </div>
           <p className="mt-1 text-sm text-muted">
@@ -434,24 +441,31 @@ function LoanCard({
         </div>
       </div>
 
-      <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <Stat label="目前本金" value={formatAmount(snapshot.currentPrincipal)} />
-        <Stat label={loan.closedAt ? "結束追蹤時年利率" : "目前年利率"} value={`${snapshot.currentAnnualInterestRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`} />
-        <Stat label="實質年利率" value={snapshot.effectiveAprPercent === null ? "—" : `${snapshot.effectiveAprPercent.toFixed(2)}%`} sub={snapshot.effectiveAprPercent === null ? "未來利率或現金流不固定" : "含開辦費的年化估算"} />
-        <Stat label="下次應繳預估" value={snapshot.nextPayment ? formatAmount(snapshot.nextPayment.payment) : "—"} sub={snapshot.nextPayment?.paymentDate} />
-        <Stat
-          label={flexibleCredit ? "契約額度" : "預估剩餘利息"}
-          value={
-            flexibleCredit
-              ? loan.creditLimit === undefined
-                ? "—"
-                : formatAmount(loan.creditLimit)
-              : snapshot.projectedInterest === null
-                ? "—"
-                : formatAmount(snapshot.projectedInterest)
-          }
-        />
-      </dl>
+      {phaseConflict ? (
+        <dl className="mt-5 grid grid-cols-2 gap-4">
+          <Stat label="本金基準日" value={loan.trackingStartDate} />
+          <Stat label="基準日本金" value={formatAmount(loan.openingBalance)} />
+        </dl>
+      ) : (
+        <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <Stat label="目前本金" value={formatAmount(snapshot.currentPrincipal)} />
+          <Stat label={loan.closedAt ? "結束追蹤時年利率" : "目前年利率"} value={`${snapshot.currentAnnualInterestRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`} />
+          <Stat label="實質年利率" value={snapshot.effectiveAprPercent === null ? "—" : `${snapshot.effectiveAprPercent.toFixed(2)}%`} sub={snapshot.effectiveAprPercent === null ? "未來利率或現金流不固定" : "含開辦費的年化估算"} />
+          <Stat label="下次應繳預估" value={snapshot.nextPayment ? formatAmount(snapshot.nextPayment.payment) : "—"} sub={snapshot.nextPayment?.paymentDate} />
+          <Stat
+            label={flexibleCredit ? "契約額度" : "預估剩餘利息"}
+            value={
+              flexibleCredit
+                ? loan.creditLimit === undefined
+                  ? "—"
+                  : formatAmount(loan.creditLimit)
+                : snapshot.projectedInterest === null
+                  ? "—"
+                  : formatAmount(snapshot.projectedInterest)
+            }
+          />
+        </dl>
+      )}
 
       {flexibleCredit && risk ? (
         <FlexibleCreditDetails loan={loan} risk={risk} />
@@ -503,7 +517,9 @@ function LoanCard({
           </div>
         )}
       </details> : null}
-      <p className="mt-3 text-xs text-muted">{REPAYMENT_METHOD_LABELS[loan.repaymentMethod]} · {showSchedule && "還款表採月利率，依本金與利率的生效日分段計算。"}損益利息採實際天數／365 日估算。</p>
+      {!phaseConflict ? (
+        <p className="mt-3 text-xs text-muted">{REPAYMENT_METHOD_LABELS[loan.repaymentMethod]} · {showSchedule && "還款表採月利率，依本金與利率的生效日分段計算。"}損益利息採實際天數／365 日估算。</p>
+      ) : null}
     </article>
   );
 }

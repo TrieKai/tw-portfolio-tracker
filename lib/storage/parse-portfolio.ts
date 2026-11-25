@@ -1,5 +1,6 @@
 import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import { restoreLatestQuote } from "@/lib/portfolio/price-history";
+import { repairLoanPhaseClosures } from "@/lib/loans/phases";
 import type {
   Holding,
   PortfolioSettings,
@@ -576,7 +577,7 @@ export function decodePortfolioStorage(
     ...parsed,
     holdings,
     holdingRemovals,
-    loans,
+    loans: repairLoanPhaseClosures(loans, loanRevisions.map((revision) => revision.previous)),
     loanRevisions,
     priceHistory,
     sales: Array.isArray(parsed.sales) ? parsed.sales : [],

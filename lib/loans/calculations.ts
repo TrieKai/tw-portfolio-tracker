@@ -11,6 +11,7 @@ import type {
   PortfolioLoanSummary,
 } from "@/lib/types/loan";
 import { isDateInLoanTracking, loanPaymentsInTracking } from "@/lib/loans/history";
+import { loansWithConsistentPhases } from "@/lib/loans/phases";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -418,6 +419,15 @@ export function estimateInvestmentFinancingCostForPeriod(
   toDate: string,
   schedules?: ReadonlyMap<Loan, LoanScheduleRow[]>
 ): number {
+  return sumInvestmentFinancingCosts(loansWithConsistentPhases(loans), fromDate, toDate, schedules);
+}
+
+function sumInvestmentFinancingCosts(
+  loans: Loan[],
+  fromDate: string,
+  toDate: string,
+  schedules?: ReadonlyMap<Loan, LoanScheduleRow[]>
+): number {
   return roundMoney(
     loans.reduce((sum, loan) => {
       if (loan.investmentUsePercent <= 0) return sum;
@@ -474,7 +484,8 @@ export function calculatePortfolioLoanSummary(
   options: { asOfDate: string; grossInvestmentPnl?: number }
 ): PortfolioLoanSummary {
   const { asOfDate, grossInvestmentPnl = 0 } = options;
-  const snapshots = loans.map((loan) => calculateLoanSnapshot(loan, asOfDate));
+  const consistentLoans = loansWithConsistentPhases(loans);
+  const snapshots = consistentLoans.map((loan) => calculateLoanSnapshot(loan, asOfDate));
   let totalDebt = 0;
   let investmentDebt = 0;
   let propertyDebt = 0;
@@ -493,8 +504,8 @@ export function calculatePortfolioLoanSummary(
   }
 
   const monthStart = startOfMonthIsoFromPrefix(asOfDate.slice(0, 7));
-  const monthlyInvestmentFinancingCost = estimateInvestmentFinancingCostForPeriod(
-    loans,
+  const monthlyInvestmentFinancingCost = sumInvestmentFinancingCosts(
+    consistentLoans,
     addDaysToIsoDate(monthStart, -1),
     asOfDate
   );
@@ -514,7 +525,7 @@ export function calculatePortfolioLoanSummary(
     : 0;
 
   return {
-    activeLoanCount: loans.filter(
+    activeLoanCount: consistentLoans.filter(
       (loan) =>
         loan.trackingStartDate <= asOfDate &&
         (!loan.closedAt || loan.closedAt > asOfDate)
@@ -543,12 +554,13 @@ export function buildDailyInvestmentFinancingCosts(
   toDate: string
 ): Record<string, number> {
   const result: Record<string, number> = {};
-  const schedules = new Map(loans.filter((loan) => loan.investmentUsePercent > 0)
+  const consistentLoans = loansWithConsistentPhases(loans).filter((loan) => loan.investmentUsePercent > 0);
+  const schedules = new Map(consistentLoans
     .map((loan) => [loan, buildLoanSchedule(loan)]));
   let date = fromDate;
   while (date <= toDate) {
     const previous = addDaysToIsoDate(date, -1);
-    const cost = estimateInvestmentFinancingCostForPeriod(loans, previous, date, schedules);
+    const cost = sumInvestmentFinancingCosts(consistentLoans, previous, date, schedules);
     if (Math.abs(cost) > 1e-9) result[date] = cost;
     date = addDaysToIsoDate(date, 1);
   }

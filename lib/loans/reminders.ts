@@ -1,6 +1,7 @@
 import { parseIsoDate } from "@/lib/date/iso-date";
 import { buildLoanSchedule } from "@/lib/loans/calculations";
 import { loanPaymentsInTracking } from "@/lib/loans/history";
+import { loansWithConsistentPhases } from "@/lib/loans/phases";
 import {
   calculateLoanCollateralValuation,
   hasCollateralRisk,
@@ -32,7 +33,7 @@ export function buildLoanReminders(
 ): LoanReminder[] {
   const reminders: LoanReminder[] = [];
 
-  for (const loan of loans) {
+  for (const loan of loansWithConsistentPhases(loans)) {
     if (!isOpenAt(loan, asOfDate)) continue;
     const recordedByDate = new Map<string, number>();
     const payments = loanPaymentsInTracking(loan);
