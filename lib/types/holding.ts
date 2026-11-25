@@ -63,6 +63,8 @@ export interface Holding {
   mortgageBalance?: number;
   createdAt: string;
   updatedAt: string;
+  /** 最近一次更正持倉資料的版本，行情更新與賣出不會改寫。 */
+  positionUpdatedAt?: string;
 }
 
 /** 單日價格快照（用於趨勢圖） */
@@ -182,6 +184,8 @@ export interface PortfolioTransaction {
   type: PortfolioTransactionType;
   /** 賣出事件對應的成交紀錄。 */
   saleId?: string;
+  /** 連結自動入帳的股利與公司行動來源。 */
+  corporateActionEventId?: string;
   holdingId: string;
   assetType: Exclude<AssetType, "property">;
   name: string;

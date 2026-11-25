@@ -64,6 +64,8 @@ export function applyHistoryResults(
   const dates = new Set<string>();
   let next = current;
   let updated = 0;
+  let writtenPoints = 0;
+  let skippedPoints = 0;
   let failed = 0;
   let skipped = 0;
   let error: string | undefined;
@@ -77,9 +79,20 @@ export function applyHistoryResults(
     }
 
     if (result.ok && result.points.length > 0) {
+      const before = new Map((next.priceHistory[holding.id] ?? []).map((point) => [point.date, point]));
       next = applyImportedPriceHistory(next, holding.id, result.points);
-      for (const point of result.points) dates.add(point.date);
-      updated++;
+      const requestedDates = new Set(result.points.map((point) => point.date));
+      let changed = 0;
+      for (const point of next.priceHistory[holding.id] ?? []) {
+        const old = before.get(point.date);
+        if (requestedDates.has(point.date) && (old?.price !== point.price || old?.source !== point.source)) {
+          dates.add(point.date);
+          changed++;
+        }
+      }
+      if (changed) updated++;
+      writtenPoints += changed;
+      skippedPoints += requestedDates.size - changed;
     } else {
       error = result.ok ? "所選區間沒有價格資料" : result.error;
       // 歷史請求失敗時，不蓋掉等待期間剛更新的行情狀態。
@@ -90,5 +103,5 @@ export function applyHistoryResults(
     }
   }
 
-  return { next, updated, failed, skipped, error, dates: [...dates].sort() };
+  return { next, updated, failed, skipped, writtenPoints, skippedPoints, error, dates: [...dates].sort() };
 }

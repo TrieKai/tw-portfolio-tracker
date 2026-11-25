@@ -1,5 +1,7 @@
 import type { StockMarket } from "@/lib/types/holding";
 
+export const MAX_CORPORATE_ACTION_LOOKUP_ITEMS = 50;
+
 export interface CorporateActionLookupItem {
   holdingId: string;
   symbol: string;

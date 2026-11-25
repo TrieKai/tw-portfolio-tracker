@@ -3,8 +3,7 @@
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { useMemo, useState, type FormEvent } from "react";
 import { corporateActionLabel } from "@/lib/client/corporate-actions-api";
-import {
-} from "@/lib/portfolio/calculations";
+import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import {
   groupHoldingsWithMetrics,
   holdingGroupKey,
@@ -164,11 +163,8 @@ function buildSuspiciousDrops(
   return [...rowsByEvent.values()].sort((a, b) => b.dropRate - a.dropRate);
 }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function CorporateActionsPanel() {
+  const today = todayIsoDate();
   const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
   const {
     holdings,
@@ -197,7 +193,7 @@ export function CorporateActionsPanel() {
   const [form, setForm] = useState<ManualGroupActionForm>(() => ({
     groupKey: stockGroups[0]?.groupKey ?? "",
     actionType: "split",
-    effectiveDate: todayIso(),
+    effectiveDate: today,
     adjustmentRatio: "2",
     cashReturnPerShare: "",
     note: "",
@@ -293,8 +289,8 @@ export function CorporateActionsPanel() {
       setFormError("每原股退還現金需大於或等於 0");
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.effectiveDate)) {
-      setFormError("請輸入有效生效日");
+    if (!parseIsoDate(form.effectiveDate) || form.effectiveDate > todayIsoDate()) {
+      setFormError("請輸入今天或更早的有效生效日");
       return;
     }
     const saved = await applyManualActionToGroup(form.groupKey, {
@@ -408,6 +404,8 @@ export function CorporateActionsPanel() {
               <span className="text-muted">生效日</span>
               <input
                 type="date"
+                max={today}
+                required
                 value={form.effectiveDate}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, effectiveDate: e.target.value }))
@@ -566,6 +564,7 @@ export function CorporateActionsPanel() {
             const canApply =
               event.stockDividendRatio > 0 ||
               (event.cashDividend !== undefined && event.cashDividend > 0);
+            const upcoming = event.effectiveDate > today;
 
             return (
               <li
@@ -588,6 +587,9 @@ export function CorporateActionsPanel() {
                         {formatQuoteAmount(group?.avgBuyPrice ?? lot.buyPrice, "stock")}
                       </p>
                     )}
+                    {!lot && (
+                      <p className="mt-1 text-xs text-muted">已出清批次 · 依除息日持有的股數入帳</p>
+                    )}
                     {event.note && (
                       <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">
                         {event.note}
@@ -604,11 +606,12 @@ export function CorporateActionsPanel() {
                   <button
                     type="button"
                     onClick={() => events.forEach(applyDetectedCorporateAction)}
+                    disabled={upcoming}
                     className={
-                      canApply ? "btn-primary text-sm" : "btn-secondary text-sm"
+                      canApply && !upcoming ? "btn-primary text-sm" : "btn-secondary text-sm"
                     }
                   >
-                    {canApply ? "套用全部" : "全部標記已處理"}
+                    {upcoming ? "尚未生效" : canApply ? "套用全部" : "全部標記已處理"}
                   </button>
                 </div>
               </li>

@@ -1,4 +1,5 @@
-import { parseIsoDate } from "@/lib/date/iso-date";
+import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
+import { earliestLoanClosureDate, isDateInLoanTracking, loanActualEntryEndDate, recordedPrincipalOn } from "@/lib/loans/history";
 import type { PortfolioStorage } from "@/lib/types/holding";
 import type {
   CreateLoanPaymentInput,
@@ -78,6 +79,7 @@ export function addLoan(
     status: "active",
     createdAt: now,
     updatedAt: now,
+    contractUpdatedAt: now,
   };
   return { ...state, loans: [...state.loans, loan] };
 }
@@ -99,6 +101,7 @@ export function restartLoan(
     ...input,
     balanceHistory: undefined,
     paymentHistory: undefined,
+    paymentImportReviews: undefined,
     rateHistory: undefined,
   }, now);
   return {
@@ -124,6 +127,7 @@ export function editLoan(
     closedAt: previous.closedAt,
     createdAt: previous.createdAt,
     updatedAt: now,
+    contractUpdatedAt: now,
   };
   next.balanceHistory = (next.balanceHistory ?? []).filter(
     (snapshot) => snapshot.effectiveDate >= next.trackingStartDate
@@ -162,7 +166,9 @@ export function setLoanStatus(
   const previous = state.loans.find((loan) => loan.id === loanId);
   if (!previous || previous.status === status) return state;
   if (status === "active" && state.loans.some((loan) => loan.restartedFromLoanId === loanId)) return state;
-  if (status !== "active" && (!parseIsoDate(effectiveDate) || effectiveDate < previous.trackingStartDate)) return state;
+  const today = todayIsoDate();
+  if (status !== "active" && (!parseIsoDate(effectiveDate) || effectiveDate > today ||
+      effectiveDate < earliestLoanClosureDate(previous, today))) return state;
   return {
     ...state,
     loanRevisions: [
@@ -176,6 +182,7 @@ export function setLoanStatus(
             status,
             closedAt: status === "active" ? undefined : effectiveDate,
             updatedAt: now,
+            contractUpdatedAt: now,
           }
         : loan
     ),
@@ -192,7 +199,7 @@ export function recordLoanBalance(
 ): PortfolioStorage {
   if (!Number.isFinite(balance) || balance < 0) return state;
   const loan = state.loans.find((item) => item.id === loanId);
-  if (!loan || effectiveDate < loan.trackingStartDate) return state;
+  if (!loan || !isDateInLoanTracking(loan, effectiveDate) || effectiveDate > loanActualEntryEndDate(loan)) return state;
 
   const byDate = new Map(
     (loan.balanceHistory ?? []).map((snapshot) => [
@@ -222,7 +229,8 @@ export function recordLoanPayment(
   now = new Date().toISOString()
 ): PortfolioStorage {
   const loan = state.loans.find((item) => item.id === loanId);
-  if (!loan || input.paymentDate < loan.trackingStartDate) return state;
+  if (!loan || !isDateInLoanTracking(loan, input.paymentDate) ||
+      input.paymentDate > loanActualEntryEndDate(loan)) return state;
   const amounts = [
     input.principalPaid,
     input.interestPaid,
@@ -235,19 +243,22 @@ export function recordLoanPayment(
   if (
     input.remainingPrincipalAfter !== undefined &&
     (!Number.isFinite(input.remainingPrincipalAfter) ||
-      input.remainingPrincipalAfter < 0)
+      input.remainingPrincipalAfter < 0 ||
+      input.remainingPrincipalAfter > recordedPrincipalOn(loan, input.paymentDate))
   ) {
     return state;
   }
   if (input.principalPaid > 0 && input.remainingPrincipalAfter === undefined) {
     return state;
   }
+  if (input.remainingPrincipalAfter === undefined && amounts.every((amount) => amount === 0)) return state;
   const hasInterestPeriod =
     !!input.interestPeriodStartDate && !!input.interestPeriodEndDate;
   if (
     (!!input.interestPeriodStartDate !== !!input.interestPeriodEndDate) ||
     (hasInterestPeriod &&
-      (input.interestPeriodStartDate! >= input.interestPeriodEndDate! ||
+      (!parseIsoDate(input.interestPeriodStartDate!) || !parseIsoDate(input.interestPeriodEndDate!) ||
+        input.interestPeriodStartDate! >= input.interestPeriodEndDate! ||
         input.interestPeriodStartDate! < loan.trackingStartDate ||
         input.interestPeriodEndDate! > input.paymentDate))
   ) {
@@ -297,7 +308,7 @@ export function recordLoanRateChange(
   const loan = state.loans.find((item) => item.id === loanId);
   if (
     !loan ||
-    input.effectiveDate < loan.trackingStartDate ||
+    !isDateInLoanTracking(loan, input.effectiveDate) ||
     !Number.isFinite(input.annualInterestRate) ||
     input.annualInterestRate < 0 ||
     input.annualInterestRate > 100

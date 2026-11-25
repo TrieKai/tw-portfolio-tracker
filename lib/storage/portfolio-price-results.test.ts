@@ -73,5 +73,14 @@ describe("行情回應只更新發出請求時的標的", () => {
     ]);
     expect(result.next.holdings[0]).toMatchObject({ priceDate: "2026-11-24", currentPrice: 125 });
     expect(result.next.priceHistory[id].map((point) => point.price)).toEqual([115, 120, 125]);
+    expect(result).toMatchObject({ writtenPoints: 1, skippedPoints: 2, dates: ["2026-11-19"] });
+    const retry = applyHistoryResults(result.next, result.next.holdings, [
+      { holdingId: id, ok: true, points: [
+        { date: "2026-11-19", price: 115, source: "api" },
+        { date: "2026-11-20", price: 117, source: "api" },
+      ] },
+    ]);
+    expect(retry.next).toBe(result.next);
+    expect(retry).toMatchObject({ writtenPoints: 0, skippedPoints: 2, dates: [] });
   });
 });

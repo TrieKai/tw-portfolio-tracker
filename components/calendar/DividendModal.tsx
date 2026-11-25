@@ -3,32 +3,53 @@
 import { Modal } from "@/components/ui/Modal";
 import { useState, type FormEvent } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
-import { todayIsoDate } from "@/lib/date/iso-date";
-import type { CashDividendInput, HoldingWithMetrics } from "@/lib/types/holding";
+import { addDaysToIsoDate, parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
+import { isDividendDateInPosition, type DividendLot } from "@/lib/portfolio/dividend-lots";
+import type { CashDividendInput } from "@/lib/types/holding";
 
 export function DividendModal({
-  holdings,
+  lots,
   onSave,
   onClose,
 }: {
-  holdings: HoldingWithMetrics[];
+  lots: DividendLot[];
   onSave: (input: CashDividendInput) => Promise<boolean>;
   onClose: () => void;
 }) {
-  const [holdingId, setHoldingId] = useState(holdings[0]?.id ?? "");
-  const [effectiveDate, setEffectiveDate] = useState(todayIsoDate());
+  const [holdingId, setHoldingId] = useState(lots[0]?.id ?? "");
+  const [effectiveDate, setEffectiveDate] = useState(lots[0]?.closedOn ? "" : todayIsoDate());
   const [settlementDate, setSettlementDate] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const selected = lots.find((lot) => lot.id === holdingId);
+  const today = todayIsoDate();
+  const latestDate = selected?.closedOn && selected.closedOn < today ? selected.closedOn : today;
+  const earliestDate = selected?.buyDate ? addDaysToIsoDate(selected.buyDate, 1) : undefined;
+
+  function selectLot(id: string) {
+    const lot = lots.find((item) => item.id === id);
+    setHoldingId(id);
+    setError(null);
+    if (!lot || (effectiveDate && !isDividendDateInPosition(lot, effectiveDate))) setEffectiveDate("");
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) return;
     const parsedAmount = Number.parseFloat(amount);
-    if (!holdingId) {
+    if (!selected) {
       setError("請選擇股票或基金");
+      return;
+    }
+    if (!isDividendDateInPosition(selected, effectiveDate) || effectiveDate > today) {
+      setError("請填持有期間內的除息日。");
+      return;
+    }
+    if (settlementDate && (!parseIsoDate(settlementDate) || settlementDate < effectiveDate)) {
+      setError("入帳日須在除息日當日或之後。");
       return;
     }
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
@@ -78,17 +99,23 @@ export function DividendModal({
           <span className="text-muted">股票或基金</span>
           <select
             value={holdingId}
-            onChange={(event) => setHoldingId(event.target.value)}
+            onChange={(event) => selectLot(event.target.value)}
             className="input-field mt-1"
             required
           >
-            {holdings.map((holding) => (
+            {lots.map((holding) => (
               <option key={holding.id} value={holding.id}>
-                {holding.name}（{holding.symbol}）
+                {holding.name}（{holding.symbol}）{holding.closedOn ? ` · 已出清 ${holding.closedOn}` : ""}
               </option>
             ))}
           </select>
         </label>
+
+        {selected?.closedOn && (
+          <p className="text-sm text-muted">
+            {selected.buyDate ? `可補登 ${selected.closedOn} 前持有期間的配息。` : "這筆舊紀錄缺少買入日，請依成交與配息明細核對除息日。"}
+          </p>
+        )}
 
         <label className="block text-sm">
           <span className="text-muted">實收總額</span>
@@ -111,7 +138,9 @@ export function DividendModal({
               <DatePicker
                 value={effectiveDate}
                 onChange={setEffectiveDate}
-                max={todayIsoDate()}
+                min={earliestDate}
+                max={latestDate}
+                required
               />
             </div>
           </label>
@@ -121,6 +150,7 @@ export function DividendModal({
               <DatePicker
                 value={settlementDate}
                 onChange={setSettlementDate}
+                min={effectiveDate || undefined}
               />
             </div>
           </label>
@@ -136,7 +166,7 @@ export function DividendModal({
           />
         </label>
 
-        {error ? <p className="text-sm text-rose-500">{error}</p> : null}
+        {error ? <p role="alert" className="text-sm text-rose-500">{error}</p> : null}
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="btn-secondary">

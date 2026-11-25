@@ -53,6 +53,14 @@ export interface LoanPaymentRecord {
   createdAt: string;
 }
 
+/** 保留匯入時核對過的繳款選擇，舊備份重匯時可辨認已排除的紀錄。 */
+export interface LoanPaymentImportReview {
+  id: string;
+  reviewedAt: string;
+  includedIds: string[];
+  excludedIds: string[];
+}
+
 export interface LoanRateChange {
   id: string;
   effectiveDate: string;
@@ -114,6 +122,7 @@ export interface Loan {
   /** openingBalance 之後的本金變動，避免更正目前餘額時回寫歷史。 */
   balanceHistory?: LoanBalanceSnapshot[];
   paymentHistory?: LoanPaymentRecord[];
+  paymentImportReviews?: LoanPaymentImportReview[];
   rateHistory?: LoanRateChange[];
   status: LoanStatus;
   closedAt?: string;
@@ -121,11 +130,13 @@ export interface Loan {
   dataQuality: LoanDataQuality;
   createdAt: string;
   updatedAt: string;
+  /** 契約或狀態調整的版本，與本金、利率及繳款事件分開。 */
+  contractUpdatedAt?: string;
 }
 
 export type CreateLoanInput = Omit<
   Loan,
-  "id" | "status" | "closedAt" | "restartedFromLoanId" | "createdAt" | "updatedAt"
+  "id" | "status" | "closedAt" | "restartedFromLoanId" | "createdAt" | "updatedAt" | "contractUpdatedAt"
 >;
 
 export type EditLoanInput = CreateLoanInput & { id: string };

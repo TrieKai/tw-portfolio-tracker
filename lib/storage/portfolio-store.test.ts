@@ -12,8 +12,29 @@ import {
 } from "@/lib/storage/portfolio-store";
 import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
+import { addDaysToIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 
 describe("portfolio transaction tracking", () => {
+  it("leaves holdings and history intact until a company action takes effect", () => {
+    const opened = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2020-01-02",
+    });
+    const holdingId = opened.holdings[0].id;
+    const today = todayIsoDate();
+    const future = addDaysToIsoDate(today, 1);
+    const event = {
+      id: "future-stock-dividend", holdingId, symbol: "2330", market: "tse" as const, name: "驗證股票",
+      type: "stock_dividend" as const, effectiveDate: future, source: "twse" as const, exDividendLabel: "除權",
+      stockDividendRatio: 0.1, subscriptionRatio: 0, autoApplicable: true,
+    };
+    const manual = { holdingId, effectiveDate: future, actionType: "split" as const, adjustmentRatio: 2 };
+    expect(applyCorporateAction(opened, event)).toBe(opened);
+    expect(applyManualCorporateAction(opened, manual)).toBe(opened);
+    expect(applyManualCorporateAction(opened, { ...manual, effectiveDate: "2020-02-30" })).toBe(opened);
+    expect(applyCorporateAction(opened, { ...event, effectiveDate: today }).holdings[0].quantity).toBeCloseTo(110);
+    expect(applyManualCorporateAction(opened, { ...manual, effectiveDate: today }).holdings[0].quantity).toBe(200);
+  });
+
   it("turns a property mortgage balance into a loan record", () => {
     const next = addHolding(defaultPortfolioStorage(), {
       assetType: "property",
@@ -460,6 +481,84 @@ describe("portfolio transaction tracking", () => {
     expect(updated.transactions.find((event) => event.type === "buy")?.price).toBe(110);
     expect(updated.transactionRevisions.at(-1)?.previous.price).toBe(100);
     expect(sold.sales[0].realizedPnl).toBe(792);
+  });
+
+
+  it("uses ex-date ownership for automatic dividend amounts regardless of recording order", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2026-11-02",
+    });
+    const id = initial.holdings[0].id;
+    const dividend = {
+      id: "fixture-excash", holdingId: id, symbol: "2330", market: "tse" as const, name: "驗證股票",
+      type: "cash_dividend" as const, effectiveDate: "2026-11-10", source: "twse" as const, exDividendLabel: "除息",
+      stockDividendRatio: 0, subscriptionRatio: 0, cashDividend: 5, autoApplicable: true,
+    };
+    const announced = applyCorporateAction(initial, dividend);
+    const earlierSale = { id, quantity: 40, sellPrice: 115, sellDate: "2026-11-06" };
+    const recordedLate = sellHolding(announced, earlierSale);
+    const recordedEarly = applyCorporateAction(sellHolding(initial, earlierSale), dividend);
+    const afterEx = applyCorporateAction(sellHolding(initial, { ...earlierSale, sellDate: "2026-11-12" }), dividend);
+    const onEx = sellHolding(announced, { ...earlierSale, sellDate: "2026-11-10" });
+    for (const [state, value] of [[recordedLate, 300], [recordedEarly, 300], [afterEx, 500], [onEx, 500]] as const) {
+      expect(state.transactions.find((event) => event.corporateActionEventId === dividend.id)?.amount).toBe(value);
+      expect(state.corporateActions[0].quantityBefore * 5).toBe(value);
+      const calendar = buildPnlCalendar(state, {
+        month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" },
+      });
+      expect(calendar.days.find((day) => day.date === "2026-11-10")?.contributions[0]?.dividend).toBe(value);
+    }
+    const closedBeforeEx = sellHolding(announced, { ...earlierSale, quantity: 100 });
+    expect(closedBeforeEx.holdings).toHaveLength(0);
+    expect(closedBeforeEx.transactions.find((event) => event.corporateActionEventId === dividend.id)?.amount).toBe(0);
+  });
+
+
+  it("allows closed positions to record a dividend earned before sale or on the sale day", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "fund", symbol: "1234", name: "已出清基金", quantity: 100, buyPrice: 10, buyDate: "2026-11-02",
+    });
+    const holdingId = initial.holdings[0].id;
+    const closed = sellHolding(initial, { id: holdingId, quantity: 100, sellPrice: 12, sellDate: "2026-11-12" });
+    const input = { holdingId, effectiveDate: "2026-11-10", settlementDate: "2026-11-22", amount: 500 };
+    const paid = addCashDividend(closed, input);
+    expect(paid.holdings).toHaveLength(0);
+    expect(paid.transactions.at(-1)).toMatchObject({
+      holdingId, date: input.effectiveDate, settlementDate: input.settlementDate, amount: input.amount,
+      type: "cash_dividend", assetType: "fund",
+    });
+    expect(paid.pnlTracking.dailySummaries["2026-11-10"]?.pnl).toBe(500);
+    expect(addCashDividend(closed, { ...input, effectiveDate: "2026-11-13" })).toBe(closed);
+    expect(addCashDividend(closed, { ...input, effectiveDate: "2026-11-02" })).toBe(closed);
+    expect(addCashDividend(closed, { ...input, effectiveDate: "2026-11-12" })).not.toBe(closed);
+    expect(addCashDividend(paid, input)).toBe(paid);
+  });
+
+  it("applies late official cash dividends to an archived stock without changing its sale or reopening it", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "已出清股票", quantity: 100, buyPrice: 100, buyDate: "2026-11-02",
+    });
+    const id = initial.holdings[0].id;
+    const closed = sellHolding(initial, { id, quantity: 100, sellPrice: 120, sellDate: "2026-11-12" });
+    const event = {
+      id: "fixture-archived", holdingId: id, symbol: "2330", market: "tse" as const, name: "已出清股票",
+      type: "mixed" as const, effectiveDate: "2026-11-10", source: "twse" as const, exDividendLabel: "權息",
+      stockDividendRatio: 0.1, subscriptionRatio: 0, cashDividend: 5, autoApplicable: true,
+    };
+    const paid = applyCorporateAction(closed, event);
+    expect(paid.holdings).toEqual([]);
+    expect(paid.sales).toEqual(closed.sales);
+    expect(paid.transactions.at(-1)).toMatchObject({
+      holdingId: id, type: "cash_dividend", amount: 500, corporateActionEventId: event.id,
+    });
+    expect(paid.corporateActions[0]).toMatchObject({ actionType: "cash_dividend", quantityBefore: 100, quantityAfter: 100 });
+    expect(applyCorporateAction(closed, { ...event, effectiveDate: "2026-11-13" })).toBe(closed);
+    expect(applyCorporateAction(closed, { ...event, cashDividend: undefined })).toBe(closed);
+    expect(applyCorporateAction(closed, { ...event, symbol: "2317" })).toBe(closed);
+    const manual = addCashDividend(closed, { holdingId: id, effectiveDate: event.effectiveDate, amount: 500 });
+    const reconciled = applyCorporateAction(manual, event);
+    expect(reconciled.transactions.filter((item) => item.type === "cash_dividend")).toHaveLength(1);
+    expect(reconciled.transactions.at(-1)).toMatchObject({ amount: 500, source: "user" });
   });
 
 });

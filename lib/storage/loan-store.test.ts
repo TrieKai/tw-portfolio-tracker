@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildDailyInvestmentFinancingCosts } from "@/lib/loans/calculations";
+import { buildDailyInvestmentFinancingCosts, principalAtDate } from "@/lib/loans/calculations";
+import { addDaysToIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
 import {
   addLoan,
@@ -164,6 +165,38 @@ describe("loan store", () => {
     });
 
     expect(next).toBe(added);
+  });
+
+  it("records backdated payments using the principal recorded for that date", () => {
+    const started = addLoan(defaultPortfolioStorage(), {
+      ...input, repaymentMethod: "revolving", openingBalance: 100_000,
+    });
+    const id = started.loans[0].id;
+    const later = recordLoanBalance(started, id, 50_000, "2026-09-20");
+    const payment = { paymentDate: "2026-09-12", principalPaid: 10_000,
+      interestPaid: 0, feePaid: 0, subsidyReceived: 0, remainingPrincipalAfter: 90_000 };
+    const paid = recordLoanPayment(later, id, payment);
+    expect(paid.loans[0].paymentHistory).toHaveLength(1);
+    expect(principalAtDate(paid.loans[0], "2026-09-12")).toBe(90_000);
+    expect(principalAtDate(paid.loans[0], "2026-09-20")).toBe(50_000);
+    expect(recordLoanPayment(later, id, { ...payment, remainingPrincipalAfter: 105_000 })).toBe(later);
+    expect(recordLoanPayment(paid, id, { ...payment, remainingPrincipalAfter: 95_000 })).toBe(paid);
+  });
+
+  it("allows a closing-day payment while rejecting dates outside the archived loan", () => {
+    const started = addLoan(defaultPortfolioStorage(), { ...input, repaymentMethod: "revolving" });
+    const id = started.loans[0].id;
+    const closed = setLoanStatus(started, id, "paid_off", "2026-09-20");
+    const payment = { paymentDate: "2026-09-20", principalPaid: 1_000_000, interestPaid: 0,
+      feePaid: 200, subsidyReceived: 0, remainingPrincipalAfter: 0 };
+    const paid = recordLoanPayment(closed, id, payment);
+    expect(paid.loans[0]).toMatchObject({ status: "paid_off", closedAt: "2026-09-20", paymentHistory: [payment] });
+    expect(buildDailyInvestmentFinancingCosts(paid.loans, "2026-09-20", "2026-09-21")['2026-09-21']).toBeUndefined();
+    expect(recordLoanPayment(closed, id, { ...payment, paymentDate: "2026-09-21" })).toBe(closed);
+    expect(recordLoanPayment(started, id, { ...payment, paymentDate: "2026-09-31" })).toBe(started);
+    expect(recordLoanPayment(started, id, { ...payment, paymentDate: addDaysToIsoDate(todayIsoDate(), 1) })).toBe(started);
+    expect(recordLoanBalance(closed, id, 0, "2026-09-21")).toBe(closed);
+    expect(setLoanStatus(paid, id, "refinanced", "2026-09-19")).toBe(paid);
   });
 
   it("requires an ending balance when principal was repaid", () => {

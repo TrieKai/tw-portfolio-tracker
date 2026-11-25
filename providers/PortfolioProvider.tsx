@@ -24,6 +24,7 @@ import {
   fetchHistoryForHoldings,
   type PriceHistoryRange,
 } from "@/lib/client/holding-history";
+import { corporateEventForLot, listDividendLots } from "@/lib/portfolio/dividend-lots";
 import { fetchCorporateActions } from "@/lib/client/corporate-actions-api";
 import type { CorporateActionEvent } from "@/lib/corporate-actions/types";
 import {
@@ -57,10 +58,10 @@ import {
 } from "@/lib/portfolio/pnl-breakdown";
 import {
   applyImportMode,
-  SaleImportReviewRequired,
+  PortfolioImportReviewRequired,
   type PortfolioImportMode,
   type PortfolioImportResult,
-  type SaleImportChoices,
+  type PortfolioImportChoices,
 } from "@/lib/storage/portfolio-export";
 import {
   defaultPortfolioStorage,
@@ -227,11 +228,11 @@ interface PortfolioContextValue {
   importPriceHistory: (
     groupKey: string,
     range: ChartRange
-  ) => Promise<{ ok: boolean; count?: number; startDate?: string; endDate?: string; error?: string }>;
+  ) => Promise<{ ok: boolean; count?: number; skippedCount?: number; startDate?: string; endDate?: string; error?: string }>;
   importFundHistory: (
     groupKey: string,
     range: ChartRange
-  ) => Promise<{ ok: boolean; count?: number; startDate?: string; endDate?: string; error?: string }>;
+  ) => Promise<{ ok: boolean; count?: number; skippedCount?: number; startDate?: string; endDate?: string; error?: string }>;
   setAutoUpdate: (enabled: boolean) => Promise<boolean>;
   setExposureSettings: (
     patch: Pick<PortfolioSettings, "netAssets">
@@ -243,7 +244,7 @@ interface PortfolioContextValue {
   importPortfolio: (
     incoming: PortfolioStorage,
     mode: PortfolioImportMode,
-    choices?: SaleImportChoices
+    choices?: PortfolioImportChoices
   ) => Promise<PortfolioImportResult>;
   /** 強制從雲端重新載入（新裝置／同步異常時使用） */
   refreshFromCloud: () => Promise<boolean>;
@@ -583,15 +584,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   );
 
   const pendingCorporateActions = useMemo(() => {
-    const handled = new Set(
-      (storage?.corporateActions ?? []).map(
-        (action) => `${action.holdingId}:${action.sourceEventId}`
-      )
-    );
-    return detectedCorporateActions.filter(
-      (event) => !handled.has(`${event.holdingId}:${event.id}`)
-    );
-  }, [detectedCorporateActions, storage?.corporateActions]);
+    if (!storage || !detectedCorporateActions.length) return [];
+    const lots = new Map(listDividendLots(storage).map((lot) => [lot.id, lot]));
+    const handled = new Set(storage.corporateActions.map((action) => `${action.holdingId}:${action.sourceEventId}`));
+    return detectedCorporateActions.flatMap((event) => {
+      if (handled.has(`${event.holdingId}:${event.id}`)) return [];
+      const applicable = corporateEventForLot(lots.get(event.holdingId), event);
+      return applicable ? [applicable] : [];
+    });
+  }, [detectedCorporateActions, storage]);
 
   const add = useCallback(
     async (
@@ -774,6 +775,8 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     let priceFail = 0;
     let historyOk = 0;
     let historyFail = 0;
+    let historyWritten = 0;
+    let historySkipped = 0;
     let skipped = 0;
     let quoteError: string | undefined;
     let historyError: string | undefined;
@@ -812,12 +815,15 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
           const result = applyHistoryResults(latest, importable, results);
           historyOk = result.updated;
           historyFail = result.failed;
+          historyWritten = result.writtenPoints;
+          historySkipped = result.skippedPoints;
           skipped += result.skipped;
           historyError = result.error;
           return result.next;
         });
         if (!saved && historyOk > 0) {
           historyOk = 0;
+          historyWritten = 0;
           historyFail = importable.length;
           historyError = "歷史價格未儲存";
         }
@@ -827,11 +833,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       const parts: string[] = [];
       if (priceOk > 0) parts.push(`現價已更新 ${priceOk} 筆`);
       if (priceFail > 0) parts.push(quoteError ?? `現價失敗 ${priceFail} 筆`);
-      if (historyOk > 0) parts.push(`歷史已載入 ${historyOk} 筆持倉`);
+      if (historyWritten > 0) parts.push(`已儲存 ${historyWritten} 筆歷史價格`);
+      if (historySkipped > 0) parts.push(`略過 ${historySkipped} 筆已保留或無需更新的歷史價格`);
       if (historyFail > 0) parts.push(`歷史失敗 ${historyFail} 筆`);
       if (range && historyTargets.length > importable.length) parts.push("部分持倉使用既有價格歷史");
       if (skipped > 0) parts.push(`略過 ${skipped} 筆已變更或已有較新價格的持倉`);
-      const ok = priceOk > 0 || historyOk > 0;
+      const ok = priceOk > 0 || historyWritten > 0 || (historySkipped > 0 && historyFail === 0);
       const message = parts.join("。") || "無可更新項目";
       const detail = !ok && historyError ? `${message}。${historyError}` : message;
       setBatchStatus(ok ? (priceFail || historyFail || skipped ? "partial" : "done") : "error");
@@ -853,45 +860,49 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   }, [refreshPrices]);
 
   const scanCorporateActions = useCallback(async () => {
-    if (!storage) return;
-    const stockHoldings = storage.holdings.filter((h) => h.assetType === "stock");
-    if (stockHoldings.length === 0) {
+    const initial = storageRef.current;
+    if (!initial) return;
+    const generation = initGenerationRef.current;
+    const items = listDividendLots(initial).flatMap((lot) => lot.assetType === "stock" && lot.buyDate
+      ? [{ holdingId: lot.id, symbol: lot.symbol, market: lot.market, buyDate: lot.buyDate }]
+      : []);
+    if (items.length === 0) {
       setDetectedCorporateActions([]);
       setCorporateActionStatus("done");
-      setCorporateActionMessage("沒有台股持倉可查詢");
+      setCorporateActionMessage("沒有可查詢的台股持倉或已賣出批次");
       return;
     }
 
     setCorporateActionStatus("loading");
     setCorporateActionMessage(null);
-
     try {
-      const res = await fetchCorporateActions(stockHoldings);
+      const res = await fetchCorporateActions(items);
+      const latest = storageRef.current;
+      if (!latest || generation !== initGenerationRef.current) return;
       if (!res.success) {
         setCorporateActionStatus("error");
         setCorporateActionMessage(res.error);
         return;
       }
       setDetectedCorporateActions(res.events);
-      const handled = new Set(
-        storage.corporateActions.map(
-          (action) => `${action.holdingId}:${action.sourceEventId}`
-        )
+      const lots = new Map(listDividendLots(latest).map((lot) => [lot.id, lot]));
+      const handled = new Set(latest.corporateActions.map((action) => `${action.holdingId}:${action.sourceEventId}`));
+      const pending = res.events.filter((event) =>
+        !handled.has(`${event.holdingId}:${event.id}`) && corporateEventForLot(lots.get(event.holdingId), event)
       );
-      const pendingCount = res.events.filter(
-        (event) => !handled.has(`${event.holdingId}:${event.id}`)
-      ).length;
+      const today = todayIsoDate();
+      const upcoming = pending.filter((event) => event.effectiveDate > today).length;
+      const ready = pending.length - upcoming;
+      const counts = [ready ? `${ready} 筆待處理公司行動` : null, upcoming ? `${upcoming} 筆尚未生效` : null]
+        .filter(Boolean).join("、");
       setCorporateActionStatus("done");
-      setCorporateActionMessage(
-        pendingCount > 0
-          ? `找到 ${pendingCount} 筆待處理公司行動`
-          : "目前沒有待處理公司行動"
-      );
+      setCorporateActionMessage(counts ? `找到 ${counts}` : "目前沒有待處理公司行動");
     } catch {
+      if (generation !== initGenerationRef.current) return;
       setCorporateActionStatus("error");
       setCorporateActionMessage("公司行動查詢失敗，請稍後重試");
     }
-  }, [storage]);
+  }, []);
 
   const applyDetectedCorporateAction = useCallback(
     async (event: CorporateActionEvent) => {
@@ -962,11 +973,17 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     const generation = priceGenerationRef.current;
     const results = await fetchHistoryForHoldings(requested, range);
     let dates: string[] = [];
+    let writtenPoints = 0;
+    let skippedPoints = 0;
+    let failed = 0;
     let error: string | undefined;
     const saved = await persist((latest) => {
       if (generation !== priceGenerationRef.current) return null;
       const result = applyHistoryResults(latest, requested, results);
       dates = result.dates;
+      writtenPoints = result.writtenPoints;
+      skippedPoints = result.skippedPoints;
+      failed = result.failed;
       error = result.error;
       return result.next;
     });
@@ -974,12 +991,14 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: "資料來源已變更，請重新載入" };
     }
 
-    if (!saved || !dates.length) {
-      return { ok: false, error: error ?? (dates.length ? "歷史價格未儲存" : "持倉已變更，請重新選擇標的") };
+    if (writtenPoints && !saved) return { ok: false, error: "歷史價格未儲存" };
+    if (!writtenPoints && (!skippedPoints || failed)) {
+      return { ok: false, error: error ?? "持倉已變更，請重新選擇標的" };
     }
     return {
       ok: true,
-      count: dates.length,
+      count: writtenPoints,
+      skippedCount: skippedPoints,
       startDate: dates[0],
       endDate: dates.at(-1),
     };
@@ -993,7 +1012,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     async (
       incoming: PortfolioStorage,
       mode: PortfolioImportMode,
-      choices?: SaleImportChoices
+      choices?: PortfolioImportChoices
     ): Promise<PortfolioImportResult> => {
       let result: PortfolioImportResult = { status: "failed" };
       const saved = await applyStorage(
@@ -1001,7 +1020,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
           try {
             return applyImportMode(latest, incoming, mode, choices);
           } catch (error) {
-            if (!(error instanceof SaleImportReviewRequired)) throw error;
+            if (!(error instanceof PortfolioImportReviewRequired)) throw error;
             result = { status: "review", conflicts: error.conflicts };
             return null;
           }

@@ -12,6 +12,8 @@ import {
 import { normalizeStockSymbol } from "@/lib/prices/stock-symbol";
 import { corporateActionAdjustmentRatio, costOnDate, holdingActions, holdingSaleTerms, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
+import { corporateEventForLot, dividendShareCount, isDividendDateInPosition, listDividendLots } from "@/lib/portfolio/dividend-lots";
+import { reconcileCorporateDividends } from "@/lib/portfolio/corporate-dividends";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import type {
   CorporateActionRecord,
@@ -177,6 +179,7 @@ export function addHolding(
     market: input.assetType === "stock" ? (input.market ?? "tse") : undefined,
     createdAt: now,
     updatedAt: now,
+    positionUpdatedAt: now,
   };
 
   const next = {
@@ -284,6 +287,7 @@ export function editHolding(
   const instrumentChanged = holdingGroupKey(instrument) !== holdingGroupKey(existingHolding);
   let next = updateHolding(state, input.id, {
     ...instrument,
+    positionUpdatedAt: nextRecordTime(existingHolding.updatedAt),
     name: input.name.trim(),
     buyPrice: input.buyPrice,
     quantity: input.quantity,
@@ -503,19 +507,11 @@ export function sellHolding(
     };
   }
 
-  if (positionClosed) {
-    return persistPnlSummariesForDates(removeHolding(next, input.id), [
-      input.sellDate,
-    ]);
-  }
-
-  return persistPnlSummariesForDates(
-    updateHolding(next, input.id, {
-      quantity: holding.quantity - quantityInCurrentUnits,
-      lastError: undefined,
-    }),
-    [input.sellDate]
-  );
+  const afterSale = positionClosed
+    ? removeHolding(next, input.id)
+    : updateHolding(next, input.id, { quantity: holding.quantity - quantityInCurrentUnits, lastError: undefined });
+  const reconciled = reconcileCorporateDividends(afterSale, input.id);
+  return persistPnlSummariesForDates(reconciled.storage, [input.sellDate, ...reconciled.dates]);
 }
 
 /** 一次套用多筆賣出（例如合併標的 FIFO 分攤），只持久化一次 */
@@ -537,16 +533,12 @@ export function addCashDividend(
   state: PortfolioStorage,
   input: CashDividendInput
 ): PortfolioStorage {
-  const holding = state.holdings.find((item) => item.id === input.holdingId);
-  if (!holding || holding.assetType === "property") return state;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveDate)) return state;
+  const holding = listDividendLots(state).find((item) => item.id === input.holdingId);
+  if (!holding || !isDividendDateInPosition(holding, input.effectiveDate) ||
+      input.effectiveDate > todayIsoDate()) return state;
   if (!Number.isFinite(input.amount) || input.amount <= 0) return state;
-  if (
-    input.settlementDate &&
-    !/^\d{4}-\d{2}-\d{2}$/.test(input.settlementDate)
-  ) {
-    return state;
-  }
+  if (input.settlementDate && (!parseIsoDate(input.settlementDate) ||
+      input.settlementDate < input.effectiveDate)) return state;
   const duplicate = state.transactions.some(
     (transaction) =>
       transaction.type === "cash_dividend" &&
@@ -910,32 +902,42 @@ export function updateSettings(
 
 export function applyCorporateAction(
   state: PortfolioStorage,
-  event: CorporateActionEvent
+  detected: CorporateActionEvent
 ): PortfolioStorage {
-  const holding = state.holdings.find((h) => h.id === event.holdingId);
-  if (!holding || holding.assetType !== "stock") return state;
-  if (event.effectiveDate <= holding.buyDate) return state;
-  if (hasHandledCorporateAction(state, holding.id, event.id)) return state;
+  if (detected.effectiveDate > todayIsoDate()) return state;
+  const lot = listDividendLots(state).find((item) => item.id === detected.holdingId);
+  const event = corporateEventForLot(lot, detected);
+  if (!lot || !event || hasHandledCorporateAction(state, lot.id, event.id)) return state;
+  const holding = state.holdings.find((item) => item.id === lot.id);
+  const dividendShares = dividendShareCount(state, lot, event.effectiveDate);
+  if (!holding && (!dividendShares || !event.cashDividend)) return state;
 
   const ratio =
     Number.isFinite(event.stockDividendRatio) && event.stockDividendRatio > 0
       ? event.stockDividendRatio
       : 0;
-  const quantityBefore = holding.quantity;
-  const buyPriceBefore = holding.buyPrice;
+  const quantityBefore = holding?.quantity ?? dividendShares ?? 0;
+  const buyPriceBefore = holding?.buyPrice ?? state.sales.find((sale) => sale.holdingId === lot.id)?.buyPrice ?? 0;
   const totalCost = quantityBefore * buyPriceBefore;
   const quantityAfter = ratio > 0 ? quantityBefore * (1 + ratio) : quantityBefore;
   const buyPriceAfter =
     ratio > 0 && quantityAfter > 0 ? totalCost / quantityAfter : buyPriceBefore;
   const now = new Date().toISOString();
+  const cashDividend = event.cashDividend && Number.isFinite(event.cashDividend) && event.cashDividend > 0
+    ? event.cashDividend : undefined;
+  const cashAmount = cashDividend !== undefined ? cashDividend * (dividendShares ?? quantityBefore) : undefined;
+  const sameManualDividend = cashAmount !== undefined && state.transactions.some((entry) =>
+    entry.type === "cash_dividend" && entry.source === "user" && entry.holdingId === lot.id &&
+    entry.date === event.effectiveDate && entry.amount === cashAmount
+  );
 
   const record: CorporateActionRecord = {
     id: newId(),
-    holdingId: holding.id,
-    assetType: holding.assetType,
-    symbol: holding.symbol,
-    market: holding.market,
-    name: holding.name,
+    holdingId: lot.id,
+    assetType: lot.assetType,
+    symbol: lot.symbol,
+    market: lot.market,
+    name: lot.name,
     actionType: event.type,
     effectiveDate: event.effectiveDate,
     source: event.source,
@@ -943,13 +945,13 @@ export function applyCorporateAction(
     stockDividendRatio: event.stockDividendRatio,
     subscriptionRatio: event.subscriptionRatio,
     subscriptionPrice: event.subscriptionPrice,
-    cashDividend: event.cashDividend,
+    cashDividend,
     adjustmentRatio: ratio > 0 ? 1 + ratio : undefined,
-    quantityBefore,
-    quantityAfter,
+    quantityBefore: ratio <= 0 ? dividendShares ?? quantityBefore : quantityBefore,
+    quantityAfter: ratio <= 0 ? dividendShares ?? quantityAfter : quantityAfter,
     buyPriceBefore,
     buyPriceAfter,
-    totalCostBefore: totalCost,
+    totalCostBefore: ratio <= 0 && dividendShares !== null ? buyPriceBefore * dividendShares : totalCost,
     totalCostAfter: ratio > 0 ? totalCost : undefined,
     priceHistoryAdjustedAt: ratio > 0 ? now : undefined,
     note: event.note,
@@ -961,11 +963,7 @@ export function applyCorporateAction(
     corporateActions: [...state.corporateActions, record],
   };
 
-  if (
-    event.cashDividend !== undefined &&
-    Number.isFinite(event.cashDividend) &&
-    event.cashDividend > 0
-  ) {
+  if (cashAmount !== undefined && !sameManualDividend) {
     withRecord = {
       ...withRecord,
       transactions: [
@@ -973,13 +971,14 @@ export function applyCorporateAction(
         {
           id: newId(),
           type: "cash_dividend",
-          holdingId: holding.id,
+          corporateActionEventId: event.id,
+          holdingId: lot.id,
           assetType: "stock",
-          name: holding.name,
-          symbol: holding.symbol,
-          market: holding.market,
+          name: lot.name,
+          symbol: lot.symbol,
+          market: lot.market,
           date: event.effectiveDate,
-          amount: event.cashDividend * quantityBefore,
+          amount: cashAmount,
           fee: 0,
           tax: 0,
           quality: "complete",
@@ -992,9 +991,11 @@ export function applyCorporateAction(
     };
   }
 
-  if (ratio <= 0) {
-    return persistPnlSummariesForDates(withRecord, [event.effectiveDate]);
-  }
+  const finalize = (portfolio: PortfolioStorage) => {
+    const reconciled = reconcileCorporateDividends(portfolio, lot.id);
+    return persistPnlSummariesForDates(reconciled.storage, [event.effectiveDate, ...reconciled.dates]);
+  };
+  if (ratio <= 0 || !holding) return finalize(withRecord);
 
   const adjustmentRatio = 1 + ratio;
   const withAdjustedHistory: PortfolioStorage = {
@@ -1015,7 +1016,7 @@ export function applyCorporateAction(
     now
   );
 
-  return persistPnlSummariesForDates(
+  return finalize(
     updateHolding(withAdjustedLedger, holding.id, {
       quantity: quantityAfter,
       buyPrice: buyPriceAfter,
@@ -1025,8 +1026,7 @@ export function applyCorporateAction(
         adjustmentRatio
       ),
       lastError: undefined,
-    }),
-    [event.effectiveDate]
+    })
   );
 }
 
@@ -1036,8 +1036,8 @@ export function applyManualCorporateAction(
 ): PortfolioStorage {
   const holding = state.holdings.find((h) => h.id === input.holdingId);
   if (!holding || holding.assetType !== "stock") return state;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveDate)) return state;
-  if (input.effectiveDate <= holding.buyDate) return state;
+  if (!parseIsoDate(input.effectiveDate) || input.effectiveDate > todayIsoDate() ||
+      input.effectiveDate <= holding.buyDate) return state;
   if (!Number.isFinite(input.adjustmentRatio) || input.adjustmentRatio <= 0) {
     return state;
   }
@@ -1177,15 +1177,18 @@ export function applyImportedPriceHistory(
 ): PortfolioStorage {
   const holding = state.holdings.find((item) => item.id === holdingId);
   if (!holding || points.length === 0) return state;
-  const retainedDates = new Set(
-    (state.priceHistory[holdingId] ?? [])
-      .filter((point) => point.source === "manual" || point.date === holding.priceDate)
-      .map((point) => point.date)
-  );
-
+  const existing = new Map((state.priceHistory[holdingId] ?? []).map((point) => [point.date, point]));
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - MAX_PRICE_HISTORY_DAYS);
+  const earliest = cutoff.toISOString().slice(0, 10);
   const sorted = points
-    .filter((point) => !retainedDates.has(point.date))
+    .filter((point) => point.date >= earliest && point.date !== holding.priceDate &&
+      existing.get(point.date)?.source !== "manual")
     .map((point) => adjustPointForCorporateActions(state, holdingId, point))
+    .filter((point) => {
+      const old = existing.get(point.date);
+      return old?.price !== point.price || old?.source !== point.source;
+    })
     .sort((a, b) => a.date.localeCompare(b.date));
   if (sorted.length === 0) return state;
   const latest = sorted[sorted.length - 1];

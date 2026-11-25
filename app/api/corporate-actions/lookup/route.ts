@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { lookupCorporateActions } from "@/lib/corporate-actions/fetcher";
-import type { CorporateActionLookupResponse } from "@/lib/corporate-actions/types";
+import { MAX_CORPORATE_ACTION_LOOKUP_ITEMS, type CorporateActionLookupResponse } from "@/lib/corporate-actions/types";
 
 export const maxDuration = 25;
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ const itemSchema = z.object({
 });
 
 const requestSchema = z.object({
-  items: z.array(itemSchema).max(50),
+  items: z.array(itemSchema).max(MAX_CORPORATE_ACTION_LOOKUP_ITEMS),
 });
 
 export async function POST(req: Request) {

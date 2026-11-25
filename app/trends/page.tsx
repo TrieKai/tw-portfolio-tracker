@@ -94,7 +94,7 @@ export default function TrendsPage() {
       setHoldingNotice({
         scope,
         text: result.ok
-          ? `已取得 ${result.count ?? 0} 筆歷史${isFund ? "淨值" : "收盤價"}${coverage}。`
+          ? `已儲存 ${result.count ?? 0} 筆歷史${isFund ? "淨值" : "收盤價"}${coverage}。${result.skippedCount ? `略過 ${result.skippedCount} 筆已保留或無需更新的價格。` : ""}`
           : result.error ?? "載入歷史資料失敗，請稍後再試。",
         error: !result.ok,
       });

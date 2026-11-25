@@ -9,6 +9,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { listDividendLots } from "@/lib/portfolio/dividend-lots";
 import { DividendModal } from "@/components/calendar/DividendModal";
 import {
   PnlDetailPanel,
@@ -321,6 +322,7 @@ export function PnlCalendarPage() {
     () => holdings.filter((holding) => holding.assetType !== "property"),
     [holdings]
   );
+  const dividendLots = useMemo(() => listDividendLots(storage), [storage]);
   const filterHoldings = useMemo(() => {
     const options = new Map(
       investmentHoldings.map((holding) => [
@@ -452,7 +454,7 @@ export function PnlCalendarPage() {
             <button
               type="button"
               onClick={() => setDividendOpen(true)}
-              disabled={investmentHoldings.length === 0}
+              disabled={dividendLots.length === 0}
               className="btn-secondary flex-1 sm:flex-none"
             >
               新增配息
@@ -613,7 +615,7 @@ export function PnlCalendarPage() {
       ) : null}
       {dividendOpen ? (
         <DividendModal
-          holdings={investmentHoldings}
+          lots={dividendLots}
           onSave={addDividend}
           onClose={() => setDividendOpen(false)}
         />

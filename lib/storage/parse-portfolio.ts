@@ -11,6 +11,7 @@ import {
   type Loan,
   type LoanBalanceSnapshot,
   type LoanCollateralPosition,
+  type LoanPaymentImportReview,
   type LoanPaymentRecord,
   type LoanRateChange,
   type LoanPurpose,
@@ -248,6 +249,26 @@ function normalizeRateHistory(
   return changes.length > 0 ? changes : undefined;
 }
 
+function normalizePaymentImportReviews(value: unknown): LoanPaymentImportReview[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const isPaymentIdList = (ids: unknown): ids is string[] =>
+    Array.isArray(ids) && ids.every((id) => typeof id === "string" && id.length > 0);
+  const reviews: LoanPaymentImportReview[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw.id !== "string" || !raw.id ||
+        typeof raw.reviewedAt !== "string" || !isPaymentIdList(raw.includedIds) ||
+        !raw.includedIds.length || !isPaymentIdList(raw.excludedIds)) continue;
+    const time = Date.parse(raw.reviewedAt);
+    const includedIds = new Set(raw.includedIds);
+    if (!Number.isFinite(time) || raw.excludedIds.some((id) => includedIds.has(id))) continue;
+    const reviewedAt = new Date(time).toISOString();
+    if (reviewedAt.length !== 24) continue;
+    reviews.push({ id: raw.id, reviewedAt, includedIds: [...includedIds],
+      excludedIds: [...new Set(raw.excludedIds)] });
+  }
+  return reviews.length ? reviews : undefined;
+}
+
 function normalizeLoan(raw: unknown): Loan | null {
   if (!isRecord(raw)) return null;
   if (
@@ -298,6 +319,7 @@ function normalizeLoan(raw: unknown): Loan | null {
     trackingStartDate,
     now
   );
+  const paymentImportReviews = normalizePaymentImportReviews(raw.paymentImportReviews);
   const rateHistory = normalizeRateHistory(
     raw.rateHistory,
     trackingStartDate,
@@ -372,6 +394,7 @@ function normalizeLoan(raw: unknown): Loan | null {
       : {}),
     ...(balanceHistory ? { balanceHistory } : {}),
     ...(paymentHistory ? { paymentHistory } : {}),
+    ...(paymentImportReviews ? { paymentImportReviews } : {}),
     ...(rateHistory ? { rateHistory } : {}),
     status,
     ...(typeof raw.closedAt === "string" && normalizeToIsoDate(raw.closedAt)
@@ -383,6 +406,7 @@ function normalizeLoan(raw: unknown): Loan | null {
     dataQuality,
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : now,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : now,
+    ...(typeof raw.contractUpdatedAt === "string" ? { contractUpdatedAt: raw.contractUpdatedAt } : {}),
   };
 }
 

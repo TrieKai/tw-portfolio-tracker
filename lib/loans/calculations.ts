@@ -280,37 +280,66 @@ export function estimateLoanInterestForPeriod(
   return roundMoney(interest);
 }
 
+interface StatementPeriod {
+  startDate: string;
+  endDate: string;
+}
+
+function estimateInterestForStatementPeriods(
+  loan: Loan,
+  periods: StatementPeriod[],
+  schedule: LoanScheduleRow[]
+): number {
+  const [first, ...rest] = [...periods].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  if (!first) return 0;
+  let { startDate, endDate } = first;
+  let interest = 0;
+  for (const period of rest) {
+    if (period.startDate <= endDate) {
+      if (period.endDate > endDate) endDate = period.endDate;
+      continue;
+    }
+    interest += estimateLoanInterestForPeriod(loan, startDate, endDate, schedule);
+    ({ startDate, endDate } = period);
+  }
+  return interest + estimateLoanInterestForPeriod(loan, startDate, endDate, schedule);
+}
+
 export function estimateLoanFinancingCostForPeriod(
   loan: Loan,
   fromDate: string,
   toDate: string
 ): number {
-  const interest = estimateLoanInterestForPeriod(loan, fromDate, toDate);
+  if (toDate <= fromDate) return 0;
+  const schedule = buildLoanSchedule(loan);
+  const interest = estimateLoanInterestForPeriod(loan, fromDate, toDate, schedule);
   const includesInitialFee =
     loan.trackingStartDate > fromDate && loan.trackingStartDate <= toDate;
-  let reconciliationAdjustment = 0;
+  const priorStatements: StatementPeriod[] = [];
+  const currentStatements: StatementPeriod[] = [];
+  let payments = 0;
   for (const payment of loan.paymentHistory ?? []) {
-    if (payment.paymentDate <= fromDate || payment.paymentDate > toDate) {
-      continue;
-    }
-    reconciliationAdjustment += payment.feePaid - payment.subsidyReceived;
-    if (
-      payment.interestPeriodStartDate &&
-      payment.interestPeriodEndDate
-    ) {
-      const estimatedForStatement = estimateLoanInterestForPeriod(
-        loan,
-        payment.interestPeriodStartDate,
-        payment.interestPeriodEndDate
-      );
-      reconciliationAdjustment +=
-        payment.interestPaid - estimatedForStatement;
+    if (payment.paymentDate > toDate) continue;
+    const belongsToPeriod = payment.paymentDate > fromDate;
+    if (belongsToPeriod) payments += payment.feePaid - payment.subsidyReceived;
+    const { interestPeriodStartDate: startDate, interestPeriodEndDate: endDate } = payment;
+    if (!startDate || !endDate || startDate >= endDate) continue;
+    if (belongsToPeriod) {
+      payments += payment.interestPaid;
+      currentStatements.push({ startDate, endDate });
+    } else {
+      priorStatements.push({ startDate, endDate });
     }
   }
+  // 同一計息日的估算值只沖銷一次，各次實付仍歸屬到各自的繳款日。
+  const replacedEstimate = currentStatements.length
+    ? estimateInterestForStatementPeriods(loan, [...priorStatements, ...currentStatements], schedule) -
+      estimateInterestForStatementPeriods(loan, priorStatements, schedule)
+    : 0;
   return roundMoney(
     interest +
       (includesInitialFee ? loan.initialFees ?? 0 : 0) +
-      reconciliationAdjustment
+      payments - replacedEstimate
   );
 }
 

@@ -269,6 +269,31 @@ describe("loan calculations", () => {
     expect(daily["2026-02-01"]).toBeLessThan(0);
   });
 
+  it("subtracts estimated interest for overlapping statement periods only once", () => {
+    const first = {
+      id: "statement-a", paymentDate: "2026-02-01", principalPaid: 0, interestPaid: 310,
+      feePaid: 20, subsidyReceived: 0, interestPeriodStartDate: "2026-01-01",
+      interestPeriodEndDate: "2026-01-31", createdAt: "2026-02-01T00:00:00.000Z",
+    };
+    const second = {
+      ...first, id: "statement-b", paymentDate: "2026-02-03", interestPaid: 310,
+      feePaid: 0, subsidyReceived: 10, createdAt: "2026-02-03T00:00:00.000Z",
+    };
+    const sample = loan({ remainingTermMonths: undefined, paymentHistory: [second, first] });
+    const interestPerDay = (120_000 * 0.06) / 365;
+    const total = estimateInvestmentFinancingCostForPeriod([sample], "2025-12-31", "2026-02-03");
+    expect(total).toBeCloseTo(310 + 310 + 20 - 10 + 3 * interestPerDay, 4);
+    const daily = buildDailyInvestmentFinancingCosts([sample], "2026-01-01", "2026-02-03");
+    expect(daily["2026-02-03"]).toBeCloseTo(310 - 10 + interestPerDay, 4);
+    expect(Object.values(daily).reduce((sum, cost) => sum + cost, 0)).toBeCloseTo(total, 4);
+
+    const overlapping = loan({ ...sample, paymentHistory: [first, {
+      ...second, interestPeriodStartDate: "2026-01-15", interestPeriodEndDate: "2026-02-02",
+    }] });
+    expect(estimateInvestmentFinancingCostForPeriod([overlapping], "2025-12-31", "2026-02-03"))
+      .toBeCloseTo(310 + 310 + 20 - 10 + interestPerDay, 4);
+  });
+
   it("calculates fee-inclusive effective APR for fixed installments", () => {
     const withoutFee = calculateLoanEffectiveApr(loan());
     const withFee = calculateLoanEffectiveApr(loan({ initialFees: 2_000 }));
