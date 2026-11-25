@@ -14,6 +14,7 @@ interface HistoryLot {
   sales: SaleTransaction[];
   actions: CorporateActionRecord[];
   removedOn?: string;
+  closedOn?: string;
 }
 
 function groupByHoldingId<T extends { holdingId: string }>(records: T[]) {
@@ -115,6 +116,7 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
       },
       sales,
       actions,
+      closedOn: latest.sellDate,
     });
     if (!knownBuy) estimatedStartCount++;
     exitDates.add(latest.sellDate);
@@ -124,13 +126,17 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
     positionOn(lot, lot.holding.buyDate, true)
   );
 
-  for (const { holding, sales, actions, removedOn } of lots.values()) {
+  for (const { holding, sales, actions, removedOn, closedOn } of lots.values()) {
+    const hasPositionHistory = (date: string) => date >= holding.buyDate &&
+      (!removedOn || date < removedOn) && (!closedOn || date <= closedOn);
     dates.add(holding.buyDate);
-    if (holding.priceDate) dates.add(holding.priceDate);
+    if (holding.priceDate && hasPositionHistory(holding.priceDate)) dates.add(holding.priceDate);
     for (const { sellDate } of sales) dates.add(sellDate);
-    for (const { effectiveDate } of actions) dates.add(effectiveDate);
+    for (const { effectiveDate } of actions) {
+      if (hasPositionHistory(effectiveDate)) dates.add(effectiveDate);
+    }
     for (const point of storage.priceHistory[holding.id] ?? []) {
-      if (point.date >= holding.buyDate && (!removedOn || point.date < removedOn)) dates.add(point.date);
+      if (hasPositionHistory(point.date)) dates.add(point.date);
     }
   }
 

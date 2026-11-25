@@ -1,7 +1,7 @@
 import type { PricePoint } from "@/lib/types/holding";
 
 export interface UniverseStrategyResult {
-  id: "actual" | "dca" | "lumpSum";
+  id: "dca" | "lumpSum";
   label: string;
   invested: number;
   finalValue: number;
@@ -35,14 +35,12 @@ function strategy(
   };
 }
 
-/** 以每月第一個有效報價日投入，與期初單筆投入及實際持有比較。 */
+/** 以每月第一個有效報價日投入，與相同本金的期初單筆投入比較。 */
 export function computeParallelUniverse(
   points: PricePoint[],
   options: {
     startDate: string;
     monthlyAmount: number;
-    actualCost: number;
-    actualQuantity: number;
   }
 ): ParallelUniverseResult | null {
   const sorted = [...points]
@@ -85,12 +83,6 @@ export function computeParallelUniverse(
     finalPrice,
     maxDrawdown,
     strategies: [
-      strategy(
-        "actual",
-        "目前實際持有",
-        options.actualCost,
-        options.actualQuantity * finalPrice
-      ),
       strategy("dca", "每月定期定額", invested, dcaUnits * finalPrice),
       strategy("lumpSum", "期初一次投入", invested, lumpSumUnits * finalPrice),
     ],

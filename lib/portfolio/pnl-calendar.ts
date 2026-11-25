@@ -74,6 +74,7 @@ export interface PnlCalendarResult {
   days: PnlCalendarDay[];
   weeks: PnlCalendarWeek[];
   summary: PnlCalendarSummary;
+  grossSummary?: PnlCalendarSummary;
 }
 
 export interface PnlCalendarWeek {
@@ -178,6 +179,22 @@ function compoundReturn(days: PnlCalendarDay[]): number | null {
   const rates = days.flatMap((day) => day.returnRate === null ? [] : [day.returnRate]);
   if (days.length && !rates.length) return null;
   return roundResult((rates.reduce((factor, rate) => factor * (1 + rate / 100), 1) - 1) * 100);
+}
+
+function summarizeDays(days: PnlCalendarDay[]): PnlCalendarSummary {
+  const individuallyValued = days.filter((day) => !day.gapStartDate && !day.saleWithoutPriorPrice);
+  return {
+    pnl: roundResult(days.reduce((sum, day) => sum + day.pnl, 0)),
+    grossPnl: roundResult(days.reduce((sum, day) => sum + (day.grossPnl ?? day.pnl), 0)),
+    financingCost: roundResult(days.reduce((sum, day) => sum + (day.financingCost ?? 0), 0)),
+    returnRate: compoundReturn(days),
+    returnRateIncomplete: days.some((day) => day.returnRate === null),
+    gainDayCount: individuallyValued.filter((day) => day.pnl > 0).length,
+    lossDayCount: individuallyValued.filter((day) => day.pnl < 0).length,
+    flatDayCount: individuallyValued.filter((day) => day.pnl === 0).length,
+    dataDayCount: days.length,
+    completeDayCount: days.filter((day) => day.quality === "complete").length,
+  };
 }
 
 function notePriceGap(contribution: PnlCalendarContribution, startDate: string, endDate: string) {
@@ -672,9 +689,9 @@ export function buildPnlCalendar(
         });
       }
     }
-    days = Array.from(byDate.values()).sort((a, b) =>
-      a.date.localeCompare(b.date)
-    );
+    if (Object.keys(costs).length > 0) {
+      days = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+    }
   }
 
   const weekDays = new Map<string, PnlCalendarDay[]>();
@@ -697,23 +714,8 @@ export function buildPnlCalendar(
     dataDayCount: entries.length,
   })).sort((a, b) => a.startDate.localeCompare(b.startDate));
 
-  const individuallyValued = days.filter((day) => !day.gapStartDate && !day.saleWithoutPriorPrice);
-  const summary: PnlCalendarSummary = {
-    pnl: roundResult(days.reduce((sum, day) => sum + day.pnl, 0)),
-    grossPnl: roundResult(
-      days.reduce((sum, day) => sum + (day.grossPnl ?? day.pnl), 0)
-    ),
-    financingCost: roundResult(
-      days.reduce((sum, day) => sum + (day.financingCost ?? 0), 0)
-    ),
-    returnRate: compoundReturn(days),
-    returnRateIncomplete: days.some((day) => day.returnRate === null),
-    gainDayCount: individuallyValued.filter((day) => day.pnl > 0).length,
-    lossDayCount: individuallyValued.filter((day) => day.pnl < 0).length,
-    flatDayCount: individuallyValued.filter((day) => day.pnl === 0).length,
-    dataDayCount: days.length,
-    completeDayCount: days.filter((day) => day.quality === "complete").length,
+  return {
+    month: options.month, days, weeks, summary: summarizeDays(days),
+    ...(days !== grossDays ? { grossSummary: summarizeDays(grossDays) } : {}),
   };
-
-  return { month: options.month, days, weeks, summary };
 }

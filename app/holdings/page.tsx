@@ -52,12 +52,7 @@ export default function HoldingsPage() {
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">月度損益</h2>
-        <MonthlyPnlTable
-          holdings={storage.holdings}
-          priceHistory={storage.priceHistory}
-          sales={sales}
-          storage={storage}
-        />
+        <MonthlyPnlTable storage={storage} />
       </section>
 
       <section className="space-y-4">

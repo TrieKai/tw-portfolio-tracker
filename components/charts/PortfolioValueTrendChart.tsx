@@ -24,6 +24,7 @@ import type { PortfolioHistory } from "@/lib/portfolio/time-travel";
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
 import { ChartFrame } from "@/components/ui/ChartFrame";
 import { PortfolioTimelineTooltip } from "./PortfolioTimelineTooltip";
+import { formatAmountAxisTick, historyDateAxis } from "./chart-axes";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 
 interface PortfolioValueTrendChartProps {
@@ -59,25 +60,11 @@ export function PortfolioValueTrendChart({
 
   const chartData = timeline.map((p) => ({
     ...p,
-    dateLabel: p.date.slice(5),
+    timestamp: Date.parse(p.date),
   }));
 
   /** 買入建倉日（用於圖上標記） */
-  const buyMarkers = useMemo(() => {
-    const seen = new Set<string>();
-    const markers: { date: string; cost: number; names: string }[] = [];
-    for (const p of timeline) {
-      if (p.costAddedToday > 0 && !seen.has(p.date)) {
-        seen.add(p.date);
-        markers.push({
-          date: p.date.slice(5),
-          cost: p.totalCost,
-          names: p.newHoldings.join("、"),
-        });
-      }
-    }
-    return markers;
-  }, [timeline]);
+  const buyDates = chartData.filter((point) => point.costAddedToday > 0);
 
   if (chartData.length < 2) {
     return (
@@ -130,20 +117,12 @@ export function PortfolioValueTrendChart({
         <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
-          <XAxis
-            dataKey="dateLabel"
-            tick={{ fontSize: 11 }}
-            stroke="var(--muted)"
-          />
+          <XAxis {...historyDateAxis(chartData[0].date, chartData[chartData.length - 1].date)} />
           <YAxis
             tick={amountsHidden ? false : { fontSize: 11 }}
             stroke="var(--muted)"
             domain={["auto", "auto"]}
-            tickFormatter={(v) =>
-              v >= 10000
-                  ? `${Math.round(Number(v) / 10000)}萬`
-                  : String(v)
-            }
+            tickFormatter={formatAmountAxisTick}
           />
           <Tooltip
             content={({ active, payload }) => {
@@ -168,20 +147,20 @@ export function PortfolioValueTrendChart({
                   : String(value)
             }
           />
-          {buyMarkers.map((m) => (
+          {buyDates.map((point) => (
             <ReferenceLine
-              key={m.date}
-              x={m.date}
+              key={point.date}
+              x={point.timestamp}
               stroke="#3b82f6"
               strokeDasharray="4 4"
               strokeOpacity={0.5}
             />
           ))}
-          {buyMarkers.map((m) => (
+          {buyDates.map((point) => (
             <ReferenceDot
-              key={`dot-${m.date}`}
-              x={m.date}
-              y={m.cost}
+              key={`dot-${point.date}`}
+              x={point.timestamp}
+              y={point.totalCost}
               r={4}
               fill="#3b82f6"
               stroke="var(--page)"
@@ -189,7 +168,7 @@ export function PortfolioValueTrendChart({
             />
           ))}
           <Line
-            type="monotone"
+            type="linear"
             dataKey="totalValue"
             name="totalValue"
             stroke="#10b981"
@@ -209,7 +188,7 @@ export function PortfolioValueTrendChart({
         </ResponsiveContainer>
       </ChartFrame>
 
-      {buyMarkers.length > 0 && (
+      {buyDates.length > 0 && (
         <p className="text-xs text-muted">
           垂直虛線／藍點：新買入建倉日（成本階梯上升）；每筆持倉以各自買入價與買入日獨立計算。
         </p>

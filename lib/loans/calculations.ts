@@ -555,6 +555,7 @@ export function buildDailyInvestmentFinancingCosts(
 ): Record<string, number> {
   const result: Record<string, number> = {};
   const consistentLoans = loansWithConsistentPhases(loans).filter((loan) => loan.investmentUsePercent > 0);
+  if (consistentLoans.length === 0) return result;
   const schedules = new Map(consistentLoans
     .map((loan) => [loan, buildLoanSchedule(loan)]));
   let date = fromDate;

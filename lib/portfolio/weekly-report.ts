@@ -1,17 +1,8 @@
 import { addDaysToIsoDate } from "@/lib/date/iso-date";
-import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
-import {
-  buildPortfolioTimelineBetween,
-  getEffectiveHistory,
-  getUnitPriceOnDate,
-} from "@/lib/portfolio/portfolio-timeline";
-import type {
-  AssetAllocationTargets,
-  AssetType,
-  Holding,
-  PriceHistoryMap,
-  SaleTransaction,
-} from "@/lib/types/holding";
+import { computePortfolioSummary, enrichHoldings } from "@/lib/portfolio/calculations";
+import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
+import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
+import type { AssetType, PortfolioStorage } from "@/lib/types/holding";
 
 export interface WeeklyContribution {
   groupKey: string;
@@ -40,60 +31,31 @@ export interface WeeklyPortfolioReport {
   };
 }
 
-/** 最近約七天週報；截止日取實際行情日，因此休市時仍可產生。 */
+/** 以最近有持倉、交易或估值紀錄的日期為期末，各日採當時的部位與行情。 */
 export function buildWeeklyPortfolioReport(
-  holdings: Holding[],
-  priceHistory: PriceHistoryMap,
-  sales: SaleTransaction[],
+  storage: PortfolioStorage,
   asOfDate: string,
-  targets?: AssetAllocationTargets
+  portfolioHistory = buildPortfolioHistory(storage)
 ): WeeklyPortfolioReport | null {
-  if (holdings.length === 0) return null;
-
-  const quoteDates = [...new Set(
-    holdings.flatMap((holding) =>
-      getEffectiveHistory(holding, priceHistory)
-        .filter((point) => point.date <= asOfDate)
-        .map((point) => point.date)
-    )
-  )].sort();
-  if (quoteDates.length < 2) return null;
-
-  const endDate = quoteDates[quoteDates.length - 1];
+  const dates = portfolioHistory.dates.filter((date) => date <= asOfDate);
+  if (dates.length < 2) return null;
+  const endDate = dates[dates.length - 1];
   const preferredStart = addDaysToIsoDate(endDate, -7);
-  const earlierDates = quoteDates.filter((date) => date < endDate);
-  const startDate =
-    [...earlierDates].reverse().find((date) => date <= preferredStart) ??
-    earlierDates[0];
-  if (!startDate) return null;
-
-  const timeline = buildPortfolioTimelineBetween(
-    holdings,
-    priceHistory,
-    startDate,
-    endDate
-  );
-  const start = timeline.find((point) => point.date === startDate);
-  const end = timeline.find((point) => point.date === endDate);
-  if (!start || !end) return null;
+  const startDate = dates.findLast((date) => date <= preferredStart) ?? dates[0];
+  const startHoldings = enrichHoldings(portfolioHistory.snapshotOn(startDate));
+  const endHoldings = enrichHoldings(portfolioHistory.snapshotOn(endDate));
+  const start = computePortfolioSummary(startHoldings, []);
+  const end = computePortfolioSummary(endHoldings, []);
 
   const contributionMap = new Map<string, WeeklyContribution>();
-  for (const holding of holdings) {
-    if (holding.buyDate > endDate) continue;
-    const history = getEffectiveHistory(holding, priceHistory);
-    const endPrice = getUnitPriceOnDate(holding, history, endDate).unitPrice;
-    const startPrice = holding.buyDate > startDate
-      ? holding.buyPrice
-      : getUnitPriceOnDate(holding, history, startDate).unitPrice;
-    const amount = (endPrice - startPrice) * holding.quantity;
-    const key = holdingGroupKey(holding);
-    const existing = contributionMap.get(key);
-    if (existing) existing.amount += amount;
-    else contributionMap.set(key, {
-      groupKey: key,
-      name: holding.name,
-      symbol: holding.symbol,
-      amount,
+  for (const group of groupHoldingsWithMetrics(startHoldings)) {
+    const { groupKey, name, symbol, pnl } = group;
+    contributionMap.set(groupKey, { groupKey, name, symbol, amount: -pnl });
+  }
+  for (const group of groupHoldingsWithMetrics(endHoldings)) {
+    const { groupKey, name, symbol, pnl } = group;
+    contributionMap.set(groupKey, {
+      groupKey, name, symbol, amount: pnl + (contributionMap.get(groupKey)?.amount ?? 0),
     });
   }
   const contributions = [...contributionMap.values()];
@@ -104,11 +66,19 @@ export function buildWeeklyPortfolioReport(
     .filter((item) => item.amount < 0)
     .sort((a, b) => a.amount - b.amount)[0];
 
-  const realizedPnl = sales
+  const realizedPnl = storage.sales
     .filter((sale) => sale.sellDate > startDate && sale.sellDate <= endDate)
     .reduce((sum, sale) => sum + sale.realizedPnl, 0);
+  // 房產直接登錄於持倉，股票與基金則以買入事件計算，避免賣出抵銷買入金額。
+  const newCapital = storage.transactions
+    .filter((event) => event.type === "buy" && event.date > startDate && event.date <= endDate)
+    .reduce((sum, event) => sum + (event.quantity ?? 0) * (event.price ?? 0), 0) +
+    portfolioHistory.initialLots
+      .filter((lot) => lot.assetType === "property" && lot.buyDate > startDate && lot.buyDate <= endDate)
+      .reduce((sum, lot) => sum + lot.quantity * lot.buyPrice, 0);
 
   let largestAllocationDrift: WeeklyPortfolioReport["largestAllocationDrift"];
+  const targets = storage.settings.allocationTargets;
   if (targets && end.totalValue > 0) {
     const values: Record<AssetType, number> = {
       stock: end.stockValue,
@@ -135,9 +105,9 @@ export function buildWeeklyPortfolioReport(
     startValue: start.totalValue,
     endValue: end.totalValue,
     valueChange: end.totalValue - start.totalValue,
-    unrealizedChange: end.pnl - start.pnl,
+    unrealizedChange: end.totalPnl - start.totalPnl,
     realizedPnl,
-    newCapital: Math.max(0, end.totalCost - start.totalCost),
+    newCapital,
     topPositive,
     topNegative,
     largestAllocationDrift,

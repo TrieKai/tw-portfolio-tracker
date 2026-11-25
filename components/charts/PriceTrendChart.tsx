@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import {
   CartesianGrid,
@@ -10,39 +11,39 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { ChartRange } from "@/lib/portfolio/calculations";
-import {
-  filterHistoryByRange,
-  getMergedSortedHistory,
-} from "@/lib/portfolio/calculations";
-import type { AssetType, PriceHistoryMap } from "@/lib/types/holding";
+import { filterHistoryByRange, type ChartRange } from "@/lib/portfolio/calculations";
+import type { HoldingSymbolGroup } from "@/lib/portfolio/holding-groups";
+import { buildInstrumentPriceHistory } from "@/lib/portfolio/price-history";
+import type { CorporateActionRecord, PriceHistoryMap } from "@/lib/types/holding";
 import { ChartFrame } from "@/components/ui/ChartFrame";
+import { historyDateAxis } from "./chart-axes";
 
 interface PriceTrendChartProps {
   priceHistory: PriceHistoryMap;
-  holdingIds: string[];
+  group: HoldingSymbolGroup;
+  corporateActions: CorporateActionRecord[];
   title: string;
   range: ChartRange;
-  assetType?: AssetType;
 }
 
 export function PriceTrendChart({
   priceHistory,
-  holdingIds,
+  group,
+  corporateActions,
   title,
   range,
-  assetType = "stock",
 }: PriceTrendChartProps) {
   const { formatQuoteAmount, amountsHidden } = useAmountPrivacy();
-  const points = filterHistoryByRange(
-    getMergedSortedHistory(priceHistory, holdingIds),
-    range
+  const history = useMemo(
+    () => buildInstrumentPriceHistory(group, priceHistory, corporateActions),
+    [group, priceHistory, corporateActions]
   );
+  const points = filterHistoryByRange(history.points, range);
 
   const chartData = points.map((p) => ({
-    date: p.date.slice(5),
+    date: p.date,
+    timestamp: Date.parse(p.date),
     price: p.price,
-    fullDate: p.date,
   }));
 
   if (chartData.length < 2) {
@@ -57,13 +58,16 @@ export function PriceTrendChart({
     <div>
       <p className="text-sm font-medium">{title}</p>
       <p className="mb-3 mt-1 text-xs text-muted">
-        可用價格 {chartData[0].fullDate}～{chartData.at(-1)?.fullDate} · {chartData.length} 筆
+        可用價格 {chartData[0].date}～{chartData.at(-1)?.date} · {chartData.length} 筆
+        {history.lastShareChange && chartData[0].date < history.lastShareChange ? (
+          <span className="mt-1 block">股數異動前的價格已換算為目前股數基準。</span>
+        ) : null}
       </p>
       <ChartFrame className="h-[200px] sm:h-[220px]">
         <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
-          <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="var(--muted)" />
+          <XAxis {...historyDateAxis(chartData[0].date, chartData[chartData.length - 1].date)} />
           <YAxis
             tick={amountsHidden ? false : { fontSize: 11 }}
             stroke="var(--muted)"
@@ -72,11 +76,11 @@ export function PriceTrendChart({
           />
           <Tooltip
             labelFormatter={(_, payload) =>
-              payload?.[0]?.payload?.fullDate ?? ""
+              payload?.[0]?.payload?.date ?? ""
             }
             formatter={(v) =>
               [
-                formatQuoteAmount(Number(v ?? 0), assetType),
+                formatQuoteAmount(Number(v ?? 0), group.assetType),
                 "價格",
               ] as [string, string]
             }
@@ -87,11 +91,11 @@ export function PriceTrendChart({
             }}
           />
           <Line
-            type="monotone"
+            type="linear"
             dataKey="price"
             stroke="#10b981"
             strokeWidth={2}
-            dot={false}
+            dot={chartData.length <= 40}
           />
         </LineChart>
         </ResponsiveContainer>

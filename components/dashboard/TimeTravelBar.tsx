@@ -136,7 +136,7 @@ export function TimeTravelBar({
             </div>
           )}
           <p className={`mt-3 text-[11px] text-muted ${view === "compact" ? "hidden" : ""}`}>
-            以目前仍持有的部位與當日最近價格回看；資產差異也可能包含後續投入與賣出，不等同投資報酬。
+            依回看日持有的部位和當時可用的價格估值。資產差異可能包含買賣與價格變動。
           </p>
         </div>
       )}

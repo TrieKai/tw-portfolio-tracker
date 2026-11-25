@@ -151,7 +151,9 @@ export default function DashboardPage() {
     shownBreakdowns.dailyUnrealized,
     formatAmount,
   );
-  const hasPortfolio = holdings.length > 0 || sales.length > 0;
+  const hasPortfolio = holdings.length > 0 || sales.length > 0 ||
+    (storage.holdingRemovals?.length ?? 0) > 0 || storage.transactions.length > 0 ||
+    Object.keys(storage.pnlTracking.dailySummaries).length > 0;
   const visibleLayout = preferences.dashboardLayout.filter(
     (item) => !item.hidden && (item.section !== "timeTravel" || historyDates.length > 0)
   );
@@ -194,11 +196,9 @@ export default function DashboardPage() {
     ),
     weeklyReport: (
       <WeeklyPortfolioReport
-        holdings={shownRawHoldings}
-        priceHistory={shownHistory}
-        sales={shownSales}
+        storage={storage}
+        portfolioHistory={portfolioHistory}
         asOfDate={travelDate ?? todayIsoDate()}
-        targets={storage.settings.allocationTargets}
         view={viewFor("weeklyReport")}
       />
     ),
@@ -216,8 +216,10 @@ export default function DashboardPage() {
     ),
     parallelUniverse: (
       <ParallelUniversePanel
-        holdings={shownRawHoldings}
-        priceHistory={shownHistory}
+        holdings={shownHoldings}
+        priceHistory={storage.priceHistory}
+        corporateActions={storage.corporateActions}
+        asOfDate={travelDate ?? undefined}
         view={viewFor("parallelUniverse")}
       />
     ),
@@ -354,26 +356,25 @@ export default function DashboardPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold">月度損益</h2>
-            <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-              <span className={`text-2xl font-semibold tabular-nums ${pnlCalendar.summary.pnl >= 0 ? "text-gain" : "text-loss"}`}>
-                {pnlCalendar.summary.pnl > 0 ? "+" : ""}
-                {formatAmount(pnlCalendar.summary.pnl)}
-              </span>
-              {monthRate !== null && (
-                <span className={`text-sm tabular-nums ${monthRate >= 0 ? "text-gain" : "text-loss"}`}>
-                  {travelDate ? `${shownMonthLabel}複利` : "本月複利"} {monthRate > 0 ? "+" : ""}{monthRate.toFixed(2)}%
+            {pnlCalendar.summary.dataDayCount > 0 && (
+              <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                <span className={`text-2xl font-semibold tabular-nums ${pnlCalendar.summary.pnl >= 0 ? "text-gain" : "text-loss"}`}>
+                  {pnlCalendar.summary.pnl > 0 ? "+" : ""}
+                  {formatAmount(pnlCalendar.summary.pnl)}
                 </span>
-              )}
-            </div>
+                {monthRate !== null && (
+                  <span className={`text-sm tabular-nums ${monthRate >= 0 ? "text-gain" : "text-loss"}`}>
+                    {travelDate ? `${shownMonthLabel}複利` : "本月複利"} {monthRate > 0 ? "+" : ""}{monthRate.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <Link href="/calendar" className="text-sm font-medium text-accent hover:underline">
             查看損益日曆 →
           </Link>
         </div>
         <MonthlyPnlTable
-          holdings={shownRawHoldings}
-          priceHistory={shownHistory}
-          sales={shownSales}
           storage={storage}
           asOfDate={travelDate ?? undefined}
         />

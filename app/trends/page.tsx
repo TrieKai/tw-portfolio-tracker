@@ -257,14 +257,14 @@ export default function TrendsPage() {
                 {activeGroup && active && (
                   <PriceTrendChart
                     priceHistory={storage.priceHistory}
-                    holdingIds={activeGroup.lots.map((l) => l.id)}
+                    group={activeGroup}
+                    corporateActions={storage.corporateActions}
                     title={`${active.name} · ${priceSeriesLabel}${
                       activeGroup.isMerged
                         ? ` · ${activeGroup.lots.length} 筆持倉`
                         : ""
                     }`}
                     range={range}
-                    assetType={active.assetType}
                   />
                 )}
               </div>

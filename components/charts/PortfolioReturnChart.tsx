@@ -20,8 +20,9 @@ import {
 import type { PortfolioHistory } from "@/lib/portfolio/time-travel";
 import type { Holding, PriceHistoryMap } from "@/lib/types/holding";
 import { ChartFrame } from "@/components/ui/ChartFrame";
+import { formatAmountAxisTick, historyDateAxis } from "./chart-axes";
 
-/** 累積損益面積圖（類似庫存損益走勢） */
+/** 依各日持有部位呈現未實現損益。 */
 export function PortfolioReturnChart({
   holdings,
   priceHistory,
@@ -40,8 +41,8 @@ export function PortfolioReturnChart({
   );
 
   const chartData = timeline.map((point) => ({
-    date: point.date.slice(5),
-    fullDate: point.date,
+    date: point.date,
+    timestamp: Date.parse(point.date),
     pnl: point.pnl,
     returnRate: point.activeHoldings > 0 ? point.returnRate : null,
   }));
@@ -68,16 +69,16 @@ export function PortfolioReturnChart({
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
-          <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="var(--muted)" />
+          <XAxis {...historyDateAxis(chartData[0].date, chartData[chartData.length - 1].date)} />
           <YAxis
             tick={amountsHidden ? false : { fontSize: 11 }}
             stroke="var(--muted)"
-            tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`}
+            tickFormatter={formatAmountAxisTick}
           />
           <ReferenceLine y={0} stroke="var(--muted)" strokeDasharray="4 4" />
           <Tooltip
             labelFormatter={(_, payload) =>
-              payload?.[0]?.payload?.fullDate ?? ""
+              payload?.[0]?.payload?.date ?? ""
             }
             formatter={(_, __, item) => {
               const row = item?.payload as {
@@ -97,11 +98,12 @@ export function PortfolioReturnChart({
             }}
           />
           <Area
-            type="monotone"
+            type="linear"
             dataKey="pnl"
             stroke="#10b981"
             fill="url(#pnlGradient)"
             strokeWidth={2}
+            dot={chartData.length <= 40}
           />
         </AreaChart>
         </ResponsiveContainer>
