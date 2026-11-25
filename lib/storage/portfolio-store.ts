@@ -4,12 +4,13 @@
  */
 
 import { PORTFOLIO_STORAGE_KEY, MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
-import { normalizeToIsoDate } from "@/lib/date/iso-date";
+import { normalizeToIsoDate, parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import {
   defaultPortfolioStorage,
   normalizePortfolioStorage,
 } from "@/lib/storage/parse-portfolio";
 import { normalizeStockSymbol } from "@/lib/prices/stock-symbol";
+import { corporateActionAdjustmentRatio, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import type {
@@ -132,6 +133,7 @@ function persistPnlSummariesForDates(
         returnRate: day.returnRate,
         returnBase: day.returnBase,
         gapStartDate: day.gapStartDate,
+        saleWithoutPriorPrice: day.saleWithoutPriorPrice,
         quality: day.quality,
         computedAt,
       };
@@ -253,28 +255,58 @@ function normalizeSymbolForAsset(
   return normalizeStockSymbol(symbol);
 }
 
-/** 更新持倉基本資料（不刪除 priceHistory / 現價） */
+/** 更新持倉基本資料，標的更正時清除原標的的行情。 */
 export function editHolding(
   state: PortfolioStorage,
   input: EditHoldingInput
 ): PortfolioStorage {
   const existingHolding = state.holdings.find((h) => h.id === input.id);
-  if (!existingHolding) return state;
+  if (!existingHolding || existingHolding.assetType !== input.assetType) return state;
+  if (
+    !parseIsoDate(input.buyDate) ||
+    (input.buyDate !== existingHolding.buyDate && state.sales.some(
+      (sale) => sale.holdingId === input.id && sale.sellDate < input.buyDate
+    ))
+  ) return state;
   const normalizedSymbol = normalizeSymbolForAsset(
     input.assetType,
     input.symbol,
     input.name,
     input.id
   );
+  const market = input.assetType === "stock" ? (input.market ?? "tse") : undefined;
+  const instrument = { id: input.id, assetType: input.assetType, symbol: normalizedSymbol, market };
+  const instrumentChanged = holdingGroupKey(instrument) !== holdingGroupKey(existingHolding);
   let next = updateHolding(state, input.id, {
+    ...instrument,
     name: input.name.trim(),
-    symbol: normalizedSymbol,
-    market: input.assetType === "stock" ? (input.market ?? "tse") : undefined,
     buyPrice: input.buyPrice,
     quantity: input.quantity,
     buyDate: input.buyDate,
     lastError: undefined,
+    ...(instrumentChanged ? {
+      currentPrice: undefined,
+      priceDate: undefined,
+      priceSource: undefined,
+      lastUpdatedAt: undefined,
+    } : {}),
   });
+
+  if (instrumentChanged) {
+    const priceHistory = { ...state.priceHistory };
+    delete priceHistory[input.id];
+    const firstDate = existingHolding.buyDate < input.buyDate ? existingHolding.buyDate : input.buyDate;
+    next = {
+      ...next,
+      priceHistory,
+      pnlTracking: {
+        ...next.pnlTracking,
+        dailySummaries: Object.fromEntries(
+          Object.entries(next.pnlTracking.dailySummaries).filter(([date]) => date < firstDate)
+        ),
+      },
+    };
+  }
 
   if (input.assetType === "property") return next;
   const originalTransaction = state.transactions.find(
@@ -285,6 +317,7 @@ export function editHolding(
   if (!originalTransaction) return next;
 
   const tradeChanged =
+    instrumentChanged ||
     existingHolding.buyPrice !== input.buyPrice ||
     existingHolding.quantity !== input.quantity ||
     existingHolding.buyDate !== input.buyDate ||
@@ -372,6 +405,7 @@ function buildSaleRecord(
     buyDate: holding.buyDate,
     buyPrice: holding.buyPrice,
     quantity: input.quantity,
+    positionClosed: input.quantity >= holding.quantity,
     sellPrice: input.sellPrice,
     sellDate: input.sellDate,
     costBasis,
@@ -397,7 +431,7 @@ export function sellHolding(
   const qty = input.quantity;
   if (!Number.isFinite(qty) || qty <= 0) return state;
   if (!Number.isFinite(input.sellPrice) || input.sellPrice <= 0) return state;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.sellDate)) return state;
+  if (!parseIsoDate(input.sellDate) || input.sellDate < holding.buyDate || input.sellDate > todayIsoDate()) return state;
   if (qty > holding.quantity) return state;
 
   const sale = buildSaleRecord(holding, input);
@@ -415,6 +449,7 @@ export function sellHolding(
         {
           id: newId(),
           type: "sell",
+          saleId: sale.id,
           holdingId: holding.id,
           assetType: holding.assetType,
           name: holding.name,
@@ -618,26 +653,6 @@ function rebaseCurrentPriceBeforeDate(
   };
 }
 
-export function corporateActionAdjustmentRatio(action: CorporateActionRecord): number {
-  if (
-    action.adjustmentRatio !== undefined &&
-    Number.isFinite(action.adjustmentRatio) &&
-    action.adjustmentRatio > 0
-  ) {
-    return action.adjustmentRatio;
-  }
-
-  if (
-    action.stockDividendRatio !== undefined &&
-    Number.isFinite(action.stockDividendRatio) &&
-    action.stockDividendRatio > 0
-  ) {
-    return 1 + action.stockDividendRatio;
-  }
-
-  return 1;
-}
-
 function shouldRebaseExistingHistory(
   points: PricePoint[] | undefined,
   holding: Holding | undefined,
@@ -753,13 +768,12 @@ function adjustPointForCorporateActions(
   holdingId: string,
   point: PricePoint
 ): PricePoint {
-  const ratio = state.corporateActions.reduce((product, action) => {
-    if (action.holdingId !== holdingId || point.date >= action.effectiveDate) {
-      return product;
-    }
-    const actionRatio = corporateActionAdjustmentRatio(action);
-    return actionRatio > 0 ? product * actionRatio : product;
-  }, 1);
+  const holding = state.holdings.find((item) => item.id === holdingId);
+  const actions = state.corporateActions.filter((action) =>
+    action.holdingId === holdingId &&
+    (!holding || holdingGroupKey(holding) === holdingGroupKey({ ...action, id: holdingId }))
+  );
+  const ratio = shareAdjustmentAfter(actions, point.date);
 
   if (ratio === 1) return point;
   return { ...point, price: point.price / ratio };
@@ -773,6 +787,8 @@ export function repairCorporateActionPriceHistory(
 
   for (const action of state.corporateActions) {
     if (action.priceHistoryAdjustedAt) continue;
+    const holding = next.holdings.find((h) => h.id === action.holdingId);
+    if (holding && holdingGroupKey(holding) !== holdingGroupKey({ ...action, id: action.holdingId })) continue;
 
     const adjustmentRatio = corporateActionAdjustmentRatio(action);
     if (!Number.isFinite(adjustmentRatio) || adjustmentRatio <= 0 || adjustmentRatio === 1) {
@@ -787,7 +803,6 @@ export function repairCorporateActionPriceHistory(
       continue;
     }
 
-    const holding = next.holdings.find((h) => h.id === action.holdingId);
     const shouldRebase = shouldRebaseExistingHistory(
       next.priceHistory[action.holdingId],
       holding,

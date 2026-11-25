@@ -1,5 +1,7 @@
-import type { PortfolioStorage } from "@/lib/types/holding";
-import { mergePriceHistory } from "@/lib/storage/portfolio-store";
+import { corporateActionAdjustmentRatio, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
+import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
+import type { PortfolioStorage, PortfolioTransaction, SaleTransaction } from "@/lib/types/holding";
+import { mergePriceHistory, repairCorporateActionPriceHistory } from "@/lib/storage/portfolio-store";
 import { normalizePortfolioStorage } from "@/lib/storage/parse-portfolio";
 
 /** 匯出檔外層格式（含版本與時間戳，方便日後遷移） */
@@ -72,21 +74,133 @@ function mergeRecords<T extends { id: string }>(
   return [...records.values()];
 }
 
+function instrumentKeys(state: PortfolioStorage) {
+  const keys = new Map<string, string>();
+  for (const item of [...state.sales, ...state.transactions, ...state.holdings]) {
+    const id = "holdingId" in item ? item.holdingId : item.id;
+    keys.set(id, holdingGroupKey({ ...item, id }));
+  }
+  return keys;
+}
+
+function adjustedTransactions(
+  state: PortfolioStorage,
+  mergedActions: PortfolioStorage["corporateActions"]
+): PortfolioTransaction[] {
+  return state.transactions.map((event) => {
+    if (!event.quantity || !["buy", "opening_balance", "sell"].includes(event.type)) return event;
+    const groupKey = holdingGroupKey({ ...event, id: event.holdingId });
+    const matchesEvent = (action: PortfolioStorage["corporateActions"][number]) =>
+      action.holdingId === event.holdingId &&
+      holdingGroupKey({ ...action, id: action.holdingId }) === groupKey;
+    const ratio = shareAdjustmentAfter(mergedActions.filter(matchesEvent), event.date) /
+      shareAdjustmentAfter(state.corporateActions.filter(matchesEvent), event.date);
+    return ratio === 1 ? event : {
+      ...event,
+      quantity: event.quantity * ratio,
+      price: event.price === undefined ? undefined : event.price / ratio,
+    };
+  });
+}
+
 /** 以修改時間合併可編輯紀錄；同時刻或無修改時間的衝突保留本機。 */
 export function mergePortfolioStorage(
-  current: PortfolioStorage,
-  incoming: PortfolioStorage
+  local: PortfolioStorage,
+  backup: PortfolioStorage
 ): PortfolioStorage {
-  const removedHoldingIds = new Set([
+  const current = repairCorporateActionPriceHistory(local);
+  const incoming = repairCorporateActionPriceHistory(backup);
+  const currentKeys = instrumentKeys(current);
+  const incomingKeys = instrumentKeys(incoming);
+  const actionsByEvent = new Map(
+    current.corporateActions.map((action) => [`${action.holdingId}:${action.sourceEventId}`, action])
+  );
+  for (const action of incoming.corporateActions) {
+    const key = `${action.holdingId}:${action.sourceEventId}`;
+    if (!actionsByEvent.has(key)) actionsByEvent.set(key, action);
+  }
+  const corporateActions = [...actionsByEvent.values()];
+  const sales = mergeRecords(current.sales, incoming.sales);
+  const currentById = new Map(current.holdings.map((holding) => [holding.id, holding]));
+  const incomingIds = new Set(incoming.holdings.map((holding) => holding.id));
+  const currentSalesIds = new Set(current.sales.map((sale) => sale.id));
+  const incomingSalesIds = new Set(incoming.sales.map((sale) => sale.id));
+  const currentClosed = new Set([
     ...current.sales.map((sale) => sale.holdingId),
     ...current.transactions.filter((event) => event.type === "sell").map((event) => event.holdingId),
-  ]);
-  for (const holding of current.holdings) removedHoldingIds.delete(holding.id);
+  ].filter((id) => !currentById.has(id)));
 
-  let priceHistory = { ...current.priceHistory };
-  for (const [holdingId, points] of Object.entries(incoming.priceHistory)) {
-    const existingDates = new Set((priceHistory[holdingId] ?? []).map((point) => point.date));
-    const added = points.filter((point) => !existingDates.has(point.date));
+  const salesByHolding = new Map<string, SaleTransaction[]>();
+  for (const sale of sales) {
+    const records = salesByHolding.get(sale.holdingId) ?? [];
+    records.push(sale);
+    salesByHolding.set(sale.holdingId, records);
+  }
+
+  const selectedHoldings = mergeRecords(current.holdings, incoming.holdings, (holding) => holding.updatedAt);
+  const selectedKeys = new Map(selectedHoldings.map((holding) => [holding.id, holdingGroupKey(holding)]));
+  const holdings = selectedHoldings.flatMap((holding) => {
+    const holdingSales = salesByHolding.get(holding.id) ?? [];
+    const closedInBackup = !incomingIds.has(holding.id) && holdingSales.some((sale) =>
+      incomingSalesIds.has(sale.id) && sale.positionClosed === undefined && sale.createdAt >= holding.updatedAt
+    );
+    if (currentClosed.has(holding.id) || closedInBackup ||
+        holdingSales.some((sale) => sale.positionClosed === true)) return [];
+
+    const fromCurrent = currentById.get(holding.id) === holding;
+    const sourceSaleIds = fromCurrent ? currentSalesIds : incomingSalesIds;
+    const source = fromCurrent ? current : incoming;
+    const matchesHolding = (action: PortfolioStorage["corporateActions"][number]) =>
+      action.holdingId === holding.id &&
+      holdingGroupKey({ ...action, id: holding.id }) === selectedKeys.get(holding.id);
+    const mergedBasis = corporateActions.filter(matchesHolding);
+    const sourceBasis = source.corporateActions.filter(matchesHolding);
+    const quantityRatio = shareAdjustmentAfter(mergedBasis, holding.buyDate) /
+      shareAdjustmentAfter(sourceBasis, holding.buyDate);
+    const soldQuantity = holdingSales.reduce((quantity, sale) =>
+      sourceSaleIds.has(sale.id) ? quantity : quantity + sale.quantity * shareAdjustmentAfter(mergedBasis, sale.sellDate),
+      0
+    );
+    const quantity = holding.quantity * quantityRatio - soldQuantity;
+    if (quantity <= Number.EPSILON * Math.max(holding.quantity, soldQuantity)) return [];
+    const sourceActions = new Set(sourceBasis.map((action) => action.sourceEventId));
+    const costReduction = mergedBasis.reduce((total, action) => {
+      if (sourceActions.has(action.sourceEventId) || action.effectiveDate <= holding.buyDate) return total;
+      const returned = (action.cashReturnPerShare ?? 0) / corporateActionAdjustmentRatio(action);
+      return total + returned / shareAdjustmentAfter(mergedBasis, action.effectiveDate);
+    }, 0);
+    const priceRatio = holding.priceDate
+      ? shareAdjustmentAfter(sourceBasis, holding.priceDate) / shareAdjustmentAfter(mergedBasis, holding.priceDate)
+      : 1;
+    return [{
+      ...holding,
+      quantity,
+      buyPrice: Math.max(0, holding.buyPrice / quantityRatio - costReduction),
+      currentPrice: holding.currentPrice === undefined ? undefined : holding.currentPrice * priceRatio,
+    }];
+  });
+
+  let priceHistory: PortfolioStorage["priceHistory"] = {};
+  for (const holdingId of new Set([...Object.keys(current.priceHistory), ...Object.keys(incoming.priceHistory)])) {
+    const instrument = selectedKeys.get(holdingId) ?? currentKeys.get(holdingId) ?? incomingKeys.get(holdingId);
+    const matchingActions = (actions: PortfolioStorage["corporateActions"]) =>
+      actions.filter((action) =>
+        action.holdingId === holdingId &&
+        (!instrument || holdingGroupKey({ ...action, id: holdingId }) === instrument)
+      );
+    const mergedBasis = matchingActions(corporateActions);
+    const rebase = (state: PortfolioStorage, sourceKey: string | undefined) => {
+      if (sourceKey && instrument && sourceKey !== instrument) return [];
+      const sourceBasis = matchingActions(state.corporateActions);
+      return (state.priceHistory[holdingId] ?? []).map((point) => {
+        const ratio = shareAdjustmentAfter(sourceBasis, point.date) / shareAdjustmentAfter(mergedBasis, point.date);
+        return ratio === 1 ? point : { ...point, price: point.price * ratio };
+      });
+    };
+    const existing = rebase(current, currentKeys.get(holdingId));
+    if (existing.length) priceHistory[holdingId] = existing;
+    const existingDates = new Set(existing.map((point) => point.date));
+    const added = rebase(incoming, incomingKeys.get(holdingId)).filter((point) => !existingDates.has(point.date));
     if (added.length) priceHistory = mergePriceHistory(priceHistory, holdingId, added);
   }
 
@@ -100,13 +214,16 @@ export function mergePortfolioStorage(
     current.transactions.length > 0 || current.sales.length > 0;
   return {
     version: 2,
-    holdings: mergeRecords(current.holdings, incoming.holdings, (holding) => holding.updatedAt)
-      .filter((holding) => !removedHoldingIds.has(holding.id)),
+    holdings,
     loans: mergeRecords(current.loans, incoming.loans, (loan) => loan.updatedAt),
     loanRevisions: mergeRecords(current.loanRevisions, incoming.loanRevisions),
-    sales: mergeRecords(current.sales, incoming.sales),
-    corporateActions: mergeRecords(current.corporateActions, incoming.corporateActions),
-    transactions: mergeRecords(current.transactions, incoming.transactions, (event) => event.updatedAt),
+    sales,
+    corporateActions,
+    transactions: mergeRecords(
+      adjustedTransactions(current, corporateActions),
+      adjustedTransactions(incoming, corporateActions),
+      (event) => event.updatedAt
+    ),
     transactionRevisions: mergeRecords(current.transactionRevisions, incoming.transactionRevisions),
     pnlTracking: {
       startedAt: current.pnlTracking.startedAt || incoming.pnlTracking.startedAt,

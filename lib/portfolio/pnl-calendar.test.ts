@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
+import { addHolding, applyPriceUpdate, sellHolding } from "@/lib/storage/portfolio-store";
+import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
 import type { PortfolioStorage } from "@/lib/types/holding";
 
 function portfolioWithOneHolding(): PortfolioStorage {
@@ -640,4 +642,43 @@ describe("buildPnlCalendar", () => {
       },
     ]);
   });
+
+  it("shows the realized sale with missing reference prices and omits a daily rate", () => {
+    const bought = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", name: "測試股票", symbol: "2330", quantity: 100,
+      buyDate: "2026-11-02", buyPrice: 100,
+    });
+    const id = bought.holdings[0].id;
+    const sold = sellHolding(bought, { id, quantity: 100, sellPrice: 120, sellDate: "2026-11-06", fee: 20, tax: 30 });
+    const options = { month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" as const } };
+    const older = {
+      ...sold,
+      transactions: [],
+      pnlTracking: { startedAt: "", dailySummaries: {} },
+    };
+    for (const state of [sold, older]) {
+      const calendar = buildPnlCalendar(state, options);
+      expect(calendar.summary).toMatchObject({ pnl: 1950, gainDayCount: 0, returnRate: null });
+      expect(calendar.days[0]).toMatchObject({
+        date: "2026-11-06", pnl: 1950, saleWithoutPriorPrice: true, returnRate: null, quality: "estimated",
+        contributions: [{ tradePnl: 2000, fee: 20, tax: 30, saleWithoutPriorPrice: true }],
+      });
+    }
+  });
+
+  it("attributes only the sale-day movement after a valid preceding quote is available", () => {
+    const bought = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", name: "測試股票", symbol: "2330", quantity: 100,
+      buyDate: "2026-11-02", buyPrice: 100,
+    });
+    const id = bought.holdings[0].id;
+    const quoted = applyPriceUpdate(bought, id, 115, "2026-11-05", "manual");
+    const sold = sellHolding(quoted, { id, quantity: 100, sellPrice: 120, sellDate: "2026-11-06", fee: 20 });
+    const calendar = buildPnlCalendar(sold, {
+      month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" },
+    });
+    expect(calendar.days.find((day) => day.date === "2026-11-06")).toMatchObject({ pnl: 480 });
+    expect(calendar.days.find((day) => day.date === "2026-11-06")?.saleWithoutPriorPrice).toBeUndefined();
+  });
+
 });

@@ -8,6 +8,7 @@ import {
   applyPriceUpdate,
   editHolding,
   sellHolding,
+  sellHoldings,
 } from "@/lib/storage/portfolio-store";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 
@@ -374,4 +375,40 @@ describe("portfolio transaction tracking", () => {
     });
     expect(calendar.summary.pnl).toBe(0);
   });
+
+  it("clears only the corrected instrument's prices while retaining same-symbol price history", () => {
+    const added = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "台積電", quantity: 100,
+      buyDate: "2026-11-02", buyPrice: 100,
+    });
+    const id = added.holdings[0].id;
+    const quoted = applyPriceUpdate(added, id, 150, "2026-11-03", "manual");
+    const sameSymbol = editHolding(quoted, { ...quoted.holdings[0], symbol: " 2330 " });
+    expect(sameSymbol.holdings[0].currentPrice).toBe(150);
+    expect(sameSymbol.priceHistory[id]).toEqual(quoted.priceHistory[id]);
+
+    const corrected = editHolding(quoted, { ...quoted.holdings[0], symbol: "2317", name: "鴻海" });
+    expect(corrected.holdings[0]).toMatchObject({ symbol: "2317", currentPrice: undefined, priceDate: undefined });
+    expect(corrected.priceHistory[id]).toBeUndefined();
+    expect(corrected.transactions[0]).toMatchObject({ symbol: "2317", date: "2026-11-02" });
+  });
+
+  it("rejects a sale before acquisition and applies no partial group edit", () => {
+    let state = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "台積電", quantity: 100,
+      buyDate: "2026-11-02", buyPrice: 100,
+    });
+    state = addHolding(state, {
+      assetType: "stock", symbol: "2330", name: "台積電", quantity: 100,
+      buyDate: "2026-11-06", buyPrice: 100,
+    });
+    const [first, second] = state.holdings;
+    const sale = { id: first.id, quantity: 40, sellPrice: 110, sellDate: "2026-11-04" };
+
+    expect(sellHolding(state, { ...sale, id: second.id })).toBe(state);
+    expect(sellHolding(state, { ...sale, sellDate: "2026-11-31" })).toBe(state);
+    expect(sellHoldings(state, [sale, { ...sale, id: second.id }])).toBe(state);
+    expect(sellHolding(state, { ...sale, sellDate: first.buyDate }).sales).toHaveLength(1);
+  });
+
 });

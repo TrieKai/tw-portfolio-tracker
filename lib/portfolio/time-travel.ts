@@ -1,5 +1,6 @@
 import { normalizeToIsoDate } from "@/lib/date/iso-date";
-import { corporateActionAdjustmentRatio } from "@/lib/storage/portfolio-store";
+import { shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
+import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import type {
   CorporateActionRecord,
   Holding,
@@ -24,13 +25,6 @@ function groupByHoldingId<T extends { holdingId: string }>(records: T[]) {
   return byHoldingId;
 }
 
-/** 歷史行情及交易在套用公司行動後以最新股數單位保存。 */
-function ratioAfter(actions: CorporateActionRecord[], date: string): number {
-  return actions.reduce((ratio, action) =>
-    date < action.effectiveDate ? ratio * corporateActionAdjustmentRatio(action) : ratio, 1
-  );
-}
-
 function positionOn(
   lot: HistoryLot,
   date: string,
@@ -40,14 +34,14 @@ function positionOn(
   let quantity = holding.quantity;
   for (const sale of sales) {
     if (sale.sellDate > date || (includeSameDaySales && sale.sellDate === date)) {
-      quantity += sale.quantity * ratioAfter(actions, sale.sellDate);
+      quantity += sale.quantity * shareAdjustmentAfter(actions, sale.sellDate);
     }
   }
   let buyPrice = holding.buyPrice;
   for (const action of actions) {
     if (action.effectiveDate > date) buyPrice = action.buyPriceBefore;
   }
-  return { ...holding, buyPrice, quantity: quantity / ratioAfter(actions, date) };
+  return { ...holding, buyPrice, quantity: quantity / shareAdjustmentAfter(actions, date) };
 }
 
 /** 依持倉和賣出紀錄重建先前持有的批次，舊資料只回推到可確認的追蹤起點。 */
@@ -71,7 +65,9 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
     lots.set(holding.id, {
       holding,
       sales: salesById.get(holding.id) ?? [],
-      actions: actionsFor(holding.id),
+      actions: actionsFor(holding.id).filter((action) =>
+        holdingGroupKey(holding) === holdingGroupKey({ ...action, id: holding.id })
+      ),
     });
   }
 
@@ -96,7 +92,7 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
         symbol: latest.symbol,
         market: latest.market,
         buyDate,
-        buyPrice: latest.buyPrice / ratioAfter(actions, latest.sellDate),
+        buyPrice: latest.buyPrice / shareAdjustmentAfter(actions, latest.sellDate),
         quantity: 0,
         createdAt: entries[0]?.createdAt ?? latest.createdAt,
         updatedAt: latest.createdAt,
@@ -140,7 +136,7 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
       }
       snapshots.push({
         ...position,
-        currentPrice: point ? point.price * ratioAfter(lot.actions, date) : undefined,
+        currentPrice: point ? point.price * shareAdjustmentAfter(lot.actions, date) : undefined,
         priceDate: point?.date,
         priceSource: point?.source,
       });
@@ -150,7 +146,7 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
 
   function priceHistoryAt(date: string): PriceHistoryMap {
     return Object.fromEntries(Array.from(lots, ([id, lot]) => {
-      const ratio = ratioAfter(lot.actions, date);
+      const ratio = shareAdjustmentAfter(lot.actions, date);
       return [id, (storage.priceHistory[id] ?? [])
         .filter((point) => point.date <= date)
         .map((point) => ratio === 1 ? point : { ...point, price: point.price * ratio })];

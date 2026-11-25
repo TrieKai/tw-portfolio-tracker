@@ -204,7 +204,7 @@ interface PortfolioContextValue {
     status: LoanStatus,
     effectiveDate: string
   ) => Promise<boolean>;
-  setManualPrice: (id: string, price: number, priceDate: string) => Promise<boolean>;
+  setManualPrice: (holding: Holding, price: number, priceDate: string) => Promise<boolean>;
   updateOne: (id: string) => Promise<boolean>;
   updateAll: () => Promise<void>;
   scanCorporateActions: () => Promise<void>;
@@ -692,9 +692,9 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setManualPrice = useCallback(
-    (id: string, price: number, priceDate: string) =>
-      persist((latest) => latest.holdings.some((holding) => holding.id === id)
-        ? applyPriceUpdate(latest, id, price, priceDate, "manual", { clearError: true })
+    (holding: Holding, price: number, priceDate: string) =>
+      persist((latest) => latest.holdings.some((entry) => isSamePriceTarget(entry, holding))
+        ? applyPriceUpdate(latest, holding.id, price, priceDate, "manual", { clearError: true })
         : null),
     [persist]
   );

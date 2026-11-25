@@ -11,6 +11,7 @@ import {
 } from "@/lib/portfolio/asset-labels";
 import {
   groupHoldingsWithMetrics,
+  holdingGroupKey,
   type HoldingGroupWithMetrics,
 } from "@/lib/portfolio/holding-groups";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
@@ -33,7 +34,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 ];
 
 export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) {
-  const { updateOne, edit, sell, remove, setManualPrice } = usePortfolio();
+  const { updateOne, edit, sell, remove, sales, setManualPrice } = usePortfolio();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [sortAsc, setSortAsc] = useState(false);
@@ -244,9 +245,13 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
       {editHoldingRow && (
         <EditHoldingModal
           holding={editHoldingRow}
+          firstSaleDate={sales.filter((sale) => sale.holdingId === editHoldingRow.id).map((sale) => sale.sellDate).sort()[0]}
           onSave={async (input, original) => {
             const saved = await edit(input, original);
-            if (saved) setEditId(null);
+            if (saved) {
+              setEditId(null);
+              if (holdingGroupKey(original) !== holdingGroupKey(input)) void updateOne(input.id);
+            }
             return saved;
           }}
           onClose={() => setEditId(null)}
@@ -279,13 +284,14 @@ export function HoldingsTable({ holdings }: { holdings: HoldingWithMetrics[] }) 
 
       {manualHolding && (
         <ManualPriceModal
+          key={holdingGroupKey(manualHolding)}
           symbol={manualHolding.symbol}
           name={manualHolding.name}
           assetType={manualHolding.assetType}
           defaultPrice={manualHolding.currentPrice}
           defaultDate={manualHolding.priceDate}
           onSave={async (price, date) => {
-            const saved = await setManualPrice(manualHolding.id, price, date);
+            const saved = await setManualPrice(manualHolding, price, date);
             if (saved) setManualId(null);
             return saved;
           }}

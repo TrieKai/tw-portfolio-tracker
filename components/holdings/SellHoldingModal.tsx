@@ -4,7 +4,7 @@ import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
-import { todayIsoDate } from "@/lib/date/iso-date";
+import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import type { HoldingWithMetrics, SellHoldingInput } from "@/lib/types/holding";
 
@@ -72,8 +72,8 @@ export function SellHoldingModal({
       setError("請輸入有效賣出價格");
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(sellDate)) {
-      setError("日期格式應為 YYYY-MM-DD");
+    if (!parseIsoDate(sellDate) || sellDate < holding.buyDate || sellDate > todayIsoDate()) {
+      setError(`賣出日須介於買入日 ${holding.buyDate} 與今天之間。`);
       return;
     }
     if (!Number.isFinite(feeAmount) || feeAmount < 0) {
@@ -162,6 +162,7 @@ export function SellHoldingModal({
               <DatePicker
                 value={sellDate}
                 onChange={setSellDate}
+                min={holding.buyDate}
                 max={todayIsoDate()}
               />
             </div>

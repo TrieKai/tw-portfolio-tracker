@@ -5,14 +5,14 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import type { HoldingWithMetrics } from "@/lib/types/holding";
 import type { EditHoldingInput } from "@/lib/types/holding";
-import { isValidStockSymbolInput } from "@/lib/prices/stock-symbol";
+import { isValidStockSymbolInput, normalizeStockSymbol } from "@/lib/prices/stock-symbol";
 import {
   getAssetTypeLabel,
   getBuyPriceLabel,
   getQuantityLabel,
 } from "@/lib/portfolio/asset-labels";
 import { DatePicker } from "@/components/ui/DatePicker";
-import { todayIsoDate } from "@/lib/date/iso-date";
+import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import {
   ResolvedInstrumentName,
   resolveInstrumentName,
@@ -20,10 +20,12 @@ import {
 
 export function EditHoldingModal({
   holding,
+  firstSaleDate,
   onSave,
   onClose,
 }: {
   holding: HoldingWithMetrics;
+  firstSaleDate?: string;
   onSave: (input: EditHoldingInput, original: HoldingWithMetrics) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -39,11 +41,24 @@ export function EditHoldingModal({
 
   const isStock = holding.assetType === "stock";
   const isProperty = holding.assetType === "property";
+  const normalizedSymbol = isStock ? normalizeStockSymbol(symbol) : symbol.replace(/\D/g, "");
+  const symbolChanged = !isProperty && normalizedSymbol.length > 0 &&
+    normalizedSymbol !== (isStock ? normalizeStockSymbol(original.symbol) : original.symbol);
+
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (submitting) return;
     setError(null);
+
+    if (!parseIsoDate(buyDate) || buyDate > todayIsoDate()) {
+      setError("請輸入有效買入日。");
+      return;
+    }
+    if (firstSaleDate && buyDate > firstSaleDate && buyDate !== original.buyDate) {
+      setError(`買入日不得晚於首次賣出日 ${firstSaleDate}。`);
+      return;
+    }
 
     const price = Number.parseFloat(buyPrice);
     const qty = Number.parseFloat(quantity);
@@ -162,10 +177,16 @@ export function EditHoldingModal({
               />
             </Field>
 
+            {symbolChanged && (
+              <p role="status" className="rounded-lg border border-border bg-surface-raised p-3 text-sm text-muted">
+                儲存後會清除原代號的現價與價格歷史，並查詢新標的現價。
+              </p>
+            )}
+
             <ResolvedInstrumentName
               assetType={holding.assetType}
               symbol={symbol}
-              initialName={holding.name}
+              initialName={symbolChanged ? undefined : holding.name}
               onResolved={(name) => setResolvedName(name)}
             />
           </>
@@ -208,7 +229,8 @@ export function EditHoldingModal({
           <DatePicker
             value={buyDate}
             onChange={setBuyDate}
-            max={todayIsoDate()}
+            max={firstSaleDate && original.buyDate <= firstSaleDate && firstSaleDate < todayIsoDate()
+              ? firstSaleDate : todayIsoDate()}
           />
         </Field>
 

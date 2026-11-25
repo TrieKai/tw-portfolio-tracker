@@ -96,6 +96,7 @@ function filterFromValue(value: string): PnlCalendarFilter {
 }
 
 function dayStatus(day: PnlCalendarDay): string | null {
+  if (day.saleWithoutPriorPrice) return "缺前收";
   if (day.gapStartDate) return "區間";
   if (day.isProvisional) return "暫";
   if (day.quality === "estimated") return "估";
@@ -139,7 +140,7 @@ function CalendarDayCell({
       style={day && !amountsHidden ? heatStyle(day, maximum) : undefined}
       aria-label={
         day
-          ? `${date}，損益 ${amountsHidden ? "金額已隱藏" : formatSignedAmount(day.pnl)}，報酬 ${day.returnRate === null ? "無可用基準" : formatRate(day.returnRate)}${day.gapStartDate ? `，自 ${day.gapStartDate} 的區間價差` : ""}`
+          ? `${date}，損益 ${amountsHidden ? "金額已隱藏" : formatSignedAmount(day.pnl)}，報酬 ${day.returnRate === null ? "無可用基準" : formatRate(day.returnRate)}${day.gapStartDate ? `，自 ${day.gapStartDate} 的區間價差` : ""}${day.saleWithoutPriorPrice ? "，賣出缺少前收，按可確認的成交損益列示" : ""}`
           : `${date}，無損益資料`
       }
     >
@@ -327,17 +328,17 @@ export function PnlCalendarPage() {
         { id: holding.id, name: holding.name, symbol: holding.symbol },
       ])
     );
-    for (const transaction of storage.transactions) {
-      if (!options.has(transaction.holdingId)) {
-        options.set(transaction.holdingId, {
-          id: transaction.holdingId,
-          name: transaction.name,
-          symbol: transaction.symbol,
+    for (const record of [...storage.transactions, ...storage.sales]) {
+      if (record.assetType !== "property" && !options.has(record.holdingId)) {
+        options.set(record.holdingId, {
+          id: record.holdingId,
+          name: record.name,
+          symbol: record.symbol,
         });
       }
     }
     return Array.from(options.values());
-  }, [investmentHoldings, storage.transactions]);
+  }, [investmentHoldings, storage.transactions, storage.sales]);
   const filter = useMemo(() => filterFromValue(filterValue), [filterValue]);
   const showNetPerformance = performanceView === "net" && filter.kind === "investment";
   const calendar = useMemo(
@@ -404,7 +405,7 @@ export function PnlCalendarPage() {
 
   if (!ready) return <LoadingSpinner />;
 
-  if (investmentHoldings.length === 0 && storage.transactions.length === 0) {
+  if (filterHoldings.length === 0) {
     return (
       <div className="space-y-6">
         <PageHeader title="損益日曆" description="查看每日投資損益，也可切換至扣息後績效。" />
@@ -600,7 +601,7 @@ export function PnlCalendarPage() {
       </section>
 
       <p className="text-xs leading-5 text-muted">
-        已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」包含舊資料回算或融資成本估算，「區間」表示中間有平日缺少估值，比例標籤代表只有部分資產更新。非交易日的利息會計入週與月合計。
+        已結束日期使用收盤價或基金 NAV；「暫」代表今日即時估值，「估」包含舊資料回算或融資成本估算，「區間」表示中間有平日缺少估值，「缺前收」表示賣出僅能列示已確認的成交損益，比例標籤代表只有部分資產更新。非交易日的利息會計入週與月合計。
       </p>
 
       {selection ? (

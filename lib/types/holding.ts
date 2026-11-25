@@ -91,6 +91,8 @@ export interface SaleTransaction {
   buyPrice: number;
   quantity: number;
   sellPrice: number;
+  /** 成交後本批持倉已結清，舊備份可能未記錄此欄位。 */
+  positionClosed?: boolean;
   /** 賣出日期 ISO YYYY-MM-DD */
   sellDate: string;
   /** 賣出成本 = buyPrice × quantity */
@@ -176,6 +178,8 @@ export type PortfolioTransactionType =
 export interface PortfolioTransaction {
   id: string;
   type: PortfolioTransactionType;
+  /** 賣出事件對應的成交紀錄。 */
+  saleId?: string;
   holdingId: string;
   assetType: Exclude<AssetType, "property">;
   name: string;
@@ -211,6 +215,7 @@ export interface PersistedPnlDaySummary {
   returnRate: number | null;
   returnBase?: number;
   gapStartDate?: string;
+  saleWithoutPriorPrice?: boolean;
   quality: "complete" | "partial" | "estimated" | "provisional";
   computedAt: string;
 }

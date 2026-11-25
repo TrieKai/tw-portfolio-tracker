@@ -181,7 +181,7 @@ export function PortfolioDataPanel() {
                 <span className="text-sm">
                   <span className="font-medium text-foreground">合併</span>
                   <span className="mt-0.5 block text-muted">
-                    補入缺少的紀錄。同筆持倉、貸款及交易採較新的版本，已有的同日價格與目前設定會保留。
+                    補入缺少的紀錄，並依賣出紀錄核對剩餘持倉。價格會按公司行動換算，已有的同日價格與目前設定會保留。
                   </span>
                 </span>
               </label>

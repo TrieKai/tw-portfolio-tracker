@@ -28,6 +28,7 @@ function signedRate(value: number | null): string {
 }
 
 function qualityLabel(day: PnlCalendarDay): string {
+  if (day.saleWithoutPriorPrice) return "賣出缺少前收，無法拆分單日價差";
   if (day.gapStartDate) return `區間價差 · ${day.gapStartDate} 至 ${day.date} 間有平日缺少估值`;
   if (day.isProvisional) return "今日暫估";
   if (day.quality === "estimated") return "估算損益";
@@ -111,7 +112,7 @@ function DayDetail({
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-xs text-muted">賣出日歸因</dt>
+                    <dt className="text-xs text-muted">{contribution.saleWithoutPriorPrice ? "成交價差（缺前收）" : "賣出日歸因"}</dt>
                     <dd className={`mt-0.5 tabular-nums ${pnlClass(contribution.tradePnl)}`}>
                       {formatSignedAmount(contribution.tradePnl)}
                     </dd>
