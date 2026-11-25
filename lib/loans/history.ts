@@ -1,5 +1,5 @@
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
-import type { Loan, LoanRevision } from "@/lib/types/loan";
+import type { Loan, LoanPaymentRecord, LoanRevision } from "@/lib/types/loan";
 
 export function isDateInLoanTracking(loan: Loan, date: string): boolean {
   return !!parseIsoDate(date) && date >= loan.trackingStartDate &&
@@ -12,6 +12,13 @@ export function loanActualEntryEndDate(loan: Loan, today = todayIsoDate()): stri
 
 export function loanPaymentsInTracking(loan: Loan) {
   return (loan.paymentHistory ?? []).filter((payment) => isDateInLoanTracking(loan, payment.paymentDate));
+}
+
+export function loanPaymentInterestPeriod(loan: Loan, payment: LoanPaymentRecord) {
+  const { interestPeriodStartDate: startDate, interestPeriodEndDate: endDate } = payment;
+  if (startDate && endDate && startDate >= loan.trackingStartDate && startDate < endDate && endDate <= payment.paymentDate) {
+    return { startDate, endDate };
+  }
 }
 
 export function loanTrackingStartIssue(date: string, predecessor?: Loan, closedAt?: string): string | undefined {

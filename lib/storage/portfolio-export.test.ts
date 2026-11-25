@@ -720,6 +720,56 @@ describe("backup merging", () => {
     }
   });
 
+  it("keeps receipts and rate changes when two restarts have different tracking dates", () => {
+    const initial = savedPortfolio();
+    const original = initial.loans[0];
+    const closed = setLoanStatus(initial, original.id, "paid_off", "2026-11-06", "2026-11-07T00:00:00.000Z");
+    const first = restartLoan(closed, original.id, {
+      ...original, trackingStartDate: "2026-11-10", openingBalance: 50_000,
+    }, "2026-11-11T00:00:00.000Z");
+    const firstId = first.loans.at(-1)!.id;
+    const repriced = recordLoanRateChange(first, firstId, {
+      effectiveDate: "2026-11-12", annualInterestRate: 8,
+    }, "2026-11-12T00:00:00.000Z");
+    const paid = recordLoanPayment(repriced, firstId, {
+      paymentDate: "2026-11-13", principalPaid: 5_000, interestPaid: 37, feePaid: 14,
+      subsidyReceived: 0, remainingPrincipalAfter: 45_000,
+      interestPeriodStartDate: "2026-11-10", interestPeriodEndDate: "2026-11-13",
+    }, "2026-11-13T00:00:00.000Z");
+    const local = recordLoanPayment(paid, firstId, {
+      paymentDate: "2026-11-18", principalPaid: 0, interestPaid: 90, feePaid: 5,
+      subsidyReceived: 0, interestPeriodStartDate: "2026-11-13", interestPeriodEndDate: "2026-11-18",
+    }, "2026-11-18T00:00:00.000Z");
+    const backup = restartLoan(closed, original.id, {
+      ...original, trackingStartDate: "2026-11-15", openingBalance: 60_000,
+    }, "2026-11-16T00:00:00.000Z");
+
+    for (const [left, right] of [[local, backup], [backup, local]]) {
+      const merged = mergePortfolioStorage(left, right);
+      const active = merged.loans.find((loan) => loan.status === "active")!;
+      expect(merged.loans).toHaveLength(2);
+      expect(active).toMatchObject({
+        trackingStartDate: "2026-11-15",
+        paymentHistory: local.loans[1].paymentHistory,
+        balanceHistory: local.loans[1].balanceHistory,
+        rateHistory: local.loans[1].rateHistory,
+      });
+      const parsed = parseImportPayload(JSON.parse(JSON.stringify(buildExportFile(merged))));
+      if (!parsed.ok) throw new Error(parsed.error);
+      const restored = applyImportMode(initial, parsed.portfolio, "replace").loans.find((loan) => loan.id === active.id)!;
+      expect(restored.paymentHistory).toEqual(JSON.parse(JSON.stringify(active.paymentHistory)));
+      expect(restored.balanceHistory).toEqual(active.balanceHistory);
+      expect(restored.rateHistory).toEqual(JSON.parse(JSON.stringify(active.rateHistory)));
+      expect(calculateLoanSnapshot(restored, "2026-11-20")).toMatchObject({
+        currentPrincipal: 60_000, currentAnnualInterestRate: 3,
+      });
+      expect(estimateLoanFinancingCostForPeriod(restored, "2026-11-10", "2026-11-20"))
+        .toBeCloseTo(5 + 60_000 * 0.03 * 5 / 365, 2);
+      expect(mergePortfolioStorage(merged, local).loans.find((loan) => loan.id === active.id)?.paymentHistory)
+        .toEqual(active.paymentHistory);
+    }
+  });
+
   it("remaps subsequent restarts and preserves the original closure when another device undid the closure", () => {
     const initial = savedPortfolio();
     const original = initial.loans[0];

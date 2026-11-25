@@ -119,6 +119,14 @@ export function LoanFormModal({
   const [trackingStartDate, setTrackingStartDate] = useState(
     editingLoan?.trackingStartDate ?? todayIsoDate()
   );
+  const movesRecordedDatesOutsideTracking = editingLoan && trackingStartDate > editingLoan.trackingStartDate && (
+    editingLoan.balanceHistory?.some(({ effectiveDate }) => effectiveDate >= editingLoan.trackingStartDate && effectiveDate < trackingStartDate) ||
+    editingLoan.rateHistory?.some(({ effectiveDate }) => effectiveDate >= editingLoan.trackingStartDate && effectiveDate < trackingStartDate) ||
+    editingLoan.paymentHistory?.some(({ paymentDate, interestPeriodStartDate }) => {
+      const start = interestPeriodStartDate ?? paymentDate;
+      return start >= editingLoan.trackingStartDate && start < trackingStartDate;
+    })
+  );
   const [termMonths, setTermMonths] = useState(
     editingLoan?.remainingTermMonths ? String(editingLoan.remainingTermMonths) : ""
   );
@@ -486,6 +494,9 @@ export function LoanFormModal({
                 {editingLoan?.closedAt ? `最晚 ${latestStart}（清償日）` : null}
               </span>
             )}
+            {movesRecordedDatesOutsideTracking ? (
+              <span className="text-xs text-amber-700 dark:text-amber-300">這個日期會影響既有帳務的計算範圍。原始紀錄仍可在帳務紀錄核對。</span>
+            ) : null}
           </Field>
           {repaymentMethod !== "revolving" ? <Field label={entryMode === "complete" && !flexibleLoan ? "還款期數（月）" : "剩餘期數（月，選填）"} required={entryMode === "complete" && !flexibleLoan}>
             <input type="number" min="1" step="1" className="input-field" value={termMonths} onChange={(event) => setTermMonths(event.target.value)} />

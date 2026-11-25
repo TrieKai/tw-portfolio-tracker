@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDailyInvestmentFinancingCosts, principalAtDate } from "@/lib/loans/calculations";
+import { buildDailyInvestmentFinancingCosts, calculateLoanSnapshot, principalAtDate } from "@/lib/loans/calculations";
 import { addDaysToIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
 import { buildExportFile, mergePortfolioStorage, parseImportPayload } from "@/lib/storage/portfolio-export";
@@ -282,7 +282,7 @@ describe("loan store", () => {
     });
   });
 
-  it("keeps pre-tracking events only in the revision after correcting the start date", () => {
+  it("keeps earlier entries for review and recalculates them after restoring the tracking date", () => {
     const added = addLoan(defaultPortfolioStorage(), {
       ...input,
       balanceHistory: [
@@ -318,9 +318,16 @@ describe("loan store", () => {
       trackingStartDate: "2026-09-15",
     });
 
-    expect(next.loans[0].balanceHistory).toBeUndefined();
-    expect(next.loans[0].paymentHistory).toBeUndefined();
-    expect(next.loans[0].rateHistory).toBeUndefined();
+    expect(next.loans[0].balanceHistory).toEqual(added.loans[0].balanceHistory);
+    expect(next.loans[0].paymentHistory).toEqual(added.loans[0].paymentHistory);
+    expect(next.loans[0].rateHistory).toEqual(added.loans[0].rateHistory);
+    expect(calculateLoanSnapshot(next.loans[0], "2026-09-15")).toMatchObject({
+      currentPrincipal: input.openingBalance, currentAnnualInterestRate: input.annualInterestRate,
+    });
+    const restored = editLoan(next, { ...input, id: next.loans[0].id, trackingStartDate: "2026-09-01" });
+    expect(calculateLoanSnapshot(restored.loans[0], "2026-09-15")).toMatchObject({
+      currentPrincipal: 990_000, currentAnnualInterestRate: 2.9,
+    });
     expect(next.loanRevisions[0].previous.paymentHistory).toHaveLength(1);
   });
 });

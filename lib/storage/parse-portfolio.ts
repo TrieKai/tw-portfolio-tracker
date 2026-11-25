@@ -95,7 +95,6 @@ function normalizeCollateralPositions(
 
 function normalizeBalanceHistory(
   value: unknown,
-  trackingStartDate: string,
   fallbackRecordedAt: string
 ): LoanBalanceSnapshot[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -111,7 +110,7 @@ function normalizeBalanceHistory(
       continue;
     }
     const effectiveDate = normalizeToIsoDate(snapshot.effectiveDate);
-    if (!effectiveDate || effectiveDate < trackingStartDate) continue;
+    if (!effectiveDate) continue;
     byDate.set(effectiveDate, {
       effectiveDate,
       balance: snapshot.balance,
@@ -129,7 +128,6 @@ function normalizeBalanceHistory(
 
 function normalizePaymentHistory(
   value: unknown,
-  trackingStartDate: string,
   fallbackCreatedAt: string
 ): LoanPaymentRecord[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -148,7 +146,6 @@ function normalizePaymentHistory(
     ];
     if (
       !paymentDate ||
-      paymentDate < trackingStartDate ||
       amounts.some(
         (amount) =>
           typeof amount !== "number" ||
@@ -172,13 +169,12 @@ function normalizePaymentHistory(
     const hasValidPeriod =
       !!periodStart &&
       !!periodEnd &&
-      periodStart >= trackingStartDate &&
       periodStart < periodEnd &&
       periodEnd <= paymentDate;
     payments.push({
       id: payment.id,
       paymentDate,
-      ...(installmentDueDate && installmentDueDate >= trackingStartDate ? { installmentDueDate } : {}),
+      ...(installmentDueDate ? { installmentDueDate } : {}),
       ...(typeof payment.installmentAssignedAt === "string" && Number.isFinite(Date.parse(payment.installmentAssignedAt))
         ? { installmentAssignedAt: new Date(payment.installmentAssignedAt).toISOString() } : {}),
       principalPaid: payment.principalPaid as number,
@@ -215,7 +211,6 @@ function normalizePaymentHistory(
 
 function normalizeRateHistory(
   value: unknown,
-  trackingStartDate: string,
   fallbackCreatedAt: string
 ): LoanRateChange[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -233,7 +228,7 @@ function normalizeRateHistory(
       continue;
     }
     const effectiveDate = normalizeToIsoDate(change.effectiveDate);
-    if (!effectiveDate || effectiveDate < trackingStartDate) continue;
+    if (!effectiveDate) continue;
     changes.push({
       id: change.id,
       effectiveDate,
@@ -315,22 +310,10 @@ function normalizeLoan(raw: unknown): Loan | null {
     raw.collateralPositions
   );
   const trackingStartDate = normalizeToIsoDate(raw.trackingStartDate)!;
-  const balanceHistory = normalizeBalanceHistory(
-    raw.balanceHistory,
-    trackingStartDate,
-    now
-  );
-  const paymentHistory = normalizePaymentHistory(
-    raw.paymentHistory,
-    trackingStartDate,
-    now
-  );
+  const balanceHistory = normalizeBalanceHistory(raw.balanceHistory, now);
+  const paymentHistory = normalizePaymentHistory(raw.paymentHistory, now);
   const paymentImportReviews = normalizePaymentImportReviews(raw.paymentImportReviews);
-  const rateHistory = normalizeRateHistory(
-    raw.rateHistory,
-    trackingStartDate,
-    now
-  );
+  const rateHistory = normalizeRateHistory(raw.rateHistory, now);
 
   return {
     id: raw.id,

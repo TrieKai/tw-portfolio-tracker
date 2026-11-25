@@ -134,19 +134,11 @@ export function editLoan(
     createdAt: previous.createdAt,
     updatedAt: now,
     contractUpdatedAt: now,
+    balanceHistory: previous.balanceHistory,
+    paymentHistory: previous.paymentHistory,
+    rateHistory: previous.rateHistory,
+    paymentImportReviews: previous.paymentImportReviews,
   };
-  next.balanceHistory = (next.balanceHistory ?? []).filter(
-    (snapshot) => snapshot.effectiveDate >= next.trackingStartDate
-  );
-  next.paymentHistory = (next.paymentHistory ?? []).filter(
-    (payment) => payment.paymentDate >= next.trackingStartDate
-  );
-  next.rateHistory = (next.rateHistory ?? []).filter(
-    (change) => change.effectiveDate >= next.trackingStartDate
-  );
-  if (next.balanceHistory.length === 0) next.balanceHistory = undefined;
-  if (next.paymentHistory.length === 0) next.paymentHistory = undefined;
-  if (next.rateHistory.length === 0) next.rateHistory = undefined;
   return {
     ...state,
     loans: state.loans.map((loan) => (loan.id === input.id ? next : loan)),

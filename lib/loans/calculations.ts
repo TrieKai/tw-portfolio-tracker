@@ -10,7 +10,7 @@ import type {
   LoanSnapshot,
   PortfolioLoanSummary,
 } from "@/lib/types/loan";
-import { isDateInLoanTracking, loanPaymentsInTracking } from "@/lib/loans/history";
+import { isDateInLoanTracking, loanPaymentInterestPeriod, loanPaymentsInTracking } from "@/lib/loans/history";
 import { loansWithConsistentPhases } from "@/lib/loans/phases";
 
 const MS_PER_DAY = 86_400_000;
@@ -69,9 +69,9 @@ function buildPrincipalEvents(
   const scheduled = schedule
     .filter((row) => row.principal > 0)
     .map((row) => ({ date: row.paymentDate, principal: row.remainingPrincipal, priority: 0 }));
-  const recorded = (loan.balanceHistory ?? []).map((snapshot) => ({
-    date: snapshot.effectiveDate, principal: snapshot.balance, priority: 1,
-  }));
+  const recorded = (loan.balanceHistory ?? [])
+    .filter((snapshot) => snapshot.effectiveDate >= loan.trackingStartDate)
+    .map((snapshot) => ({ date: snapshot.effectiveDate, principal: snapshot.balance, priority: 1 }));
   // 同日的本金快照代表實際期末餘額，優先於攤還預估。
   return [...scheduled, ...recorded].sort(
     (a, b) => a.date.localeCompare(b.date) || a.priority - b.priority
@@ -86,11 +86,9 @@ function annuityPayment(principal: number, monthlyRate: number, periods: number)
 }
 
 function orderedRateChanges(loan: Loan) {
-  return [...(loan.rateHistory ?? [])].sort(
-    (a, b) =>
-      a.effectiveDate.localeCompare(b.effectiveDate) ||
-      a.createdAt.localeCompare(b.createdAt)
-  );
+  return (loan.rateHistory ?? [])
+    .filter((change) => change.effectiveDate >= loan.trackingStartDate)
+    .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.createdAt.localeCompare(b.createdAt));
 }
 
 export function interestRateAtDate(loan: Loan, asOfDate: string): number {
@@ -126,7 +124,9 @@ export function buildLoanSchedule(loan: Loan): LoanScheduleRow[] {
   if (
     !periods ||
     periods <= 0 ||
-    (loan.openingBalance <= 0 && !loan.balanceHistory?.some((snapshot) => snapshot.balance > 0)) ||
+    (loan.openingBalance <= 0 && !loan.balanceHistory?.some(
+      (snapshot) => snapshot.balance > 0 && snapshot.effectiveDate >= loan.trackingStartDate
+    )) ||
     loan.repaymentMethod === "revolving"
   ) {
     return [];
@@ -354,13 +354,13 @@ export function estimateLoanFinancingCostForPeriod(
     if (payment.paymentDate > toDate) continue;
     const belongsToPeriod = payment.paymentDate > fromDate;
     if (belongsToPeriod) payments += payment.feePaid - payment.subsidyReceived;
-    const { interestPeriodStartDate: startDate, interestPeriodEndDate: endDate } = payment;
-    if (!startDate || !endDate || startDate >= endDate) continue;
+    const statement = loanPaymentInterestPeriod(loan, payment);
+    if (!statement) continue;
     if (belongsToPeriod) {
       payments += payment.interestPaid;
-      currentStatements.push({ startDate, endDate });
+      currentStatements.push(statement);
     } else {
-      priorStatements.push({ startDate, endDate });
+      priorStatements.push(statement);
     }
   }
   // 同一計息日的估算值只沖銷一次，各次實付仍歸屬到各自的繳款日。

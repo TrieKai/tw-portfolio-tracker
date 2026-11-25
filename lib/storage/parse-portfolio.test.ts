@@ -166,6 +166,7 @@ describe("normalizePortfolioStorage", () => {
       maturityDate: "2027-08-01",
       collateralPositions: [{ holdingId: "holding-1", quantity: 1_000 }],
       balanceHistory: [
+        { effectiveDate: "2026-07-01", balance: 600_000 },
         { effectiveDate: "2026-08-15", balance: 450_000 },
       ],
       paymentHistory: [{ id: "payment-1", interestPaid: 1_200 }],

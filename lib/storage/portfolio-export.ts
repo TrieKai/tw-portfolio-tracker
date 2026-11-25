@@ -370,15 +370,12 @@ function mergeLoans(current: PortfolioStorage, incoming: PortfolioStorage, choic
       const existing = balanceByDate.get(entry.effectiveDate);
       if (!existing || entry.recordedAt > existing.recordedAt) balanceByDate.set(entry.effectiveDate, entry);
     }
-    const balanceHistory = [...balanceByDate.values()]
-      .filter((entry) => entry.effectiveDate >= contract.trackingStartDate)
-      .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
+    // 基準日決定列入計算的期間，完整帳務紀錄仍保留以供核對。
+    const balanceHistory = [...balanceByDate.values()].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
     const rateHistory = mergeRecords(local.rateHistory ?? [], backup.rateHistory ?? [])
-      .filter((entry) => entry.effectiveDate >= contract.trackingStartDate)
       .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.createdAt.localeCompare(b.createdAt));
     const paymentHistory = mergeRecords(local.paymentHistory ?? [], backup.paymentHistory ?? [],
       (payment) => payment.installmentAssignedAt ?? payment.createdAt)
-      .filter((entry) => entry.paymentDate >= contract.trackingStartDate)
       .sort((a, b) => a.paymentDate.localeCompare(b.paymentDate) || a.createdAt.localeCompare(b.createdAt));
     const paymentImportReviews = mergeRecords(local.paymentImportReviews ?? [], backup.paymentImportReviews ?? [],
       (review) => review.reviewedAt);
