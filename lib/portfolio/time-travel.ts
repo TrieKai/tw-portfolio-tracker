@@ -1,6 +1,5 @@
 import { normalizeToIsoDate } from "@/lib/date/iso-date";
-import { shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
-import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
+import { costInCurrentUnits, costOnDate, holdingActions, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
 import type {
   CorporateActionRecord,
   Holding,
@@ -37,10 +36,7 @@ function positionOn(
       quantity += sale.quantity * shareAdjustmentAfter(actions, sale.sellDate);
     }
   }
-  let buyPrice = holding.buyPrice;
-  for (const action of actions) {
-    if (action.effectiveDate > date) buyPrice = action.buyPriceBefore;
-  }
+  const buyPrice = Math.max(0, costOnDate(holding.buyPrice, actions, date));
   return { ...holding, buyPrice, quantity: quantity / shareAdjustmentAfter(actions, date) };
 }
 
@@ -65,9 +61,7 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
     lots.set(holding.id, {
       holding,
       sales: salesById.get(holding.id) ?? [],
-      actions: actionsFor(holding.id).filter((action) =>
-        holdingGroupKey(holding) === holdingGroupKey({ ...action, id: holding.id })
-      ),
+      actions: holdingActions(actionsFor(holding.id), holding),
     });
   }
 
@@ -83,7 +77,7 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
       unknownStartCount++;
       continue;
     }
-    const actions = actionsFor(id);
+    const actions = holdingActions(actionsFor(id), { ...latest, id });
     lots.set(id, {
       holding: {
         id,
@@ -92,7 +86,7 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
         symbol: latest.symbol,
         market: latest.market,
         buyDate,
-        buyPrice: latest.buyPrice / shareAdjustmentAfter(actions, latest.sellDate),
+        buyPrice: costInCurrentUnits(latest.buyPrice, actions, latest.sellDate),
         quantity: 0,
         createdAt: entries[0]?.createdAt ?? latest.createdAt,
         updatedAt: latest.createdAt,

@@ -215,6 +215,10 @@ export function EditHoldingModal({
           </Field>
         </div>
 
+        {firstSaleDate && Number.parseFloat(buyPrice) !== original.buyPrice && (
+          <p className="text-sm text-muted">儲存成本更正後，會重算此筆持倉既有賣出的已實現損益。</p>
+        )}
+
         {isProperty && (
           <p className="rounded-lg border border-border bg-surface-raised/60 p-3 text-xs text-muted">
             房貸本金、利率與期限已改由

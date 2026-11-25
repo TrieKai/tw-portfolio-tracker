@@ -55,8 +55,13 @@ import {
   buildPortfolioPnlBreakdowns,
   type PortfolioPnlBreakdowns,
 } from "@/lib/portfolio/pnl-breakdown";
-import { applyImportMode } from "@/lib/storage/portfolio-export";
-import type { PortfolioImportMode } from "@/lib/storage/portfolio-export";
+import {
+  applyImportMode,
+  SaleImportReviewRequired,
+  type PortfolioImportMode,
+  type PortfolioImportResult,
+  type SaleImportChoices,
+} from "@/lib/storage/portfolio-export";
 import {
   defaultPortfolioStorage,
   hasPortfolioData,
@@ -237,8 +242,9 @@ interface PortfolioContextValue {
   /** 從 JSON 備份匯入（取代或合併） */
   importPortfolio: (
     incoming: PortfolioStorage,
-    mode: PortfolioImportMode
-  ) => Promise<boolean>;
+    mode: PortfolioImportMode,
+    choices?: SaleImportChoices
+  ) => Promise<PortfolioImportResult>;
   /** 強制從雲端重新載入（新裝置／同步異常時使用） */
   refreshFromCloud: () => Promise<boolean>;
 }
@@ -984,14 +990,28 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const importFundHistory = importPriceHistory;
 
   const importPortfolio = useCallback(
-    (incoming: PortfolioStorage, mode: PortfolioImportMode) => {
-      return applyStorage(
-        (latest) => applyImportMode(latest, incoming, mode),
+    async (
+      incoming: PortfolioStorage,
+      mode: PortfolioImportMode,
+      choices?: SaleImportChoices
+    ): Promise<PortfolioImportResult> => {
+      let result: PortfolioImportResult = { status: "failed" };
+      const saved = await applyStorage(
+        (latest) => {
+          try {
+            return applyImportMode(latest, incoming, mode, choices);
+          } catch (error) {
+            if (!(error instanceof SaleImportReviewRequired)) throw error;
+            result = { status: "review", conflicts: error.conflicts };
+            return null;
+          }
+        },
         {
           overwriteUnreadable: mode === "replace",
           onSaved: mode === "replace" ? invalidatePriceRequests : undefined,
         }
       );
+      return saved ? { status: "saved" } : result;
     },
     [applyStorage, invalidatePriceRequests]
   );

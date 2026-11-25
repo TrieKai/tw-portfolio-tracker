@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { addHolding, applyManualCorporateAction, applyPriceUpdate, editHolding, sellHolding } from "@/lib/storage/portfolio-store";
 import { addLoan, setLoanStatus } from "@/lib/storage/loan-store";
-import { mergePortfolioStorage } from "@/lib/storage/portfolio-export";
+import { mergePortfolioStorage, SaleImportReviewRequired } from "@/lib/storage/portfolio-export";
 import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
@@ -108,6 +108,71 @@ describe("backup merging", () => {
 
     expect(merged.holdings[0].symbol).toBe("2317");
     expect(merged.priceHistory[id]).toBeUndefined();
+  });
+
+
+  it("requires confirmation before merging independently entered duplicate full sales", () => {
+    const initial = savedPortfolio();
+    const id = initial.holdings[0].id;
+    const sale = { id, quantity: 100, sellPrice: 120, sellDate: "2026-11-06" };
+    const local = sellHolding(initial, sale);
+    const backup = sellHolding(initial, { ...sale, fee: 10 });
+    // 舊資料沒有 saleId，仍須移除該筆成交對應的賣出事件。
+    local.transactions = local.transactions.map((event) => ({ ...event, saleId: undefined }));
+    try {
+      mergePortfolioStorage(local, backup);
+      throw new Error("Missing sale review");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SaleImportReviewRequired);
+      if (!(error instanceof SaleImportReviewRequired)) throw error;
+      const [conflict] = error.conflicts;
+      expect(conflict.canKeepBoth).toBe(false);
+      expect(() => mergePortfolioStorage(local, backup, { [conflict.key]: "both" })).toThrow(SaleImportReviewRequired);
+      for (const [choice, selected] of [["local", local], ["backup", backup]] as const) {
+        const merged = mergePortfolioStorage(local, backup, { [conflict.key]: choice });
+        expect(merged.holdings).toEqual([]);
+        expect(merged.sales).toEqual(selected.sales);
+        expect(merged.transactions.filter((event) => event.type === "sell")).toHaveLength(1);
+        expect(buildPortfolioHistory(merged).snapshotOn("2026-11-05")[0]?.quantity).toBe(100);
+      }
+    }
+  });
+
+  it("keeps a single partial sale when choosing either source and permits legitimate separate fills", () => {
+    const initial = savedPortfolio();
+    const id = initial.holdings[0].id;
+    const sale = { id, quantity: 30, sellPrice: 120, sellDate: "2026-11-06" };
+    const local = sellHolding(initial, sale);
+    const backup = sellHolding(initial, { ...sale, fee: 10 });
+    try {
+      mergePortfolioStorage(local, backup);
+      throw new Error("Missing sale review");
+    } catch (error) {
+      if (!(error instanceof SaleImportReviewRequired)) throw error;
+      const [conflict] = error.conflicts;
+      expect(conflict.canKeepBoth).toBe(true);
+      const once = mergePortfolioStorage(local, backup, { [conflict.key]: "backup" });
+      expect(once.holdings[0].quantity).toBe(70);
+      expect(once.sales[0].id).toBe(backup.sales[0].id);
+      expect(once.transactions.filter((event) => event.type === "sell")).toHaveLength(1);
+      const twice = mergePortfolioStorage(local, backup, { [conflict.key]: "both" });
+      expect(twice.holdings[0].quantity).toBe(40);
+      expect(twice.sales).toHaveLength(2);
+    }
+  });
+
+  it("retains a corrected cost for the same sale id on repeat imports", () => {
+    const initial = savedPortfolio();
+    const id = initial.holdings[0].id;
+    const local = sellHolding(initial, { id, quantity: 40, sellPrice: 120, sellDate: "2026-11-06" });
+    const sameMillisecond = new Date(Date.now() + 2000).toISOString();
+    local.sales[0].createdAt = sameMillisecond;
+    local.holdings[0].updatedAt = sameMillisecond;
+    const backup = editHolding(local, { ...local.holdings[0], buyPrice: 110 });
+    for (const merged of [mergePortfolioStorage(local, backup), mergePortfolioStorage(backup, local)]) {
+      expect(merged.sales[0].realizedPnl).toBe(400);
+      expect(merged.holdings[0].buyPrice).toBe(110);
+    }
   });
 
 });

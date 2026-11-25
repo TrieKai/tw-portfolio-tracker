@@ -1,4 +1,5 @@
-import { corporateActionAdjustmentRatio, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
+import { corporateActionAdjustmentRatio, holdingActions, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
+import { linkSaleEvents } from "@/lib/portfolio/sale-events";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import type { PortfolioStorage, PortfolioTransaction, SaleTransaction } from "@/lib/types/holding";
 import { mergePriceHistory, repairCorporateActionPriceHistory } from "@/lib/storage/portfolio-store";
@@ -103,10 +104,62 @@ function adjustedTransactions(
   });
 }
 
+export type SaleImportChoice = "local" | "backup" | "both";
+export type SaleImportChoices = Record<string, SaleImportChoice>;
+
+export interface SaleImportConflict {
+  key: string;
+  local: SaleTransaction[];
+  backup: SaleTransaction[];
+  canKeepBoth: boolean;
+}
+
+export type PortfolioImportResult =
+  | { status: "saved" | "failed" }
+  | { status: "review"; conflicts: SaleImportConflict[] };
+
+export class SaleImportReviewRequired extends Error {
+  constructor(readonly conflicts: SaleImportConflict[]) {
+    super("請先核對疑似重複的賣出成交");
+  }
+}
+
+function duplicateSaleGroups(current: SaleTransaction[], incoming: SaleTransaction[]) {
+  const currentIds = new Set(current.map((sale) => sale.id));
+  const incomingIds = new Set(incoming.map((sale) => sale.id));
+  const group = (sales: SaleTransaction[], otherIds: Set<string>) => {
+    const records = new Map<string, SaleTransaction[]>();
+    for (const sale of sales) {
+      if (otherIds.has(sale.id)) continue;
+      const key = JSON.stringify([sale.holdingId, sale.sellDate, sale.quantity, sale.sellPrice]);
+      const matches = records.get(key) ?? [];
+      matches.push(sale);
+      records.set(key, matches);
+    }
+    return records;
+  };
+  const local = group(current, incomingIds);
+  const backup = group(incoming, currentIds);
+  return Array.from(local, ([key, records]) => ({ local: records, backup: backup.get(key) ?? [] }))
+    .filter((pair) => pair.backup.length > 0);
+}
+
+function withoutSales(state: PortfolioStorage, rejected: Set<string>) {
+  if (!rejected.size) return { sales: state.sales, transactions: state.transactions };
+  const { linked } = linkSaleEvents(state.sales, state.transactions);
+  return {
+    sales: state.sales.filter((sale) => !rejected.has(sale.id)),
+    transactions: state.transactions.filter((event) =>
+      !rejected.has(event.saleId ?? linked.get(event.id)?.id ?? "")
+    ),
+  };
+}
+
 /** 以修改時間合併可編輯紀錄；同時刻或無修改時間的衝突保留本機。 */
 export function mergePortfolioStorage(
   local: PortfolioStorage,
-  backup: PortfolioStorage
+  backup: PortfolioStorage,
+  choices: SaleImportChoices = {}
 ): PortfolioStorage {
   const current = repairCorporateActionPriceHistory(local);
   const incoming = repairCorporateActionPriceHistory(backup);
@@ -120,14 +173,58 @@ export function mergePortfolioStorage(
     if (!actionsByEvent.has(key)) actionsByEvent.set(key, action);
   }
   const corporateActions = [...actionsByEvent.values()];
-  const sales = mergeRecords(current.sales, incoming.sales);
   const currentById = new Map(current.holdings.map((holding) => [holding.id, holding]));
   const incomingIds = new Set(incoming.holdings.map((holding) => holding.id));
   const currentSalesIds = new Set(current.sales.map((sale) => sale.id));
   const incomingSalesIds = new Set(incoming.sales.map((sale) => sale.id));
+  const selectedHoldings = mergeRecords(current.holdings, incoming.holdings, (holding) => holding.updatedAt);
+  const selectedKeys = new Map(selectedHoldings.map((holding) => [holding.id, holdingGroupKey(holding)]));
+  const selectedById = new Map(selectedHoldings.map((holding) => [holding.id, holding]));
+  const mergedSales = mergeRecords(current.sales, incoming.sales, (sale) => sale.updatedAt ?? sale.createdAt);
+
+  const duplicates: SaleImportConflict[] = duplicateSaleGroups(current.sales, incoming.sales).map((group) => {
+    const id = group.local[0].holdingId;
+    const holding = selectedById.get(id);
+    const fromCurrent = holding && currentById.get(id) === holding;
+    const source = fromCurrent ? current : incoming;
+    const sourceIds = fromCurrent ? currentSalesIds : incomingSalesIds;
+    const actions = holding ? holdingActions(corporateActions, holding) : [];
+    const sourceActions = holding ? holdingActions(source.corporateActions, holding) : [];
+    const trades = mergedSales.filter((sale) => sale.holdingId === id);
+    const addedQuantity = trades.reduce((sum, sale) =>
+      sourceIds.has(sale.id) ? sum : sum + sale.quantity * shareAdjustmentAfter(actions, sale.sellDate), 0
+    );
+    // 使用各筆成交日期的股數換算，並預留同一批次其他備份成交。
+    const canKeepBoth = Boolean(holding && currentById.has(id) && incomingIds.has(id) &&
+      !trades.some((sale) => sale.positionClosed) &&
+      addedQuantity <= holding.quantity * shareAdjustmentAfter(actions, holding.buyDate) /
+        shareAdjustmentAfter(sourceActions, holding.buyDate));
+    return {
+      ...group,
+      canKeepBoth,
+      key: JSON.stringify([group.local, group.backup].map((sales) =>
+        sales.map((sale) => [sale.id, sale.updatedAt ?? sale.createdAt]).sort()
+      )),
+    };
+  });
+  if (duplicates.some((conflict) =>
+    choices[conflict.key] !== "local" && choices[conflict.key] !== "backup" &&
+    !(choices[conflict.key] === "both" && conflict.canKeepBoth)
+  )) throw new SaleImportReviewRequired(duplicates);
+
+  const droppedLocal = new Set<string>();
+  const droppedBackup = new Set<string>();
+  for (const conflict of duplicates) {
+    const choice = choices[conflict.key];
+    if (choice === "local") for (const sale of conflict.backup) droppedBackup.add(sale.id);
+    if (choice === "backup") for (const sale of conflict.local) droppedLocal.add(sale.id);
+  }
+  const currentTrades = withoutSales(current, droppedLocal);
+  const incomingTrades = withoutSales(incoming, droppedBackup);
+  const sales = mergedSales.filter((sale) => !droppedLocal.has(sale.id) && !droppedBackup.has(sale.id));
   const currentClosed = new Set([
-    ...current.sales.map((sale) => sale.holdingId),
-    ...current.transactions.filter((event) => event.type === "sell").map((event) => event.holdingId),
+    ...currentTrades.sales.map((sale) => sale.holdingId),
+    ...currentTrades.transactions.filter((event) => event.type === "sell").map((event) => event.holdingId),
   ].filter((id) => !currentById.has(id)));
 
   const salesByHolding = new Map<string, SaleTransaction[]>();
@@ -137,8 +234,6 @@ export function mergePortfolioStorage(
     salesByHolding.set(sale.holdingId, records);
   }
 
-  const selectedHoldings = mergeRecords(current.holdings, incoming.holdings, (holding) => holding.updatedAt);
-  const selectedKeys = new Map(selectedHoldings.map((holding) => [holding.id, holdingGroupKey(holding)]));
   const holdings = selectedHoldings.flatMap((holding) => {
     const holdingSales = salesByHolding.get(holding.id) ?? [];
     const closedInBackup = !incomingIds.has(holding.id) && holdingSales.some((sale) =>
@@ -161,7 +256,14 @@ export function mergePortfolioStorage(
       sourceSaleIds.has(sale.id) ? quantity : quantity + sale.quantity * shareAdjustmentAfter(mergedBasis, sale.sellDate),
       0
     );
-    const quantity = holding.quantity * quantityRatio - soldQuantity;
+    // 持倉餘量包含來源端已扣除的成交。排除重複紀錄時，只回補被放棄的本側成交。
+    const rejected = fromCurrent ? droppedLocal : droppedBackup;
+    const restoredQuantity = source.sales.reduce((quantity, sale) =>
+      sale.holdingId === holding.id && rejected.has(sale.id)
+        ? quantity + sale.quantity * shareAdjustmentAfter(mergedBasis, sale.sellDate)
+        : quantity, 0
+    );
+    const quantity = holding.quantity * quantityRatio + restoredQuantity - soldQuantity;
     if (quantity <= Number.EPSILON * Math.max(holding.quantity, soldQuantity)) return [];
     const sourceActions = new Set(sourceBasis.map((action) => action.sourceEventId));
     const costReduction = mergedBasis.reduce((total, action) => {
@@ -210,6 +312,10 @@ export function mergePortfolioStorage(
       dailySummaries[date] = summary;
     }
   }
+  if (duplicates.length) {
+    const rejectedDates = mergedSales.filter((sale) => droppedLocal.has(sale.id) || droppedBackup.has(sale.id));
+    for (const sale of rejectedDates) delete dailySummaries[sale.sellDate];
+  }
   const currentHasData = current.holdings.length > 0 || current.loans.length > 0 ||
     current.transactions.length > 0 || current.sales.length > 0;
   return {
@@ -220,8 +326,8 @@ export function mergePortfolioStorage(
     sales,
     corporateActions,
     transactions: mergeRecords(
-      adjustedTransactions(current, corporateActions),
-      adjustedTransactions(incoming, corporateActions),
+      adjustedTransactions({ ...current, transactions: currentTrades.transactions }, corporateActions),
+      adjustedTransactions({ ...incoming, transactions: incomingTrades.transactions }, corporateActions),
       (event) => event.updatedAt
     ),
     transactionRevisions: mergeRecords(current.transactionRevisions, incoming.transactionRevisions),
@@ -241,7 +347,8 @@ export function mergePortfolioStorage(
 export function applyImportMode(
   current: PortfolioStorage,
   incoming: PortfolioStorage,
-  mode: PortfolioImportMode
+  mode: PortfolioImportMode,
+  choices?: SaleImportChoices
 ): PortfolioStorage {
   if (mode === "replace") {
     return {
@@ -253,7 +360,7 @@ export function applyImportMode(
       },
     };
   }
-  return mergePortfolioStorage(current, incoming);
+  return mergePortfolioStorage(current, incoming, choices);
 }
 
 export function buildExportFilename(date = new Date()): string {

@@ -1,7 +1,8 @@
+import { MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+import { linkSaleEvents } from "@/lib/portfolio/sale-events";
 import type {
   AssetType,
   PortfolioStorage,
-  SaleTransaction,
   StockMarket,
 } from "@/lib/types/holding";
 import {
@@ -9,6 +10,7 @@ import {
   endOfMonthIsoFromPrefix,
   parseIsoDate,
   startOfMonthIsoFromPrefix,
+  todayIsoDate,
   toIsoDate,
 } from "@/lib/date/iso-date";
 import { buildDailyInvestmentFinancingCosts } from "@/lib/loans/calculations";
@@ -335,24 +337,28 @@ export function buildPnlCalendar(
   const instruments = Array.from(instrumentById.values()).filter((instrument) =>
     matchesFilter(instrument, options.filter)
   );
-  const buyDatesByHolding = new Set(
-    storage.transactions
-      .filter((transaction) => transaction.type === "buy")
-      .map((transaction) => `${transaction.holdingId}:${transaction.date}`)
-  );
+  const buys = storage.transactions.filter((transaction) => transaction.type === "buy");
+  const buyDatesByHolding = new Set(buys.map((transaction) => `${transaction.holdingId}:${transaction.date}`));
+  const purchaseByHolding = new Map(buys.map((transaction) => [transaction.holdingId, transaction]));
   const contributionsByDate = new Map<string, DayAccumulator>();
+  const retentionStart = addDaysToIsoDate(todayIsoDate(), -MAX_PRICE_HISTORY_DAYS);
 
   for (const instrument of instruments) {
     const points = (storage.priceHistory[instrument.id] ?? [])
       .filter((point) => point.date <= options.asOfDate)
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    for (let index = 1; index < points.length; index += 1) {
+    const purchase = purchaseByHolding.get(instrument.id);
+    for (let index = 0; index < points.length; index += 1) {
       const previous = points[index - 1];
       const current = points[index];
       if (!current.date.startsWith(options.month)) continue;
       if (current.date < instrument.buyDate) continue;
       if (buyDatesByHolding.has(`${instrument.id}:${current.date}`)) continue;
+      const openingInterval = purchase && purchase.price !== undefined &&
+        purchase.date < current.date && (!previous || previous.date < purchase.date) &&
+        (purchase.date >= retentionStart || previous !== undefined);
+      if (!previous && !openingInterval) continue;
 
       const quantity = quantityAtEndOfDay(
         storage,
@@ -362,8 +368,9 @@ export function buildPnlCalendar(
       );
       if (quantity <= 0) continue;
       // 首筆持有期間行情不可從建倉前收盤價起算，否則會計入尚未持有時的漲跌。
-      const previousPrice =
-        previous.date < instrument.buyDate && instrument.buyPrice !== undefined
+      const previousPrice = openingInterval
+        ? purchase.price!
+        : previous.date < instrument.buyDate && instrument.buyPrice !== undefined
           ? instrument.buyPrice
           : previous.price;
       const contribution = (current.price - previousPrice) * quantity;
@@ -377,34 +384,39 @@ export function buildPnlCalendar(
       detail.pnl += contribution;
       detail.marketPnl += contribution;
       addPriceRange(detail, previousPrice, current.price, quantity);
-      notePriceGap(detail, previous.date < instrument.buyDate ? instrument.buyDate : previous.date, current.date);
+      if (openingInterval) {
+        if (!detail.gapStartDate || purchase.date < detail.gapStartDate) detail.gapStartDate = purchase.date;
+      } else {
+        notePriceGap(detail, previous.date < instrument.buyDate ? instrument.buyDate : previous.date, current.date);
+      }
       contributionsByDate.set(current.date, existing);
     }
   }
 
-  for (const transaction of storage.transactions) {
-    if (transaction.type !== "buy") continue;
+  for (const transaction of buys) {
     if (!matchesFilter(transaction, options.filter)) continue;
     if (!transaction.date.startsWith(options.month)) continue;
     if (transaction.date > options.asOfDate) continue;
     const quantity = transaction.quantity ?? 0;
     const buyPrice = transaction.price ?? 0;
-    if (quantity <= 0 || buyPrice <= 0) continue;
+    if (quantity <= 0 || buyPrice < 0) continue;
 
     const close = (storage.priceHistory[transaction.holdingId] ?? []).find(
       (point) => point.date === transaction.date
     );
-    if (!close) continue;
+    if (!close && transaction.fee === 0 && transaction.tax === 0) continue;
 
     const existing =
       contributionsByDate.get(transaction.date) ?? emptyDayAccumulator();
     const retainedQuantity = Math.min(quantity, quantityAtEndOfDay(
       storage, transaction.holdingId, transaction.date, quantity
     ));
-    const marketPnl = (close.price - buyPrice) * retainedQuantity;
+    const marketPnl = close ? (close.price - buyPrice) * retainedQuantity : 0;
     existing.pnl += marketPnl - transaction.fee - transaction.tax;
-    existing.baseValue += buyPrice * retainedQuantity;
-    existing.pricedHoldingIds.add(transaction.holdingId);
+    if (close) {
+      existing.baseValue += buyPrice * retainedQuantity;
+      existing.pricedHoldingIds.add(transaction.holdingId);
+    }
     existing.totalHoldingIds.add(transaction.holdingId);
     const instrument = instrumentById.get(transaction.holdingId)!;
     const detail = getContribution(existing, instrument);
@@ -412,19 +424,11 @@ export function buildPnlCalendar(
     detail.fee += transaction.fee;
     detail.tax += transaction.tax;
     detail.pnl += marketPnl - transaction.fee - transaction.tax;
-    if (retainedQuantity > 0) addPriceRange(detail, buyPrice, close.price, retainedQuantity);
+    if (close && retainedQuantity > 0) addPriceRange(detail, buyPrice, close.price, retainedQuantity);
     contributionsByDate.set(transaction.date, existing);
   }
 
-  const remainingSales = new Map<string, SaleTransaction>(storage.sales.map((sale) => [sale.id, sale]));
-  const salesByPositionDate = new Map<string, SaleTransaction[]>();
-  for (const sale of storage.sales) {
-    const key = `${sale.holdingId}:${sale.sellDate}`;
-    const sales = salesByPositionDate.get(key) ?? [];
-    sales.push(sale);
-    salesByPositionDate.set(key, sales);
-  }
-
+  const { linked: recordedSales, unlinkedSales } = linkSaleEvents(storage.sales, storage.transactions);
   for (const transaction of storage.transactions) {
     if (transaction.type !== "sell") continue;
     if (!matchesFilter(transaction, options.filter)) continue;
@@ -434,14 +438,7 @@ export function buildPnlCalendar(
     const sellPrice = transaction.price ?? 0;
     if (quantity <= 0 || sellPrice <= 0) continue;
 
-    const candidates = salesByPositionDate.get(`${transaction.holdingId}:${transaction.date}`) ?? [];
-    const sale = transaction.saleId
-      ? remainingSales.get(transaction.saleId)
-      : candidates.find((item) =>
-        remainingSales.has(item.id) && Math.abs(item.proceeds - quantity * sellPrice) < 0.01
-      );
-    if (sale) remainingSales.delete(sale.id);
-
+    const sale = recordedSales.get(transaction.id);
     const instrument = instrumentById.get(transaction.holdingId)!;
     const buyDate = sale?.buyDate ?? (instrument.knownBuyDate ? instrument.buyDate : undefined);
     const previous = (storage.priceHistory[transaction.holdingId] ?? [])
@@ -474,7 +471,7 @@ export function buildPnlCalendar(
     contributionsByDate.set(transaction.date, existing);
   }
 
-  for (const sale of remainingSales.values()) {
+  for (const sale of unlinkedSales) {
     if (sale.assetType === "property" || !matchesFilter(sale, options.filter)) continue;
     if (!sale.sellDate.startsWith(options.month) || sale.sellDate > options.asOfDate) continue;
     recordSaleWithoutPriorPrice(
@@ -556,7 +553,7 @@ export function buildPnlCalendar(
         gapStartDate,
         saleWithoutPriorPrice: saleWithoutPriorPrice || undefined,
         returnRate:
-          saleWithoutPriorPrice ? null : value.baseValue > 0 ? (value.pnl / value.baseValue) * 100 : 0,
+          saleWithoutPriorPrice ? null : value.baseValue > 0 ? (value.pnl / value.baseValue) * 100 : value.pnl === 0 ? 0 : null,
         pricedHoldingCount,
         totalHoldingCount,
         coverageRate:

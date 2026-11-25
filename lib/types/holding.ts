@@ -106,6 +106,8 @@ export interface SaleTransaction {
   /** 實際交易稅；舊紀錄可能未保存。 */
   tax?: number;
   createdAt: string;
+  /** 成交欄位固定，買入成本更正後更新此時間。 */
+  updatedAt?: string;
 }
 
 export type CorporateActionType =

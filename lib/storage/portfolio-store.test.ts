@@ -10,6 +10,7 @@ import {
   sellHolding,
   sellHoldings,
 } from "@/lib/storage/portfolio-store";
+import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 
 describe("portfolio transaction tracking", () => {
@@ -409,6 +410,56 @@ describe("portfolio transaction tracking", () => {
     expect(sellHolding(state, { ...sale, sellDate: "2026-11-31" })).toBe(state);
     expect(sellHoldings(state, [sale, { ...sale, id: second.id }])).toBe(state);
     expect(sellHolding(state, { ...sale, sellDate: first.buyDate }).sales).toHaveLength(1);
+  });
+
+
+  it("records a backdated sale in the units and cost of the execution day", () => {
+    let state = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "測試股票", quantity: 100,
+      buyDate: "2026-11-02", buyPrice: 100,
+    });
+    const id = state.holdings[0].id;
+    state = applyPriceUpdate(state, id, 100, "2026-11-05", "manual");
+    state = applyManualCorporateAction(state, {
+      holdingId: id, effectiveDate: "2026-11-10", actionType: "split", adjustmentRatio: 2,
+    });
+    const sale = { id, sellDate: "2026-11-06", quantity: 30, sellPrice: 110 };
+    expect(sellHolding(state, { ...sale, quantity: 101 })).toBe(state);
+    const remaining = sellHolding(state, sale);
+
+    expect(remaining.holdings[0].quantity).toBe(140);
+    expect(remaining.sales[0]).toMatchObject({ quantity: 30, buyPrice: 100, sellPrice: 110, realizedPnl: 300 });
+    expect(remaining.transactions.find((event) => event.type === "sell")).toMatchObject({ quantity: 60, price: 55 });
+    const history = buildPortfolioHistory(remaining);
+    expect(history.snapshotOn("2026-11-05")[0]?.quantity).toBe(100);
+    expect(history.snapshotOn("2026-11-06")[0]?.quantity).toBe(70);
+    expect(history.snapshotOn("2026-11-10")[0]?.quantity).toBe(140);
+    const calendar = buildPnlCalendar(remaining, {
+      month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" },
+    });
+    expect(calendar.days.find((day) => day.date === "2026-11-06")?.pnl).toBe(300);
+
+    const corrected = editHolding(remaining, { ...remaining.holdings[0], buyPrice: 55 });
+    expect(corrected.sales[0]).toMatchObject({ buyPrice: 110, realizedPnl: 0 });
+    expect(buildPortfolioHistory(corrected).snapshotOn("2026-11-05")[0]?.buyPrice).toBe(110);
+  });
+
+  it("reprices earlier sales after a purchase-cost correction while preserving execution and fees", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "測試股票", quantity: 100,
+      buyDate: "2026-11-02", buyPrice: 100,
+    });
+    const sold = sellHolding(initial, {
+      id: initial.holdings[0].id, sellDate: "2026-11-06", quantity: 40, sellPrice: 120, fee: 5, tax: 3,
+    });
+    const updated = editHolding(sold, { ...sold.holdings[0], buyPrice: 110 });
+    expect(updated.sales[0]).toMatchObject({
+      id: sold.sales[0].id, sellDate: "2026-11-06", quantity: 40, sellPrice: 120,
+      buyPrice: 110, costBasis: 4_400, proceeds: 4_800, fee: 5, tax: 3, realizedPnl: 392,
+    });
+    expect(updated.transactions.find((event) => event.type === "buy")?.price).toBe(110);
+    expect(updated.transactionRevisions.at(-1)?.previous.price).toBe(100);
+    expect(sold.sales[0].realizedPnl).toBe(792);
   });
 
 });

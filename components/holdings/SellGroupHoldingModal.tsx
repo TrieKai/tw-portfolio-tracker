@@ -5,6 +5,8 @@ import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
+import { holdingSaleTerms } from "@/lib/corporate-actions/adjustment";
+import { usePortfolio } from "@/providers/PortfolioProvider";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import { allocateFifoSell } from "@/lib/portfolio/holding-groups";
 import type { HoldingGroupWithMetrics } from "@/lib/portfolio/holding-groups";
@@ -21,6 +23,7 @@ export function SellGroupHoldingModal({
   onClose: () => void;
 }) {
   const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
+  const { storage: { corporateActions } } = usePortfolio();
   const unitLabel = getSellUnitLabel(group.assetType);
   const totalQty = group.quantity;
 
@@ -38,10 +41,21 @@ export function SellGroupHoldingModal({
     lot.buyDate < earliest ? lot.buyDate : earliest, group.lots[0].buyDate
   );
   const eligibleLots = useMemo(
-    () => group.lots.filter((lot) => lot.buyDate <= sellDate),
-    [group.lots, sellDate]
+    () => group.lots.filter((lot) => lot.buyDate <= sellDate).map((lot) => {
+      const terms = holdingSaleTerms(lot, corporateActions, sellDate);
+      return { ...lot, quantity: terms.quantity, buyPrice: terms.buyPrice };
+    }),
+    [corporateActions, group.lots, sellDate]
   );
   const availableOnDate = eligibleLots.reduce((sum, lot) => sum + lot.quantity, 0);
+
+  function changeSellDate(date: string) {
+    if (group.lots.some((lot) =>
+      holdingSaleTerms(lot, corporateActions, date).shareFactor !==
+      holdingSaleTerms(lot, corporateActions, sellDate).shareFactor
+    )) setSellPrice("");
+    setSellDate(date);
+  }
 
   const allocation = useMemo(() => {
     const qty = Number.parseFloat(quantity);
@@ -69,9 +83,9 @@ export function SellGroupHoldingModal({
     const proceeds = price * qty;
     const cost = allocation.reduce((s, a) => s + a.buyPrice * a.quantity, 0);
     const realizedPnl = proceeds - cost - feeAmount - taxAmount;
-    const isFullSell = qty >= totalQty;
+    const isFullSell = eligibleLots.length === group.lots.length && qty >= availableOnDate;
     return { proceeds, realizedPnl, isFullSell, cost };
-  }, [quantity, sellPrice, fee, tax, allocation, availableOnDate, totalQty]);
+  }, [quantity, sellPrice, fee, tax, allocation, availableOnDate, eligibleLots.length, group.lots.length]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -85,10 +99,6 @@ export function SellGroupHoldingModal({
 
     if (Number.isNaN(qty) || qty <= 0) {
       setError("請輸入有效賣出數量");
-      return;
-    }
-    if (qty > totalQty) {
-      setError(`賣出數量不可超過持有 ${totalQty} ${unitLabel}`);
       return;
     }
     if (Number.isNaN(price) || price <= 0) {
@@ -171,7 +181,6 @@ export function SellGroupHoldingModal({
               type="number"
               step="any"
               min="0"
-              max={totalQty}
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               className="input-field min-w-0 flex-1"
@@ -227,10 +236,11 @@ export function SellGroupHoldingModal({
             <div className="mt-1">
               <DatePicker
                 value={sellDate}
-                onChange={setSellDate}
+                onChange={changeSellDate}
                 min={earliestBuyDate}
                 max={todayIsoDate()}
               />
+              <p className="mt-1 text-xs text-muted">數量與單價以成交日為準。</p>
               <p className="mt-1 text-xs text-muted">當日可賣出 {availableOnDate} {unitLabel}</p>
             </div>
           </label>

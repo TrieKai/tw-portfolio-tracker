@@ -1,5 +1,7 @@
 "use client";
 
+import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
+import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { Modal } from "@/components/ui/Modal";
 import { useCallback, useRef, useState } from "react";
 import {
@@ -7,6 +9,9 @@ import {
   downloadPortfolioExport,
   readPortfolioImportFile,
   type PortfolioImportMode,
+  type SaleImportChoice,
+  type SaleImportChoices,
+  type SaleImportConflict,
 } from "@/lib/storage/portfolio-export";
 import type { PortfolioStorage } from "@/lib/types/holding";
 import { hasPortfolioData } from "@/lib/storage/parse-portfolio";
@@ -27,6 +32,8 @@ export function PortfolioDataPanel() {
     text: string;
   } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [conflicts, setConflicts] = useState<SaleImportConflict[]>([]);
+  const [choices, setChoices] = useState<SaleImportChoices>({});
   const [confirm, setConfirm] = useState<ImportConfirmState | null>(null);
 
   const handleExport = useCallback(() => {
@@ -52,6 +59,8 @@ export function PortfolioDataPanel() {
         return;
       }
 
+      setConflicts([]);
+      setChoices({});
       setConfirm({
         portfolio: parsed.portfolio,
         summary: describePortfolioStorage(parsed.portfolio),
@@ -65,9 +74,19 @@ export function PortfolioDataPanel() {
     if (!confirm || importing) return;
     setImporting(true);
     setMessage(null);
-    const saved = await importPortfolio(confirm.portfolio, confirm.mode);
+    const result = await importPortfolio(confirm.portfolio, confirm.mode, choices);
     setImporting(false);
-    if (!saved) {
+    if (result.status === "review") {
+      setConflicts(result.conflicts);
+      setChoices((previous) => Object.fromEntries(
+        result.conflicts.flatMap((conflict) =>
+          previous[conflict.key] && (previous[conflict.key] !== "both" || conflict.canKeepBoth)
+            ? [[conflict.key, previous[conflict.key]]] : []
+        )
+      ));
+      return;
+    }
+    if (result.status === "failed") {
       setMessage({ type: "error", text: "未能儲存備份資料。若本機資料已損毀，可選擇取代全部。也請確認瀏覽器儲存空間。" });
       return;
     }
@@ -76,7 +95,7 @@ export function PortfolioDataPanel() {
       text: confirm.mode === "replace" ? "已用備份取代資料。" : "備份已合併。",
     });
     setConfirm(null);
-  }, [confirm, importing, importPortfolio]);
+  }, [confirm, choices, importing, importPortfolio]);
 
   return (
     <>
@@ -139,8 +158,8 @@ export function PortfolioDataPanel() {
       </section>
 
       {confirm && (
-        <Modal labelledBy="import-confirm-title" onClose={() => setConfirm(null)}>
-          <div className="w-full max-w-md rounded-2xl border border-border bg-page p-5 shadow-xl">
+        <Modal labelledBy="import-confirm-title" onClose={importing ? undefined : () => setConfirm(null)}>
+          <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-page p-5 shadow-xl">
             <h2 id="import-confirm-title" className="text-lg font-semibold">
               確認匯入
             </h2>
@@ -187,12 +206,20 @@ export function PortfolioDataPanel() {
               </label>
             </fieldset>
 
+            {confirm.mode === "merge" && conflicts.length > 0 && (
+              <SaleReview
+                conflicts={conflicts}
+                choices={choices}
+                disabled={importing}
+                onChoose={(key, choice) => setChoices((previous) => ({ ...previous, [key]: choice }))}
+              />
+            )}
             {message?.type === "error" && <p role="alert" className="mt-3 text-sm text-loss">{message.text}</p>}
             <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
               <button
                 type="button"
                 onClick={runImport}
-                disabled={importing}
+                disabled={importing || (confirm.mode === "merge" && conflicts.some((conflict) => !choices[conflict.key]))}
                 className="touch-target rounded-lg bg-accent-button px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110"
               >
                 {importing ? "儲存中…" : "確認匯入"}
@@ -209,5 +236,57 @@ export function PortfolioDataPanel() {
         </Modal>
       )}
     </>
+  );
+}
+
+
+function SaleReview({
+  conflicts,
+  choices,
+  disabled,
+  onChoose,
+}: {
+  conflicts: SaleImportConflict[];
+  choices: SaleImportChoices;
+  disabled: boolean;
+  onChoose: (key: string, choice: SaleImportChoice) => void;
+}) {
+  const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
+  return (
+    <section className="mt-5 space-y-3" aria-labelledby="sale-review-title">
+      <h3 id="sale-review-title" className="font-semibold">核對疑似重複成交</h3>
+      <p role="status" className="text-sm text-muted">
+        同一批持倉出現日期、數量與單價相同的賣出紀錄。請確認要保留哪一邊的成交。
+      </p>
+      {conflicts.map((conflict, index) => {
+        const sale = conflict.local[0];
+        const options = [
+          { choice: "local" as const, label: "保留本機", sales: conflict.local },
+          { choice: "backup" as const, label: "保留備份", sales: conflict.backup },
+        ];
+        return (
+          <fieldset key={conflict.key} disabled={disabled} className="min-w-0 space-y-2 rounded-lg border border-border p-3">
+            <legend className="max-w-full break-words px-1 text-sm font-medium">{sale.name}（{sale.symbol}）</legend>
+            <p className="text-sm text-muted">
+              {sale.sellDate} · 每筆 {sale.quantity} {getSellUnitLabel(sale.assetType)} · {formatQuoteAmount(sale.sellPrice, sale.assetType)}
+            </p>
+            {options.map(({ choice, label, sales }) => (
+              <label key={choice} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg bg-surface-raised px-3 py-2 text-sm">
+                <input type="radio" name={`sale-conflict-${index}`} checked={choices[conflict.key] === choice}
+                  onChange={() => onChoose(conflict.key, choice)} />
+                <span>{label} · {sales.length} 筆 · 已實現 {formatAmount(sales.reduce((sum, item) => sum + item.realizedPnl, 0))}</span>
+              </label>
+            ))}
+            {conflict.canKeepBoth && (
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg bg-surface-raised px-3 py-2 text-sm">
+                <input type="radio" name={`sale-conflict-${index}`} checked={choices[conflict.key] === "both"}
+                  onChange={() => onChoose(conflict.key, "both")} />
+                <span>兩邊是不同成交，全部保留</span>
+              </label>
+            )}
+          </fieldset>
+        );
+      })}
+    </section>
   );
 }

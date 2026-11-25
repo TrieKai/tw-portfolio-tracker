@@ -10,7 +10,7 @@ import {
   normalizePortfolioStorage,
 } from "@/lib/storage/parse-portfolio";
 import { normalizeStockSymbol } from "@/lib/prices/stock-symbol";
-import { corporateActionAdjustmentRatio, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
+import { corporateActionAdjustmentRatio, costOnDate, holdingActions, holdingSaleTerms, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import type {
@@ -95,6 +95,11 @@ export async function commitPortfolio(
       };
     };
   });
+}
+
+function nextRecordTime(previous: string): string {
+  const timestamp = Date.parse(previous);
+  return new Date(Math.max(Date.now(), Number.isFinite(timestamp) ? timestamp + 1 : 0)).toISOString();
 }
 
 function newId(): string {
@@ -308,6 +313,29 @@ export function editHolding(
     };
   }
 
+  const costChanged = existingHolding.buyPrice !== input.buyPrice;
+  const dateChanged = existingHolding.buyDate !== input.buyDate;
+  const actions = holdingActions(state.corporateActions, existingHolding);
+  const now = nextRecordTime(existingHolding.updatedAt);
+  if (costChanged || dateChanged) {
+    next = {
+      ...next,
+      sales: next.sales.map((sale) => {
+        if (sale.holdingId !== input.id) return sale;
+        const buyPrice = costChanged ? Math.max(0, costOnDate(input.buyPrice, actions, sale.sellDate)) : sale.buyPrice;
+        const costBasis = buyPrice * sale.quantity;
+        return {
+          ...sale,
+          buyDate: input.buyDate,
+          buyPrice,
+          costBasis,
+          realizedPnl: sale.realizedPnl + (sale.costBasis - costBasis),
+          updatedAt: nextRecordTime(sale.updatedAt ?? sale.createdAt),
+        };
+      }),
+    };
+  }
+
   if (input.assetType === "property") return next;
   const originalTransaction = state.transactions.find(
     (transaction) =>
@@ -318,11 +346,10 @@ export function editHolding(
 
   const tradeChanged =
     instrumentChanged ||
-    existingHolding.buyPrice !== input.buyPrice ||
+    costChanged ||
     existingHolding.quantity !== input.quantity ||
-    existingHolding.buyDate !== input.buyDate ||
+    dateChanged ||
     (input.fee !== undefined && input.fee !== originalTransaction.fee);
-  const now = new Date().toISOString();
   // 編輯畫面上的數量是目前餘額；若曾部分賣出，只把餘額差額回推至原始交易。
   const correctedOpeningQuantity =
     (originalTransaction.quantity ?? existingHolding.quantity) +
@@ -335,7 +362,10 @@ export function editHolding(
     ...(originalTransaction.type === "buy"
       ? {
           date: input.buyDate,
-          price: input.buyPrice,
+          price: dateChanged || costChanged
+            ? Math.max(0, costOnDate(input.buyPrice, actions, input.buyDate)) /
+              shareAdjustmentAfter(actions, input.buyDate)
+            : originalTransaction.price,
           quantity: correctedOpeningQuantity,
           fee:
             input.fee !== undefined && Number.isFinite(input.fee) && input.fee > 0
@@ -343,7 +373,7 @@ export function editHolding(
               : originalTransaction.fee,
         }
       : { quantity: correctedOpeningQuantity }),
-    updatedAt: now,
+    updatedAt: nextRecordTime(originalTransaction.updatedAt),
   };
   next = {
     ...next,
@@ -383,9 +413,11 @@ export function editHolding(
 
 function buildSaleRecord(
   holding: Holding,
-  input: SellHoldingInput
+  input: SellHoldingInput,
+  buyPrice: number,
+  positionClosed: boolean
 ): SaleTransaction {
-  const costBasis = holding.buyPrice * input.quantity;
+  const costBasis = buyPrice * input.quantity;
   const proceeds = input.sellPrice * input.quantity;
   const fee =
     input.fee !== undefined && Number.isFinite(input.fee) && input.fee > 0
@@ -403,9 +435,9 @@ function buildSaleRecord(
     symbol: holding.symbol,
     market: holding.market,
     buyDate: holding.buyDate,
-    buyPrice: holding.buyPrice,
+    buyPrice,
     quantity: input.quantity,
-    positionClosed: input.quantity >= holding.quantity,
+    positionClosed,
     sellPrice: input.sellPrice,
     sellDate: input.sellDate,
     costBasis,
@@ -432,9 +464,11 @@ export function sellHolding(
   if (!Number.isFinite(qty) || qty <= 0) return state;
   if (!Number.isFinite(input.sellPrice) || input.sellPrice <= 0) return state;
   if (!parseIsoDate(input.sellDate) || input.sellDate < holding.buyDate || input.sellDate > todayIsoDate()) return state;
-  if (qty > holding.quantity) return state;
-
-  const sale = buildSaleRecord(holding, input);
+  const terms = holdingSaleTerms(holding, state.corporateActions, input.sellDate);
+  if (qty > terms.quantity || terms.quantity <= 0) return state;
+  const positionClosed = qty >= terms.quantity;
+  const quantityInCurrentUnits = positionClosed ? holding.quantity : qty * terms.shareFactor;
+  const sale = buildSaleRecord(holding, input, terms.buyPrice, positionClosed);
   let next: PortfolioStorage = {
     ...state,
     sales: [...state.sales, sale],
@@ -456,8 +490,8 @@ export function sellHolding(
           symbol: holding.symbol,
           market: holding.market,
           date: input.sellDate,
-          quantity: input.quantity,
-          price: input.sellPrice,
+          quantity: quantityInCurrentUnits,
+          price: input.sellPrice / terms.shareFactor,
           fee: sale.fee ?? 0,
           tax: sale.tax ?? 0,
           quality: "complete",
@@ -469,7 +503,7 @@ export function sellHolding(
     };
   }
 
-  if (qty >= holding.quantity) {
+  if (positionClosed) {
     return persistPnlSummariesForDates(removeHolding(next, input.id), [
       input.sellDate,
     ]);
@@ -477,7 +511,7 @@ export function sellHolding(
 
   return persistPnlSummariesForDates(
     updateHolding(next, input.id, {
-      quantity: holding.quantity - qty,
+      quantity: holding.quantity - quantityInCurrentUnits,
       lastError: undefined,
     }),
     [input.sellDate]
@@ -570,7 +604,7 @@ export function updateHolding(
     ...state,
     holdings: state.holdings.map((h) =>
       h.id === holdingId
-        ? { ...h, ...patch, updatedAt: new Date().toISOString() }
+        ? { ...h, ...patch, updatedAt: nextRecordTime(h.updatedAt) }
         : h
     ),
   };

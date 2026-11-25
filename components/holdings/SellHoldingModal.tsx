@@ -5,6 +5,8 @@ import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
+import { holdingSaleTerms } from "@/lib/corporate-actions/adjustment";
+import { usePortfolio } from "@/providers/PortfolioProvider";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import type { HoldingWithMetrics, SellHoldingInput } from "@/lib/types/holding";
 
@@ -18,6 +20,7 @@ export function SellHoldingModal({
   onClose: () => void;
 }) {
   const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
+  const { storage: { corporateActions } } = usePortfolio();
   const unitLabel = getSellUnitLabel(holding.assetType);
   const [quantity, setQuantity] = useState(String(holding.quantity));
   const [sellPrice, setSellPrice] = useState(
@@ -29,6 +32,15 @@ export function SellHoldingModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const terms = holdingSaleTerms(holding, corporateActions, sellDate);
+
+  function changeSellDate(date: string) {
+    if (holdingSaleTerms(holding, corporateActions, date).shareFactor !== terms.shareFactor) {
+      setSellPrice("");
+    }
+    setSellDate(date);
+  }
+
   const preview = useMemo(() => {
     const qty = Number.parseFloat(quantity);
     const price = Number.parseFloat(sellPrice);
@@ -37,18 +49,19 @@ export function SellHoldingModal({
     if (
       Number.isNaN(qty) ||
       qty <= 0 ||
+      qty > terms.quantity ||
       Number.isNaN(price) ||
       price <= 0
     ) {
       return null;
     }
     const proceeds = price * qty;
-    const cost = holding.buyPrice * qty;
+    const cost = terms.buyPrice * qty;
     if (!Number.isFinite(feeAmount) || !Number.isFinite(taxAmount)) return null;
     const realizedPnl = proceeds - cost - feeAmount - taxAmount;
-    const isFullSell = qty >= holding.quantity;
+    const isFullSell = qty >= terms.quantity;
     return { proceeds, realizedPnl, isFullSell };
-  }, [quantity, sellPrice, fee, tax, holding.buyPrice, holding.quantity]);
+  }, [quantity, sellPrice, fee, tax, terms.buyPrice, terms.quantity]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -64,16 +77,16 @@ export function SellHoldingModal({
       setError("請輸入有效賣出數量");
       return;
     }
-    if (qty > holding.quantity) {
-      setError(`賣出數量不可超過持有 ${holding.quantity} ${unitLabel}`);
-      return;
-    }
     if (Number.isNaN(price) || price <= 0) {
       setError("請輸入有效賣出價格");
       return;
     }
     if (!parseIsoDate(sellDate) || sellDate < holding.buyDate || sellDate > todayIsoDate()) {
       setError(`賣出日須介於買入日 ${holding.buyDate} 與今天之間。`);
+      return;
+    }
+    if (qty > terms.quantity) {
+      setError(`以成交日數量計算，最多可賣出 ${terms.quantity} ${unitLabel}。`);
       return;
     }
     if (!Number.isFinite(feeAmount) || feeAmount < 0) {
@@ -109,9 +122,9 @@ export function SellHoldingModal({
           賣出持倉
         </h3>
         <p className="text-sm text-muted">
-          {holding.name}（{holding.symbol}）· 持有 {holding.quantity}{" "}
+          {holding.name}（{holding.symbol}）· 當日可賣出 {terms.quantity}{" "}
           {unitLabel} · 成本均價{" "}
-          {formatQuoteAmount(holding.buyPrice, holding.assetType)}
+          {formatQuoteAmount(terms.buyPrice, holding.assetType)}
         </p>
 
         <label className="block text-sm">
@@ -123,7 +136,7 @@ export function SellHoldingModal({
               type="number"
               step="any"
               min="0"
-              max={holding.quantity}
+              max={terms.quantity}
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               className="input-field min-w-0 flex-1"
@@ -131,7 +144,8 @@ export function SellHoldingModal({
             />
             <button
               type="button"
-              onClick={() => setQuantity(String(holding.quantity))}
+              onClick={() => setQuantity(String(terms.quantity))}
+              disabled={terms.quantity <= 0}
               className="btn-secondary shrink-0 text-xs"
             >
               全部
@@ -161,10 +175,11 @@ export function SellHoldingModal({
             <div className="mt-1">
               <DatePicker
                 value={sellDate}
-                onChange={setSellDate}
+                onChange={changeSellDate}
                 min={holding.buyDate}
                 max={todayIsoDate()}
               />
+              <p className="mt-1 text-xs text-muted">數量與單價以成交日為準。</p>
             </div>
           </label>
         </div>

@@ -681,4 +681,61 @@ describe("buildPnlCalendar", () => {
     expect(calendar.days.find((day) => day.date === "2026-11-06")?.saleWithoutPriorPrice).toBeUndefined();
   });
 
+
+  it("adds the purchase-to-first-quote interval and reconciles to the same-month sale", () => {
+    const held = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", name: "測試股票", symbol: "2330", quantity: 100,
+      buyDate: "2026-11-02", buyPrice: 100,
+    });
+    const id = held.holdings[0].id;
+    const quoted = applyPriceUpdate(held, id, 115, "2026-11-05", "manual");
+    const sold = sellHolding(quoted, { id, quantity: 100, sellPrice: 120, sellDate: "2026-11-06" });
+    const calendar = buildPnlCalendar(sold, {
+      month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" },
+    });
+
+    expect(calendar.days).toMatchObject([
+      { date: "2026-11-05", gapStartDate: "2026-11-02", pnl: 1500, quality: "estimated" },
+      { date: "2026-11-06", pnl: 500, quality: "complete" },
+    ]);
+    expect(calendar.summary.pnl).toBe(sold.sales[0].realizedPnl);
+    expect(calendar.summary.gainDayCount).toBe(1);
+  });
+
+  it("does not attribute the first quote to units already sold without a previous close", () => {
+    const held = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", name: "測試股票", symbol: "2330", quantity: 100,
+      buyDate: "2026-11-02", buyPrice: 100, fee: 25,
+    });
+    const id = held.holdings[0].id;
+    const sold = sellHolding(held, { id, quantity: 40, sellPrice: 110, sellDate: "2026-11-04" });
+    const quoted = applyPriceUpdate(sold, id, 115, "2026-11-05", "manual");
+    const calendar = buildPnlCalendar(quoted, {
+      month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" },
+    });
+
+    expect(calendar.days).toMatchObject([
+      { date: "2026-11-02", pnl: -25, returnRate: null },
+      { date: "2026-11-04", pnl: 400, saleWithoutPriorPrice: true },
+      { date: "2026-11-05", pnl: 900, gapStartDate: "2026-11-02" },
+    ]);
+    expect(calendar.summary.pnl).toBe(1275);
+  });
+
+
+  it("cannot treat the oldest retained quote as the initial valuation of a pre-retention purchase", () => {
+    const state = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", name: "測試股票", symbol: "2330", quantity: 100,
+      buyDate: "2018-01-02", buyPrice: 100,
+    });
+    state.priceHistory[state.holdings[0].id] = [
+      { date: "2026-11-05", price: 130, source: "manual" },
+      { date: "2026-11-06", price: 131, source: "manual" },
+    ];
+    const calendar = buildPnlCalendar(state, {
+      month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" },
+    });
+    expect(calendar.days.map(({ date, pnl }) => [date, pnl])).toEqual([["2026-11-06", 100]]);
+  });
+
 });
