@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { addCashDividend, addHolding, applyCorporateAction, applyManualCorporateAction, applyPriceUpdate, editHolding, removeHolding, sellHolding } from "@/lib/storage/portfolio-store";
 import { addLoan, recordLoanBalance, recordLoanPayment, recordLoanRateChange, restartLoan, setLoanStatus } from "@/lib/storage/loan-store";
-import { applyImportMode, mergePortfolioStorage, parseImportPayload, PortfolioImportReviewRequired } from "@/lib/storage/portfolio-export";
+import { applyImportMode, buildExportFile, mergePortfolioStorage, parseImportPayload, PortfolioImportReviewRequired } from "@/lib/storage/portfolio-export";
 import { calculateLoanSnapshot, calculatePortfolioLoanSummary, estimateLoanFinancingCostForPeriod } from "@/lib/loans/calculations";
 import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
@@ -105,6 +105,65 @@ describe("backup merging", () => {
     expect(merged.loans[0].status).toBe("paid_off");
     expect(merged.settings.autoUpdateEnabled).toBe(true);
     expect(merged.priceHistory[id].map((point) => point.price)).toEqual([104, 108]);
+  });
+
+  it("restores a legacy quote that was superseded by an older manual entry", () => {
+    const initial = savedPortfolio();
+    const id = initial.holdings[0].id;
+    const priced = applyPriceUpdate(initial, id, 130, "2026-11-24", "api");
+    const backfill = applyPriceUpdate(priced, id, 120, "2026-11-20", "manual");
+    const old: typeof backfill = { ...backfill, holdings: [{
+      ...backfill.holdings[0], currentPrice: 120, priceDate: "2026/11/20", priceSource: "manual",
+    }] };
+    const parsed = parseImportPayload(JSON.parse(JSON.stringify(buildExportFile(old))));
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.portfolio.holdings[0]).toMatchObject({ currentPrice: 130, priceDate: "2026-11-24", priceSource: "api" });
+    expect(parsed.portfolio.priceHistory[id]).toEqual(backfill.priceHistory[id]);
+    expect(applyImportMode(initial, parsed.portfolio, "replace").holdings[0]).toEqual(parsed.portfolio.holdings[0]);
+  });
+
+  it("keeps the daily totals from the chosen close when two backups disagree", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2022-11-07T10:00:00.000Z"));
+      const initial = addHolding(defaultPortfolioStorage(), {
+        assetType: "stock", name: "台積電", symbol: "2330", quantity: 100, buyPrice: 100, buyDate: "2022-11-02",
+      });
+      const id = initial.holdings[0].id;
+      const sold = sellHolding(initial, { id, quantity: 60, sellPrice: 115, sellDate: "2022-11-04" });
+      const local = applyPriceUpdate(applyPriceUpdate(sold, id, 110, "2022-11-03", "manual"), id, 120, "2022-11-07", "api");
+      vi.setSystemTime(new Date("2022-11-07T11:00:00.000Z"));
+      const backup = applyPriceUpdate(applyPriceUpdate(sold, id, 105, "2022-11-03", "api"), id, 120, "2022-11-07", "api");
+      const merged = mergePortfolioStorage(local, backup);
+      expect(merged.priceHistory[id].map(({ price }) => price)).toEqual([110, 120]);
+      const pnl = (state: typeof local) => Object.values(state.pnlTracking.dailySummaries)
+        .sort((a, b) => a.date.localeCompare(b.date)).map(({ date, pnl }) => [date, pnl]);
+      expect(pnl(merged)).toEqual([["2022-11-03", 1000], ["2022-11-04", 300], ["2022-11-07", 400]]);
+
+      vi.setSystemTime(new Date("2026-11-25T10:00:00.000Z"));
+      const expired = applyPriceUpdate(merged, id, 130, "2026-11-25", "api");
+      for (const restored of [expired, mergePortfolioStorage(expired, backup)]) {
+        const days = buildPnlCalendar(restored, {
+          month: "2022-11", asOfDate: "2022-11-30", filter: { kind: "investment" },
+        }).days.map(({ date, pnl }) => [date, pnl]);
+        expect(days).toEqual(pnl(local));
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rebuilds the daily totals when merging quotes that only exist on separate devices", () => {
+    const initial = savedPortfolio();
+    const id = initial.holdings[0].id;
+    const later = applyPriceUpdate(initial, id, 130, "2026-11-24", "api");
+    const earlier = applyPriceUpdate(initial, id, 110, "2026-11-23", "manual");
+    expect(later.pnlTracking.dailySummaries["2026-11-24"].pnl).toBe(3000);
+    for (const merged of [mergePortfolioStorage(later, earlier), mergePortfolioStorage(earlier, later)]) {
+      expect(merged.pnlTracking.dailySummaries["2026-11-23"].pnl).toBe(1000);
+      expect(merged.pnlTracking.dailySummaries["2026-11-24"].pnl).toBe(2000);
+      expect(merged.holdings[0]).toMatchObject({ currentPrice: 130, priceDate: "2026-11-24" });
+    }
   });
 
   it("does not restore a holding already sold in full", () => {
@@ -241,9 +300,29 @@ describe("backup merging", () => {
       expect(once.holdings[0].quantity).toBe(70);
       expect(once.sales[0].id).toBe(backup.sales[0].id);
       expect(once.transactions.filter((event) => event.type === "sell")).toHaveLength(1);
+      const exported = parseImportPayload(JSON.parse(JSON.stringify(buildExportFile(once))));
+      if (!exported.ok) throw new Error(exported.error);
+      const restored = applyImportMode(initial, exported.portfolio, "replace");
+      for (const repeated of [mergePortfolioStorage(restored, local), mergePortfolioStorage(local, restored)]) {
+        expect(repeated.holdings[0].quantity).toBe(70);
+        expect(repeated.sales).toEqual(backup.sales);
+        expect(repeated.transactions.filter((event) => event.type === "sell")).toHaveLength(1);
+      }
       const twice = mergePortfolioStorage(local, backup, { [conflict.key]: "both" });
       expect(twice.holdings[0].quantity).toBe(40);
       expect(twice.sales).toHaveLength(2);
+      once.saleImportReviews![0].reviewedAt = "2026-11-24T00:00:00.000Z";
+      twice.saleImportReviews![0].reviewedAt = "2026-11-25T00:00:00.000Z";
+      for (const merged of [mergePortfolioStorage(once, twice), mergePortfolioStorage(twice, once)]) {
+        expect(merged.holdings[0].quantity).toBe(40);
+        expect(merged.sales.map(({ id }) => id).sort()).toEqual(twice.sales.map(({ id }) => id).sort());
+        expect(mergePortfolioStorage(merged, local).holdings[0].quantity).toBe(40);
+      }
+      const third = sellHolding(initial, { ...sale, fee: 20 });
+      expect(() => mergePortfolioStorage(restored, third)).toThrow(PortfolioImportReviewRequired);
+      expect(parseImportPayload({ ...once, saleImportReviews: [{ ...once.saleImportReviews![0],
+        excludedIds: once.saleImportReviews![0].includedIds }] }))
+        .toMatchObject({ ok: false, error: expect.stringContaining("saleImportReviews[0].excludedIds") });
     }
   });
 
@@ -284,7 +363,77 @@ describe("backup merging", () => {
         expect(merged.sales.map((sale) => sale.id)).toEqual([soldId]);
         expect(buildPortfolioHistory(merged).snapshotOn("2026-11-03")[0]?.quantity).toBe(100);
         expect(merged.transactions.filter((event) => event.type === "sell")).toHaveLength(1);
+        const repeated = mergePortfolioStorage(merged, choice === "local" ? backup : local);
+        expect(repeated.holdings[0].quantity).toBe(quantity);
+        expect(repeated.sales).toEqual(merged.sales);
       }
+    }
+  });
+
+  it("keeps a partial position when rejecting a full sale that follows a shared sale", () => {
+    const initial = savedPortfolio();
+    const id = initial.holdings[0].id;
+    const common = sellHolding(initial, { id, quantity: 20, sellPrice: 110, sellDate: "2026-11-05" });
+    const closed = sellHolding(common, { id, quantity: 80, sellPrice: 120, sellDate: "2026-11-06" });
+    const partial = sellHolding(common, { id, quantity: 50, sellPrice: 125, sellDate: "2026-11-07" });
+    expect(closed.holdings).toEqual([]);
+    try {
+      mergePortfolioStorage(closed, partial);
+      throw new Error("Missing oversell review");
+    } catch (error) {
+      if (!(error instanceof PortfolioImportReviewRequired)) throw error;
+      const [conflict] = error.conflicts;
+      expect(conflict).toMatchObject({ kind: "oversold", capacity: 100, mergedQuantity: 150 });
+      const chosen = mergePortfolioStorage(closed, partial, { [conflict.key]: "backup" });
+      expect(chosen.holdings[0]?.quantity).toBe(30);
+      expect(chosen.sales).toEqual(partial.sales);
+      expect(chosen.transactions.filter((event) => event.type === "sell")).toHaveLength(2);
+      expect(mergePortfolioStorage(closed, chosen).holdings[0]?.quantity).toBe(30);
+      expect(mergePortfolioStorage(chosen, closed).holdings[0]?.quantity).toBe(30);
+    }
+  });
+
+  it("keeps expired calendar totals calculated from the chosen trades when an old backup is merged again", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2022-11-07T10:00:00.000Z"));
+      const opened = addHolding(defaultPortfolioStorage(), {
+        assetType: "stock", name: "台積電", symbol: "2330", quantity: 100,
+        buyPrice: 100, buyDate: "2022-11-02",
+      });
+      const id = opened.holdings[0].id;
+      const priced = applyPriceUpdate(opened, id, 110, "2022-11-03", "manual");
+      const sell = { id, quantity: 60, sellPrice: 115, sellDate: "2022-11-04" };
+      const kept = applyPriceUpdate(sellHolding(priced, sell), id, 120, "2022-11-07", "manual");
+      vi.setSystemTime(new Date("2022-11-07T11:00:00.000Z"));
+      const rejected = applyPriceUpdate(sellHolding(priced, { ...sell, quantity: 70 }), id, 120, "2022-11-07", "manual");
+      vi.setSystemTime(new Date("2026-11-25T10:00:00.000Z"));
+      const local = applyPriceUpdate(kept, id, 130, "2026-11-25", "manual");
+      const backup = applyPriceUpdate(rejected, id, 130, "2026-11-25", "manual");
+      const days = (state: typeof local) => buildPnlCalendar(state, {
+        month: "2022-11", asOfDate: "2022-11-30", filter: { kind: "investment" },
+      }).days.map(({ date, pnl }) => [date, pnl]);
+      expect(local.priceHistory[id].map((point) => point.date)).toEqual(["2026-11-25"]);
+      expect(days(local)).toEqual([["2022-11-03", 1000], ["2022-11-04", 300], ["2022-11-07", 400]]);
+      expect(days(backup)).toEqual([["2022-11-03", 1000], ["2022-11-04", 350], ["2022-11-07", 300]]);
+      try {
+        mergePortfolioStorage(local, backup);
+        throw new Error("Missing oversell review");
+      } catch (error) {
+        if (!(error instanceof PortfolioImportReviewRequired)) throw error;
+        const [conflict] = error.conflicts;
+        expect(conflict).toMatchObject({ kind: "oversold" });
+        const merged = mergePortfolioStorage(local, backup, { [conflict.key]: "local" });
+        expect(merged.holdings[0].quantity).toBe(40);
+        const recalculated = days({ ...merged, priceHistory: kept.priceHistory,
+          pnlTracking: { ...merged.pnlTracking, dailySummaries: {} } });
+        expect(recalculated).toEqual(days(local).slice(1));
+        expect(days(merged)).toEqual(days(local));
+        expect(days(mergePortfolioStorage(merged, backup))).toEqual(days(local));
+        expect(days(mergePortfolioStorage(backup, merged))).toEqual(days(local));
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 

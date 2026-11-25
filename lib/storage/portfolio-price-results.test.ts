@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultPortfolioStorage } from "./parse-portfolio";
-import { addHolding, applyPriceUpdate, removeHolding, updateHolding, updateSettings } from "./portfolio-store";
+import { addHolding, applyPriceUpdate, removeHolding, sellHolding, updateHolding, updateSettings } from "./portfolio-store";
 import { applyHistoryResults, applyQuoteResults } from "./portfolio-price-results";
+import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
+import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
+import { addDaysToIsoDate } from "@/lib/date/iso-date";
 import type { BatchUpdateItemResult } from "@/lib/types/price-api";
 
 function portfolio() {
@@ -82,5 +85,48 @@ describe("行情回應只更新發出請求時的標的", () => {
     ]);
     expect(retry.next).toBe(result.next);
     expect(retry).toMatchObject({ writtenPoints: 0, skippedPoints: 2, dates: [] });
+  });
+
+  it.each(["自動匯入", "手動輸入"])("%s較早的行情後，保留最新現價並重算受影響的成交與估值", (mode) => {
+    const initial = portfolio();
+    const [holding] = initial.holdings;
+    const id = holding.id;
+    const previous = applyPriceUpdate(initial, id, 110, "2026-11-18", "api");
+    const sold = sellHolding(previous, { id, quantity: 2, sellPrice: 125, sellDate: "2026-11-23" });
+    const priced = applyPriceUpdate(sold, id, 130, "2026-11-24", "api");
+    expect(priced.pnlTracking.dailySummaries["2026-11-23"].pnl).toBe(30);
+    expect(priced.pnlTracking.dailySummaries["2026-11-24"].pnl).toBe(160);
+
+    const updated = mode === "手動輸入"
+      ? applyPriceUpdate(priced, id, 120, "2026-11-20", "manual")
+      : applyHistoryResults(priced, priced.holdings, [{ holdingId: id, ok: true,
+        points: [{ date: "2026-11-20", price: 120, source: "api" }] }]).next;
+    expect(updated.holdings[0]).toMatchObject({ currentPrice: 130, priceDate: "2026-11-24", priceSource: "api" });
+    expect(updated.pnlTracking.dailySummaries["2026-11-23"].pnl).toBe(10);
+    expect(updated.pnlTracking.dailySummaries["2026-11-24"].pnl).toBe(80);
+
+    vi.setSystemTime(new Date("2030-11-25T12:00:00+08:00"));
+    const expired = applyPriceUpdate(updated, id, 140, "2030-11-25", "api");
+    expect(expired.priceHistory[id].map((point) => point.date)).toEqual(["2030-11-25"]);
+    const calendar = buildPnlCalendar(expired, {
+      month: "2026-11", asOfDate: "2026-11-30", filter: { kind: "investment" },
+    });
+    expect(calendar.days.map(({ date, pnl }) => [date, pnl])).toEqual([
+      ["2026-11-18", 100], ["2026-11-20", 100], ["2026-11-23", 10], ["2026-11-24", 80],
+    ]);
+  });
+
+  it("拒絕超出保留期的回填，並接受保留期首日和既有現價日期", () => {
+    const initial = portfolio();
+    const id = initial.holdings[0].id;
+    const priced = applyPriceUpdate(initial, id, 130, "2026-11-24", "api");
+    const earliest = priceHistoryStartDate();
+    const before = addDaysToIsoDate(earliest, -1);
+    expect(applyPriceUpdate(priced, id, 100, before, "manual")).toBe(priced);
+    const backfilled = applyPriceUpdate(priced, id, 105, earliest, "manual");
+    expect(backfilled.priceHistory[id][0]).toEqual({ date: earliest, price: 105, source: "manual" });
+    expect(backfilled.holdings[0]).toEqual(priced.holdings[0]);
+    const corrected = applyPriceUpdate(backfilled, id, 133, "2026-11-24", "manual");
+    expect(corrected.holdings[0]).toMatchObject({ currentPrice: 133, priceDate: "2026-11-24", priceSource: "manual" });
   });
 });

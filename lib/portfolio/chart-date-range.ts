@@ -1,6 +1,10 @@
 /** 趨勢圖時間區間 */
-import { toIsoDate } from "@/lib/date/iso-date";
+import { addDaysToIsoDate, todayIsoDate, toIsoDate } from "@/lib/date/iso-date";
 import { MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+
+export function priceHistoryStartDate(today = todayIsoDate()): string {
+  return addDaysToIsoDate(today, -MAX_PRICE_HISTORY_DAYS);
+}
 
 export type ChartRange =
   | "7d"

@@ -49,5 +49,12 @@ export function getSellUnitLabel(assetType: AssetType): string {
 }
 
 export function getManualPriceLabel(assetType: AssetType): string {
-  return assetType === "property" ? "現估總價" : "最新價格 / 淨值";
+  switch (assetType) {
+    case "stock":
+      return "價格";
+    case "fund":
+      return "淨值";
+    case "property":
+      return "估價總額";
+  }
 }

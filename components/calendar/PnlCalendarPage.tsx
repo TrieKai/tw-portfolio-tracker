@@ -32,7 +32,7 @@ import {
   type TradingCalendarRow,
 } from "@/lib/date/trading-calendar";
 import { canImportHistory } from "@/lib/client/holding-history";
-import { MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { formatFinancingCostImpact } from "@/lib/loans/format";
 import {
@@ -288,7 +288,7 @@ export function calendarHistoryRange(month: string, today: string) {
   const monthEnd = endOfMonthIsoFromPrefix(month);
   // 保留上月底的估值基準，首個交易日也能計算日損益。
   const previousMonth = shiftMonth(month, -1);
-  const earliest = addDaysToIsoDate(today, -MAX_PRICE_HISTORY_DAYS);
+  const earliest = priceHistoryStartDate(today);
   const startDate = `${previousMonth}-01`;
   return {
     startDate: startDate < earliest ? earliest : startDate,

@@ -1,3 +1,5 @@
+import type { RecordImportReview } from "@/lib/types/portfolio-import";
+
 export const LOAN_TYPES = [
   "personal_credit",
   "securities_margin",
@@ -56,13 +58,7 @@ export interface LoanPaymentRecord {
   createdAt: string;
 }
 
-/** 保留匯入時核對過的繳款選擇，舊備份重匯時可辨認已排除的紀錄。 */
-export interface LoanPaymentImportReview {
-  id: string;
-  reviewedAt: string;
-  includedIds: string[];
-  excludedIds: string[];
-}
+export type LoanPaymentImportReview = RecordImportReview;
 
 export interface LoanRateChange {
   id: string;

@@ -15,6 +15,12 @@ const nonnegative: Check = (value) => typeof value === "number" && Number.isFini
 const positive: Check = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
 const date: Check = (value) => typeof value === "string" && !!parseIsoDate(value);
 const compatibleDate: Check = (value) => typeof value === "string" && !!normalizeToIsoDate(value);
+const isoTimestamp: Check = (value) => {
+  if (typeof value !== "string") return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && value.length === 24 && new Date(time).toISOString() === value;
+};
+const idList: Check = (value) => Array.isArray(value) && value.every(id) && new Set(value).size === value.length;
 const boolean: Check = (value) => typeof value === "boolean";
 const optional = (check: Check): Check => (value) => value === undefined || check(value);
 const oneOf = (...allowed: string[]): Check => (value) => typeof value === "string" && allowed.includes(value);
@@ -114,6 +120,7 @@ export function invalidPortfolioField(raw: Record<string, unknown>): string | un
   const collections = {
     holdings: holdingFields,
     sales: saleFields,
+    saleImportReviews: { id, reviewedAt: isoTimestamp, includedIds: idList, excludedIds: idList },
     corporateActions: actionFields,
     transactions: transactionFields,
     transactionRevisions: { id, transactionId: id, correctedAt: string, previous: isRecord, reason: optional(string) },
@@ -131,6 +138,11 @@ export function invalidPortfolioField(raw: Record<string, unknown>): string | un
       if (invalid) return invalid;
       if (ids.has(record.id)) return `${path}.id（重複）`;
       ids.add(record.id);
+      if (key === "saleImportReviews") {
+        const included = new Set<string>(record.includedIds);
+        if (record.excludedIds.some((saleId: string) => included.has(saleId))) return `${path}.excludedIds`;
+        if (included.size + record.excludedIds.length === 0) return path;
+      }
       if (key === "transactionRevisions") {
         const invalidPrevious = invalidField(record.previous, transactionFields, `${path}.previous`);
         if (invalidPrevious) return invalidPrevious;

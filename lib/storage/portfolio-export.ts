@@ -2,9 +2,13 @@ import { corporateActionAdjustmentRatio, costOnDate, holdingActions, shareAdjust
 import { reconcileCorporateDividends } from "@/lib/portfolio/corporate-dividends";
 import { linkSaleEvents } from "@/lib/portfolio/sale-events";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
-import type { CorporateActionRecord, Holding, HoldingRemoval, PortfolioStorage, PortfolioTransaction, SaleTransaction } from "@/lib/types/holding";
-import { mergePriceHistory, repairCorporateActionPriceHistory } from "@/lib/storage/portfolio-store";
+import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
+import { pnlDatesUsingChangedPrices, restoreLatestQuote } from "@/lib/portfolio/price-history";
+import type { CorporateActionRecord, Holding, HoldingRemoval, PortfolioStorage, PortfolioTransaction, PricePoint, SaleTransaction } from "@/lib/types/holding";
+import { mergePriceHistory, persistPnlSummariesForDates, repairCorporateActionPriceHistory } from "@/lib/storage/portfolio-store";
+import { mergeDailyPnlSummaries } from "@/lib/storage/merge-daily-pnl";
 import type { Loan, LoanPaymentRecord } from "@/lib/types/loan";
+import type { RecordImportReview } from "@/lib/types/portfolio-import";
 import { decodePortfolioStorage, hasPortfolioData, type PortfolioDecodeResult } from "@/lib/storage/parse-portfolio";
 import { isRecord } from "@/lib/storage/portfolio-shape";
 
@@ -96,6 +100,18 @@ function instrumentKeys(state: PortfolioStorage) {
     keys.set(id, holdingGroupKey({ ...item, id }));
   }
   return keys;
+}
+
+function pnlDatesUsingDifferentPrices(points: PricePoint[], source: PricePoint[], dates: string[], earliest: string) {
+  const sourceByDate = new Map(source.map(({ date, price }) => [date, price]));
+  const changed = new Set<string>();
+  for (const { date, price } of points) {
+    const previous = sourceByDate.get(date);
+    // 早於保留期且缺少行情無法證明摘要有誤。若仍有存檔，直接比對復權後的價格。
+    if (previous === undefined ? date >= earliest :
+      Math.abs(price - previous) > 8 * Number.EPSILON * Math.max(price, previous)) changed.add(date);
+  }
+  return pnlDatesUsingChangedPrices(points, changed, dates);
 }
 
 function adjustedTransactions(
@@ -191,13 +207,19 @@ export function isPortfolioImportChoiceAllowed(conflict: PortfolioImportConflict
 }
 
 function withoutSales(state: PortfolioStorage, rejected: Set<string>) {
-  if (!rejected.size) return { sales: state.sales, transactions: state.transactions };
+  const affectedHoldings = new Set<string>();
+  if (!rejected.size) return { sales: state.sales, transactions: state.transactions, affectedHoldings };
   const { linked } = linkSaleEvents(state.sales, state.transactions);
   return {
-    sales: state.sales.filter((sale) => !rejected.has(sale.id)),
+    sales: state.sales.filter((sale) => {
+      if (!rejected.has(sale.id)) return true;
+      affectedHoldings.add(sale.holdingId);
+      return false;
+    }),
     transactions: state.transactions.filter((event) =>
       !rejected.has(event.saleId ?? linked.get(event.id)?.id ?? "")
     ),
+    affectedHoldings,
   };
 }
 
@@ -205,6 +227,32 @@ function acquisitionVersions(state: PortfolioStorage) {
   return new Map(state.transactions
     .filter((event) => event.type === "buy" || event.type === "opening_balance")
     .map((event) => [event.holdingId, event.updatedAt]));
+}
+
+function compareImportReviews(a: RecordImportReview, b: RecordImportReview) {
+  return a.reviewedAt.localeCompare(b.reviewedAt) || a.id.localeCompare(b.id);
+}
+
+function excludedByReviews(reviews: RecordImportReview[]) {
+  const excluded = new Set<string>();
+  for (const review of reviews) {
+    for (const id of review.includedIds) excluded.delete(id);
+    for (const id of review.excludedIds) excluded.add(id);
+  }
+  return excluded;
+}
+
+function appendImportReview(reviews: RecordImportReview[], includedIds: string[], excludedIds: string[]) {
+  const previous = reviews.at(-1);
+  const previousTime = previous ? Date.parse(previous.reviewedAt) : 0;
+  // 跨裝置時鐘有偏差時，本次核對仍應排在已知的決定之後。
+  const reviewedAt = new Date(Math.max(Date.now(), previousTime + 1)).toISOString();
+  includedIds.sort();
+  excludedIds.sort();
+  const id = JSON.stringify([includedIds, excludedIds]);
+  const existing = reviews.findIndex((review) => review.id === id);
+  if (existing >= 0) reviews.splice(existing, 1);
+  reviews.push({ id, reviewedAt, includedIds, excludedIds });
 }
 
 function reviewLoanPayments(
@@ -215,14 +263,8 @@ function reviewLoanPayments(
   conflicts: LoanPaymentImportConflict[]
 ): Loan {
   if (!loan.paymentHistory?.length) return loan;
-  const reviews = [...(loan.paymentImportReviews ?? [])].sort((a, b) =>
-    a.reviewedAt.localeCompare(b.reviewedAt) || a.id.localeCompare(b.id)
-  );
-  const excludedIds = new Set<string>();
-  for (const review of reviews) {
-    for (const id of review.includedIds) excludedIds.delete(id);
-    for (const id of review.excludedIds) excludedIds.add(id);
-  }
+  const reviews = [...(loan.paymentImportReviews ?? [])].sort(compareImportReviews);
+  const excludedIds = excludedByReviews(reviews);
 
   const groups = new Map<string, { local: LoanPaymentRecord[]; backup: LoanPaymentRecord[] }>();
   if (localIds?.size && backupIds?.size) {
@@ -248,14 +290,10 @@ function reviewLoanPayments(
     conflicts.push(conflict);
     const choice = choices[key];
     if (!Array.isArray(choice) || !isPortfolioImportChoiceAllowed(conflict, choice)) continue;
-    const includedIds = [...choice].sort();
+    const includedIds = [...choice];
     const included = new Set(includedIds);
     const excluded = ids.filter((id) => !included.has(id));
-    const previousReview = reviews.at(-1);
-    const previousTime = previousReview ? Date.parse(previousReview.reviewedAt) : 0;
-    // 沿用先前的核對順序，避免裝置時鐘較慢時覆寫本次決定。
-    const reviewedAt = new Date(Math.max(Date.now(), previousTime + 1)).toISOString();
-    reviews.push({ id: JSON.stringify([includedIds, excluded]), reviewedAt, includedIds, excludedIds: excluded });
+    appendImportReview(reviews, includedIds, excluded);
     for (const id of excluded) excludedIds.add(id);
   }
   const payments = loan.paymentHistory.filter((payment) => !excludedIds.has(payment.id));
@@ -431,8 +469,13 @@ export function mergePortfolioStorage(
   const selectedKeys = new Map(selectedHoldings.map((holding) => [holding.id, holdingGroupKey(holding)]));
   const selectedById = new Map(selectedHoldings.map((holding) => [holding.id, holding]));
   const mergedSales = mergeRecords(current.sales, incoming.sales, (sale) => sale.updatedAt ?? sale.createdAt);
+  const saleImportReviews = mergeRecords(current.saleImportReviews ?? [], incoming.saleImportReviews ?? [],
+    (review) => review.reviewedAt).sort(compareImportReviews);
+  const dropped = excludedByReviews(saleImportReviews);
+  const isRetained = (sale: SaleTransaction) => !dropped.has(sale.id);
 
-  const duplicates: SaleImportConflict[] = duplicateSaleGroups(current.sales, incoming.sales).map((group) => {
+  const duplicateGroups = duplicateSaleGroups(current.sales.filter(isRetained), incoming.sales.filter(isRetained));
+  const duplicates: SaleImportConflict[] = duplicateGroups.map((group) => {
     const id = group.local[0].holdingId;
     const holding = selectedById.get(id);
     const fromCurrent = holding && currentById.get(id) === holding;
@@ -441,12 +484,15 @@ export function mergePortfolioStorage(
     const actions = holding ? holdingActions(corporateActions, holding) : [];
     const sourceActions = holding ? holdingActions(source.corporateActions, holding) : [];
     const trades = mergedSales.filter((sale) => sale.holdingId === id);
-    const addedQuantity = trades.reduce((sum, sale) =>
-      sourceIds.has(sale.id) ? sum : sum + sale.quantity * shareAdjustmentAfter(actions, sale.sellDate), 0
-    );
+    const addedQuantity = trades.reduce((sum, sale) => {
+      const wasSold = sourceIds.has(sale.id);
+      if (wasSold === isRetained(sale)) return sum;
+      const quantity = sale.quantity * shareAdjustmentAfter(actions, sale.sellDate);
+      return wasSold ? sum - quantity : sum + quantity;
+    }, 0);
     // 使用各筆成交日期的股數換算，並預留同一批次其他備份成交。
     const canKeepBoth = Boolean(holding && currentById.has(id) && incomingIds.has(id) &&
-      !trades.some((sale) => sale.positionClosed) &&
+      !trades.some((sale) => sale.positionClosed && isRetained(sale)) &&
       addedQuantity <= holding.quantity * shareAdjustmentAfter(actions, holding.buyDate) /
         shareAdjustmentAfter(sourceActions, holding.buyDate));
     return {
@@ -462,16 +508,17 @@ export function mergePortfolioStorage(
     throw new PortfolioImportReviewRequired(initialConflicts);
   }
 
-  const droppedLocal = new Set<string>();
-  const droppedBackup = new Set<string>();
   const decide = (conflict: SaleImportConflict) => {
     const choice = choices[conflict.key];
-    if (choice === "local") for (const sale of conflict.backup) droppedBackup.add(sale.id);
-    if (choice === "backup") for (const sale of conflict.local) droppedLocal.add(sale.id);
+    const localIds = conflict.local.map((sale) => sale.id);
+    const backupIds = conflict.backup.map((sale) => sale.id);
+    const included = choice === "local" ? localIds : choice === "backup" ? backupIds : [...localIds, ...backupIds];
+    const excluded = choice === "local" ? backupIds : choice === "backup" ? localIds : [];
+    appendImportReview(saleImportReviews, included, excluded);
+    for (const id of excluded) dropped.add(id);
   };
   for (const conflict of duplicates) decide(conflict);
-  const surviving = () => mergedSales.filter((sale) => !droppedLocal.has(sale.id) && !droppedBackup.has(sale.id));
-  const provisionalSales = surviving();
+  const provisionalSales = mergedSales.filter(isRetained);
   const oversold: SaleImportConflict[] = [];
   const archivedOpenings = new Map(mergeRecords(
     adjustedTransactions(current, corporateActions),
@@ -520,13 +567,14 @@ export function mergePortfolioStorage(
     throw new PortfolioImportReviewRequired([...initialConflicts, ...oversold]);
   }
   for (const conflict of oversold) decide(conflict);
-  const currentTrades = withoutSales(current, droppedLocal);
-  const incomingTrades = withoutSales(incoming, droppedBackup);
-  const sales = surviving();
+  const currentTrades = withoutSales(current, dropped);
+  const incomingTrades = withoutSales(incoming, dropped);
+  const sales = mergedSales.filter(isRetained);
+  // 來源若已放棄一筆賣出，僅憑該側沒有持倉，無法判斷保留的成交是否已出清。
   const currentClosed = new Set([
     ...currentTrades.sales.map((sale) => sale.holdingId),
     ...currentTrades.transactions.filter((event) => event.type === "sell").map((event) => event.holdingId),
-  ].filter((id) => !currentById.has(id)));
+  ].filter((id) => !currentById.has(id) && !currentTrades.affectedHoldings.has(id)));
 
   const salesByHolding = new Map<string, SaleTransaction[]>();
   for (const sale of sales) {
@@ -538,9 +586,9 @@ export function mergePortfolioStorage(
   const mergedCosts = new Map<string, { holding: Holding; cost: number; actions: CorporateActionRecord[] }>();
   const holdings = selectedHoldings.flatMap((holding) => {
     const holdingSales = salesByHolding.get(holding.id) ?? [];
-    const closedInBackup = !incomingIds.has(holding.id) && holdingSales.some((sale) =>
-      incomingSalesIds.has(sale.id) && sale.positionClosed === undefined && sale.createdAt >= holding.updatedAt
-    );
+    const closedInBackup = !incomingIds.has(holding.id) && !incomingTrades.affectedHoldings.has(holding.id) &&
+      holdingSales.some((sale) => incomingSalesIds.has(sale.id) &&
+        sale.positionClosed === undefined && sale.createdAt >= holding.updatedAt);
     const fromCurrent = currentById.get(holding.id) === holding;
     const sourceSaleIds = fromCurrent ? currentSalesIds : incomingSalesIds;
     const source = fromCurrent ? current : incoming;
@@ -556,9 +604,8 @@ export function mergePortfolioStorage(
       0
     );
     // 持倉餘量包含來源端已扣除的成交。排除重複紀錄時，只回補被放棄的本側成交。
-    const rejected = fromCurrent ? droppedLocal : droppedBackup;
     const restoredQuantity = source.sales.reduce((quantity, sale) =>
-      sale.holdingId === holding.id && rejected.has(sale.id)
+      sale.holdingId === holding.id && dropped.has(sale.id)
         ? quantity + sale.quantity * shareAdjustmentAfter(mergedBasis, sale.sellDate)
         : quantity, 0
     );
@@ -601,7 +648,6 @@ export function mergePortfolioStorage(
   });
 
   const localSales = new Map(current.sales.map((sale) => [sale.id, sale]));
-  const repricedDates = new Set<string>();
   const repricedSales = sales.map((sale) => {
     const cost = mergedCosts.get(sale.holdingId);
     if (!cost || holdingGroupKey({ ...sale, id: sale.holdingId }) !== holdingGroupKey(cost.holding)) return sale;
@@ -622,10 +668,23 @@ export function mergePortfolioStorage(
     const updatedAt = Number.isFinite(correctionTime)
       ? new Date(Math.max(correctionTime, Number.isFinite(previousTime) ? previousTime + 1 : 0)).toISOString()
       : sale.updatedAt;
-    repricedDates.add(sale.sellDate);
     return { ...sale, buyPrice, costBasis, realizedPnl: sale.realizedPnl + (sale.costBasis - costBasis), updatedAt };
   });
 
+  const transactions = mergeManualDividends(mergeRecords(
+    adjustedTransactions({ ...current, transactions: currentTrades.transactions }, corporateActions),
+    adjustedTransactions({ ...incoming, transactions: incomingTrades.transactions }, corporateActions),
+    (event) => event.updatedAt
+  ));
+  const pnlEventDates = new Map<string, string[]>();
+  for (const event of transactions) {
+    if (event.type !== "sell" && event.type !== "cash_dividend") continue;
+    const dates = pnlEventDates.get(event.holdingId) ?? [];
+    dates.push(event.date);
+    pnlEventDates.set(event.holdingId, dates);
+  }
+  const changedPrices = { current: new Set<string>(), incoming: new Set<string>() };
+  const earliest = priceHistoryStartDate();
   let priceHistory: PortfolioStorage["priceHistory"] = {};
   for (const holdingId of new Set([...Object.keys(current.priceHistory), ...Object.keys(incoming.priceHistory)])) {
     const removed = removals.get(holdingId);
@@ -646,41 +705,34 @@ export function mergePortfolioStorage(
       });
     };
     const existing = rebase(current, currentKeys.get(holdingId));
+    const imported = rebase(incoming, incomingKeys.get(holdingId));
     if (existing.length) priceHistory[holdingId] = existing;
     const existingDates = new Set(existing.map((point) => point.date));
-    const added = rebase(incoming, incomingKeys.get(holdingId)).filter((point) => !existingDates.has(point.date));
+    const added = imported.filter((point) => !existingDates.has(point.date));
     if (added.length) priceHistory = mergePriceHistory(priceHistory, holdingId, added);
+    if (!instrument || instrument.startsWith("property:")) continue;
+    const points = priceHistory[holdingId] ?? [];
+    const dates = pnlEventDates.get(holdingId) ?? [];
+    for (const date of pnlDatesUsingDifferentPrices(points, existing, dates, earliest)) changedPrices.current.add(date);
+    for (const date of pnlDatesUsingDifferentPrices(points, imported, dates, earliest)) changedPrices.incoming.add(date);
   }
 
-  const dailySummaries = { ...current.pnlTracking.dailySummaries };
-  for (const [date, summary] of Object.entries(incoming.pnlTracking.dailySummaries)) {
-    if (!dailySummaries[date] || summary.computedAt > dailySummaries[date].computedAt) {
-      dailySummaries[date] = summary;
-    }
-  }
+  const dailySummaries = mergeDailyPnlSummaries(current, incoming, repricedSales, corporateActions, changedPrices);
   for (const [id, removal] of removals) {
     for (const point of priceHistory[id] ?? []) {
       if (point.date >= removal.removedOn) delete dailySummaries[point.date];
     }
   }
-  for (const date of repricedDates) delete dailySummaries[date];
-  if (droppedLocal.size || droppedBackup.size) {
-    const rejectedDates = mergedSales.filter((sale) => droppedLocal.has(sale.id) || droppedBackup.has(sale.id));
-    for (const sale of rejectedDates) delete dailySummaries[sale.sellDate];
-  }
   const currentHasData = hasPortfolioData(current);
   const result: PortfolioStorage = {
     version: 2,
-    holdings,
+    holdings: holdings.map((holding) => restoreLatestQuote(holding, priceHistory[holding.id])),
     holdingRemovals: [...removals.values()],
     ...mergedLoans,
     sales: repricedSales,
+    ...(saleImportReviews.length ? { saleImportReviews } : {}),
     corporateActions,
-    transactions: mergeManualDividends(mergeRecords(
-      adjustedTransactions({ ...current, transactions: currentTrades.transactions }, corporateActions),
-      adjustedTransactions({ ...incoming, transactions: incomingTrades.transactions }, corporateActions),
-      (event) => event.updatedAt
-    )),
+    transactions,
     transactionRevisions: mergeRecords(current.transactionRevisions, incoming.transactionRevisions),
     pnlTracking: {
       startedAt: current.pnlTracking.startedAt || incoming.pnlTracking.startedAt,
@@ -695,7 +747,9 @@ export function mergePortfolioStorage(
   };
   const reconciled = reconcileCorporateDividends(result);
   for (const date of reconciled.dates) delete dailySummaries[date];
-  return reconciled.storage;
+  const recalculate = [...new Set([...changedPrices.current, ...changedPrices.incoming])]
+    .filter((date) => !dailySummaries[date]);
+  return persistPnlSummariesForDates(reconciled.storage, recalculate);
 }
 
 export function applyImportMode(

@@ -3,8 +3,9 @@
 import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
-import { todayIsoDate } from "@/lib/date/iso-date";
+import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { getManualPriceLabel } from "@/lib/portfolio/asset-labels";
+import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
 import type { AssetType } from "@/lib/types/holding";
 
 export function ManualPriceModal({
@@ -30,17 +31,24 @@ export function ManualPriceModal({
   const [date, setDate] = useState(defaultDate ?? todayIsoDate());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const today = todayIsoDate();
+  const earliest = priceHistoryStartDate(today);
+  const historical = defaultPrice !== undefined && !!defaultDate && !!date && date < defaultDate;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
     const n = Number.parseFloat(price);
-    if (Number.isNaN(n) || n <= 0) {
+    if (!Number.isFinite(n) || n <= 0) {
       setError("請輸入有效價格");
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      setError("日期格式應為 YYYY-MM-DD");
+    if (!parseIsoDate(date) || date > today) {
+      setError("請選擇今天或更早的價格日期。");
+      return;
+    }
+    if (historical && date < earliest) {
+      setError(`歷史價格僅保留最近三年，請選擇 ${earliest} 或之後的日期。`);
       return;
     }
     setSaving(true);
@@ -70,7 +78,10 @@ export function ManualPriceModal({
             step="any"
             min="0"
             value={price}
-            onChange={(e) => setPrice(e.target.value)}
+            onChange={(e) => {
+              setPrice(e.target.value);
+              setError(null);
+            }}
             className="input-field mt-1"
             required
           />
@@ -81,13 +92,23 @@ export function ManualPriceModal({
           <div className="mt-1">
             <DatePicker
               value={date}
-              onChange={setDate}
-              max={todayIsoDate()}
+              onChange={(value) => {
+                setDate(value);
+                setError(null);
+              }}
+              max={today}
+              required
             />
           </div>
         </label>
 
-        {error && <p role="alert" className="text-sm text-rose-500">{error}</p>}
+        {historical && date >= earliest && (
+          <p role="status" className="text-sm text-muted">
+            將補入歷史價格。{assetType === "property" ? "最新估價" : "現價"}日期仍為{" "}
+            <time dateTime={defaultDate} className="whitespace-nowrap tabular-nums">{defaultDate}</time>。
+          </p>
+        )}
+        {error && <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">{error}</p>}
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-secondary">

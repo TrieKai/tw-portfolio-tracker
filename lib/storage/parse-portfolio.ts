@@ -1,4 +1,5 @@
 import { normalizeToIsoDate } from "@/lib/date/iso-date";
+import { restoreLatestQuote } from "@/lib/portfolio/price-history";
 import type {
   Holding,
   PortfolioSettings,
@@ -532,7 +533,10 @@ export function decodePortfolioStorage(
     ...removal, holding: normalizeHoldingDates(removal.holding),
   }));
   const removedIds = new Set(holdingRemovals.map(({ holding }) => holding.id));
-  const normalizedHoldings = parsed.holdings.filter((holding) => !removedIds.has(holding.id)).map(normalizeHoldingDates);
+  const priceHistory = normalizePriceHistoryMap(parsed.priceHistory ?? {});
+  const normalizedHoldings = parsed.holdings.filter((holding) => !removedIds.has(holding.id)).map((holding) =>
+    restoreLatestQuote(normalizeHoldingDates(holding), priceHistory[holding.id])
+  );
   const hasLoanCollection = Object.prototype.hasOwnProperty.call(
     migrated,
     "loans"
@@ -573,11 +577,7 @@ export function decodePortfolioStorage(
     holdingRemovals,
     loans,
     loanRevisions,
-    priceHistory: normalizePriceHistoryMap(
-      parsed.priceHistory && typeof parsed.priceHistory === "object"
-        ? parsed.priceHistory
-        : {}
-    ),
+    priceHistory,
     sales: Array.isArray(parsed.sales) ? parsed.sales : [],
     corporateActions: Array.isArray(parsed.corporateActions)
       ? parsed.corporateActions
@@ -626,6 +626,7 @@ export function hasPortfolioData(state: PortfolioStorage): boolean {
     (state.holdingRemovals?.length ?? 0) > 0 ||
     state.loans.length > 0 ||
     state.sales.length > 0 ||
+    (state.saleImportReviews?.length ?? 0) > 0 ||
     state.corporateActions.length > 0 || state.transactions.length > 0 ||
     state.loanRevisions.length > 0 || state.transactionRevisions.length > 0 ||
     Object.values(state.priceHistory).some((points) => points.length > 0) ||

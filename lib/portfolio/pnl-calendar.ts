@@ -1,4 +1,4 @@
-import { MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
 import { linkSaleEvents } from "@/lib/portfolio/sale-events";
 import type {
   AssetType,
@@ -10,7 +10,6 @@ import {
   endOfMonthIsoFromPrefix,
   parseIsoDate,
   startOfMonthIsoFromPrefix,
-  todayIsoDate,
   toIsoDate,
 } from "@/lib/date/iso-date";
 import { buildDailyInvestmentFinancingCosts } from "@/lib/loans/calculations";
@@ -346,7 +345,7 @@ export function buildPnlCalendar(
   const buyDatesByHolding = new Set(buys.map((transaction) => `${transaction.holdingId}:${transaction.date}`));
   const purchaseByHolding = new Map(buys.map((transaction) => [transaction.holdingId, transaction]));
   const contributionsByDate = new Map<string, DayAccumulator>();
-  const retentionStart = addDaysToIsoDate(todayIsoDate(), -MAX_PRICE_HISTORY_DAYS);
+  const retentionStart = priceHistoryStartDate();
 
   for (const instrument of instruments) {
     const points = (storage.priceHistory[instrument.id] ?? [])

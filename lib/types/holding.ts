@@ -6,6 +6,7 @@
  */
 
 import type { Loan, LoanRevision } from "@/lib/types/loan";
+import type { RecordImportReview } from "@/lib/types/portfolio-import";
 
 /** 資產大類：台股 / 境內基金 / 房子 */
 export type AssetType = "stock" | "fund" | "property";
@@ -262,6 +263,7 @@ export interface PortfolioStorage {
   priceHistory: PriceHistoryMap;
   /** 賣出紀錄（依 createdAt 追加；展示時依 sellDate 排序） */
   sales: SaleTransaction[];
+  saleImportReviews?: RecordImportReview[];
   /** 已處理公司行動，避免同一事件重複套用 */
   corporateActions: CorporateActionRecord[];
   /** 損益日曆使用的不可變交易事件。 */

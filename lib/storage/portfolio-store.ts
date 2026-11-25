@@ -3,8 +3,10 @@
  * 匿名模式僅寫入本機；登入 Google 時另由 API 同步至雲端，本機仍作快取。
  */
 
-import { PORTFOLIO_STORAGE_KEY, MAX_PRICE_HISTORY_DAYS } from "@/lib/portfolio/constants";
+import { PORTFOLIO_STORAGE_KEY } from "@/lib/portfolio/constants";
 import { normalizeToIsoDate, parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
+import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
+import { pnlDatesUsingChangedPrices } from "@/lib/portfolio/price-history";
 import {
   defaultPortfolioStorage,
   normalizePortfolioStorage,
@@ -111,7 +113,7 @@ function newId(): string {
   return `h-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function persistPnlSummariesForDates(
+export function persistPnlSummariesForDates(
   state: PortfolioStorage,
   dates: string[]
 ): PortfolioStorage {
@@ -153,6 +155,19 @@ function persistPnlSummariesForDates(
       dailySummaries,
     },
   };
+}
+
+function persistPricePnlSummaries(state: PortfolioStorage, holding: Holding, changedDates: string[]): PortfolioStorage {
+  if (holding.assetType === "property") return state;
+  const eventDates = state.transactions.filter((event) => event.holdingId === holding.id &&
+    (event.type === "sell" || event.type === "cash_dividend")).map((event) => event.date);
+  const affected = pnlDatesUsingChangedPrices(state.priceHistory[holding.id] ?? [], new Set(changedDates), eventDates);
+  if (!affected.size) return state;
+  const dailySummaries = { ...state.pnlTracking.dailySummaries };
+  for (const date of affected) delete dailySummaries[date];
+  return persistPnlSummariesForDates({
+    ...state, pnlTracking: { ...state.pnlTracking, dailySummaries },
+  }, [...affected]);
 }
 
 function hasHandledCorporateAction(
@@ -510,8 +525,27 @@ export function sellHolding(
   const afterSale = positionClosed
     ? { ...next, holdings: next.holdings.filter((holding) => holding.id !== input.id) }
     : updateHolding(next, input.id, { quantity: holding.quantity - quantityInCurrentUnits, lastError: undefined });
+  if (holding.assetType === "property") return afterSale;
+
   const reconciled = reconcileCorporateDividends(afterSale, input.id);
-  return persistPnlSummariesForDates(reconciled.storage, [input.sellDate, ...reconciled.dates]);
+  const affectedDates = new Set([input.sellDate, ...reconciled.dates]);
+  for (const point of afterSale.priceHistory[input.id] ?? []) {
+    if (point.date > input.sellDate) affectedDates.add(point.date);
+  }
+  for (const event of afterSale.transactions) {
+    if (event.holdingId === input.id && event.date > input.sellDate &&
+        (event.type === "sell" || event.type === "cash_dividend")) {
+      affectedDates.add(event.date);
+    }
+  }
+  // 回填會改變後續股數；重算成交與估值日，並移除已無行情可核對的舊摘要。
+  const retentionStart = priceHistoryStartDate();
+  const dailySummaries = Object.fromEntries(Object.entries(reconciled.storage.pnlTracking.dailySummaries)
+    .filter(([date]) => !affectedDates.has(date) && (date < input.sellDate || date >= retentionStart)));
+  return persistPnlSummariesForDates({
+    ...reconciled.storage,
+    pnlTracking: { ...reconciled.storage.pnlTracking, dailySummaries },
+  }, [...affectedDates]);
 }
 
 /** 一次套用多筆賣出（例如合併標的 FIFO 分攤），只持久化一次 */
@@ -639,10 +673,8 @@ export function appendPricePoint(
     a.date.localeCompare(b.date)
   );
 
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - MAX_PRICE_HISTORY_DAYS);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
-  const trimmed = merged.filter((p) => p.date >= cutoffStr);
+  const earliest = priceHistoryStartDate();
+  const trimmed = merged.filter((p) => p.date >= earliest);
 
   return { ...priceHistory, [holdingId]: trimmed };
 }
@@ -876,7 +908,11 @@ export function applyPriceUpdate(
   source: PriceSource,
   extra?: { name?: string; market?: StockMarket; clearError?: boolean }
 ): PortfolioStorage {
-  const isoDate = normalizeToIsoDate(priceDate) ?? priceDate;
+  const holding = state.holdings.find((item) => item.id === holdingId);
+  const isoDate = normalizeToIsoDate(priceDate);
+  if (!holding || !isoDate) return state;
+  const historical = holding.currentPrice !== undefined && !!holding.priceDate && isoDate < holding.priceDate;
+  if (historical && isoDate < priceHistoryStartDate()) return state;
   const point = adjustPointForCorporateActions(state, holdingId, {
     date: isoDate,
     price,
@@ -897,8 +933,8 @@ export function applyPriceUpdate(
     ...(extra?.clearError ? { lastError: undefined } : {}),
   };
 
-  next = updateHolding(next, holdingId, patch);
-  return persistPnlSummariesForDates(next, [isoDate]);
+  if (!historical) next = updateHolding(next, holdingId, patch);
+  return persistPricePnlSummaries(next, holding, [isoDate]);
 }
 
 export function updateSettings(
@@ -1189,9 +1225,7 @@ export function applyImportedPriceHistory(
   const holding = state.holdings.find((item) => item.id === holdingId);
   if (!holding || points.length === 0) return state;
   const existing = new Map((state.priceHistory[holdingId] ?? []).map((point) => [point.date, point]));
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - MAX_PRICE_HISTORY_DAYS);
-  const earliest = cutoff.toISOString().slice(0, 10);
+  const earliest = priceHistoryStartDate();
   const sorted = points
     .filter((point) => point.date >= earliest && point.date !== holding.priceDate &&
       existing.get(point.date)?.source !== "manual")
@@ -1219,8 +1253,9 @@ export function applyImportedPriceHistory(
     });
   }
 
-  return persistPnlSummariesForDates(
+  return persistPricePnlSummaries(
     next,
+    holding,
     sorted.map((point) => point.date)
   );
 }

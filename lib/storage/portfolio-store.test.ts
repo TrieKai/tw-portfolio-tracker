@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
 import {
   addCashDividend,
@@ -15,6 +15,34 @@ import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { addDaysToIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 
 describe("portfolio transaction tracking", () => {
+  it("refreshes saved later valuations after a backdated sale and keeps the corrected total after price expiry", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2022-11-07T10:00:00.000Z"));
+      const initial = addHolding(defaultPortfolioStorage(), {
+        assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2022-11-02",
+      });
+      const id = initial.holdings[0].id;
+      const priced = applyPriceUpdate(applyPriceUpdate(initial, id, 110, "2022-11-03", "manual"),
+        id, 120, "2022-11-07", "manual");
+      expect(priced.pnlTracking.dailySummaries["2022-11-07"].pnl).toBe(1000);
+      const sold = sellHolding(priced, { id, quantity: 60, sellPrice: 115, sellDate: "2022-11-04" });
+      expect(sold.pnlTracking.dailySummaries["2022-11-03"].pnl).toBe(1000);
+      expect(sold.pnlTracking.dailySummaries["2022-11-07"].pnl).toBe(400);
+      vi.setSystemTime(new Date("2026-11-25T10:00:00.000Z"));
+      const expired = applyPriceUpdate(sold, id, 130, "2026-11-25", "manual");
+      expect(expired.priceHistory[id].map((point) => point.date)).toEqual(["2026-11-25"]);
+      const calendar = buildPnlCalendar(expired, {
+        month: "2022-11", asOfDate: "2022-11-30", filter: { kind: "investment" },
+      });
+      expect(calendar.days.map(({ date, pnl }) => [date, pnl])).toEqual([
+        ["2022-11-03", 1000], ["2022-11-04", 300], ["2022-11-07", 400],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("leaves holdings and history intact until a company action takes effect", () => {
     const opened = addHolding(defaultPortfolioStorage(), {
       assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2020-01-02",
