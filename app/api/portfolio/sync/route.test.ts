@@ -61,4 +61,15 @@ describe("雲端寫入版本檢查", () => {
     expect((await update(existing.updatedAt)).status).toBe(401);
     expect(mocks.compareAndWrite).toHaveBeenCalledTimes(1);
   });
+
+  it("以格式錯誤拒絕損毀的紀錄，並在讀寫雲端之前回報位置", async () => {
+    const response = await PUT(new Request("http://localhost/api/portfolio/sync", {
+      method: "PUT", body: JSON.stringify({ portfolio: { ...portfolio, holdings: [null] } }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ success: false, code: "INVALID_BODY", error: expect.stringContaining("holdings[0]") });
+    expect(mocks.read).not.toHaveBeenCalled();
+    expect(mocks.compareAndWrite).not.toHaveBeenCalled();
+  });
 });

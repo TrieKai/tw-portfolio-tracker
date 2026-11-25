@@ -18,6 +18,7 @@ export function reconcileCorporateDividends(state: PortfolioStorage, holdingId?:
     byDate.set(key, records);
   }
   const lots = new Map(listDividendLots(state).map((lot) => [lot.id, lot]));
+  const removedIds = new Set((state.holdingRemovals ?? []).map(({ holding }) => holding.id));
   const manual = new Set(state.transactions
     .filter((event) => event.type === "cash_dividend" && event.source === "user")
     .map((event) => JSON.stringify([event.holdingId, event.date, event.amount])));
@@ -33,12 +34,14 @@ export function reconcileCorporateDividends(state: PortfolioStorage, holdingId?:
     );
     if (!dividend) return action;
     const lot = lots.get(action.holdingId);
-    if (!lot || holdingGroupKey(lot) !== holdingGroupKey({ ...action, id: lot.id })) return action;
-    const quantity = dividendShareCount(state, lot, action.effectiveDate);
-    if (quantity === null) return action;
+    const removed = removedIds.has(action.holdingId);
+    if (!removed && (!lot || holdingGroupKey(lot) !== holdingGroupKey({ ...action, id: lot.id }))) return action;
+    const quantity = !removed && lot ? dividendShareCount(state, lot, action.effectiveDate) : null;
+    if (quantity === null && !removed) return action;
 
-    const amount = quantity * action.cashDividend;
-    if (manual.has(JSON.stringify([lot.id, action.effectiveDate, amount]))) {
+    // 已移除批次保留先前入帳金額，仍比對備份中的重複紀錄。
+    const amount = quantity === null ? dividend.amount : quantity * action.cashDividend;
+    if (manual.has(JSON.stringify([action.holdingId, action.effectiveDate, amount]))) {
       dropped.add(dividend.id);
       dates.add(action.effectiveDate);
     } else if (amount !== dividend.amount || !dividend.corporateActionEventId) {
@@ -49,7 +52,7 @@ export function reconcileCorporateDividends(state: PortfolioStorage, holdingId?:
       dropped.add(duplicate.id);
       dates.add(action.effectiveDate);
     }
-    if (quantity === action.quantityBefore) return action;
+    if (quantity === null || quantity === action.quantityBefore) return action;
     const quantityAfter = quantity * corporateActionAdjustmentRatio(action);
     dates.add(action.effectiveDate);
     return {

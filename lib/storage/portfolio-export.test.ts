@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { addCashDividend, addHolding, applyManualCorporateAction, applyPriceUpdate, editHolding, sellHolding } from "@/lib/storage/portfolio-store";
+import { addCashDividend, addHolding, applyCorporateAction, applyManualCorporateAction, applyPriceUpdate, editHolding, removeHolding, sellHolding } from "@/lib/storage/portfolio-store";
 import { addLoan, recordLoanBalance, recordLoanPayment, recordLoanRateChange, restartLoan, setLoanStatus } from "@/lib/storage/loan-store";
 import { applyImportMode, mergePortfolioStorage, parseImportPayload, PortfolioImportReviewRequired } from "@/lib/storage/portfolio-export";
 import { calculateLoanSnapshot, calculatePortfolioLoanSummary, estimateLoanFinancingCostForPeriod } from "@/lib/loans/calculations";
 import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
-import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
+import { defaultPortfolioStorage, hasPortfolioData } from "@/lib/storage/parse-portfolio";
 
 function savedPortfolio() {
   const opened = addHolding(defaultPortfolioStorage(), {
@@ -21,6 +21,73 @@ function savedPortfolio() {
 }
 
 describe("backup merging", () => {
+  it("reports malformed entries in wrapped and bare backups before using their valid records", () => {
+    const portfolio = savedPortfolio();
+    const malformed = { ...portfolio, holdings: [...portfolio.holdings, null] };
+    for (const raw of [malformed, { app: "tw-portfolio-tracker", exportVersion: 1, portfolio: malformed }]) {
+      expect(parseImportPayload(raw)).toEqual({ ok: false, error: "資料欄位 holdings[1] 的格式無效。" });
+    }
+    expect(parseImportPayload({ ...portfolio, loans: [null] })).toMatchObject({ ok: false, error: expect.stringContaining("loans[0]") });
+    expect(parseImportPayload({ ...portfolio, loans: [{ ...portfolio.loans[0], paymentHistory: [null] }] }))
+      .toMatchObject({ ok: false, error: expect.stringContaining("loans[0].paymentHistory[0]") });
+    expect(parseImportPayload({ ...portfolio, sales: [null] })).toMatchObject({ ok: false, error: expect.stringContaining("sales[0]") });
+    expect(parseImportPayload({ ...portfolio, priceHistory: { sample: [{ date: "2026-11-07", price: "10", source: "manual" }] } }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('priceHistory["sample"][0].price') });
+    expect(parseImportPayload(portfolio)).toMatchObject({ ok: true, portfolio: JSON.parse(JSON.stringify(portfolio)) });
+  });
+
+  it("recognizes a backup with historical transactions and no remaining assets", () => {
+    const invested = savedPortfolio();
+    const archive = { ...defaultPortfolioStorage(), transactions: invested.transactions };
+    const parsed = parseImportPayload(archive);
+    expect(parsed.ok && hasPortfolioData(parsed.portfolio)).toBe(true);
+    expect(hasPortfolioData(defaultPortfolioStorage())).toBe(false);
+  });
+
+  it("keeps a removed lot out of old and repeat imports while preserving the actual financial records", () => {
+    const opened = savedPortfolio();
+    const holding = opened.holdings[0];
+    const sold = sellHolding(opened, { id: holding.id, quantity: 30, sellPrice: 115, sellDate: "2026-11-05" });
+    const paid = applyCorporateAction(sold, {
+      id: "retained-dividend", holdingId: holding.id, symbol: holding.symbol, market: "tse", name: holding.name,
+      type: "cash_dividend", effectiveDate: "2026-11-08", source: "twse", exDividendLabel: "除息",
+      stockDividendRatio: 0, subscriptionRatio: 0, cashDividend: 5, autoApplicable: true,
+    });
+    const priced = applyPriceUpdate(paid, holding.id, 120, "2026-11-10", "manual");
+    const removed = removeHolding(priced, holding.id, "2026-11-12");
+    const old = applyPriceUpdate(priced, holding.id, 135, "2026-11-13", "api");
+    expect(removed.holdingRemovals).toMatchObject([{ holding: { id: holding.id, quantity: 70 }, removedOn: "2026-11-12" }]);
+    const restored = parseImportPayload(JSON.parse(JSON.stringify(removed)));
+    if (!restored.ok) throw new Error(restored.error);
+    for (const [left, right] of [[restored.portfolio, old], [old, restored.portfolio]]) {
+      const merged = mergePortfolioStorage(left, right);
+      expect(merged.holdings).toEqual([]);
+      expect(merged.sales).toEqual(priced.sales);
+      expect(merged.transactions.find((event) => event.type === "cash_dividend")?.amount).toBe(350);
+      expect(merged.priceHistory[holding.id]).toEqual(expect.arrayContaining([expect.objectContaining({ date: "2026-11-10", price: 120 })]));
+      const history = buildPortfolioHistory(merged);
+      expect(history.snapshotOn("2026-11-10")[0]).toMatchObject({ quantity: 70, currentPrice: 120 });
+      expect(history.snapshotOn("2026-11-12")).toEqual([]);
+      const calendar = buildPnlCalendar(merged, { month: "2026-11", asOfDate: "2026-11-24", filter: { kind: "investment" } });
+      expect(calendar.days.find((day) => day.date === "2026-11-08")?.contributions[0]?.dividend).toBe(350);
+      expect(calendar.days.find((day) => day.date === "2026-11-13")).toBeUndefined();
+      expect(mergePortfolioStorage(merged, old).holdingRemovals).toHaveLength(1);
+      expect(mergePortfolioStorage(merged, old).holdings).toEqual([]);
+    }
+    expect(applyImportMode(restored.portfolio, old, "replace").holdings[0].id).toBe(holding.id);
+
+    const newPurchase = addHolding(restored.portfolio, { ...holding, quantity: 20, buyDate: "2026-11-14" });
+    expect(mergePortfolioStorage(newPurchase, old).holdings).toMatchObject([{ id: newPurchase.holdings[0].id, quantity: 20 }]);
+  });
+
+  it("keeps removal-only backups recognizable and trusts the removal when old data also has the lot", () => {
+    const added = addHolding(defaultPortfolioStorage(), { assetType: "property", symbol: "HOME", name: "房屋",
+      quantity: 1, buyPrice: 1_000_000, buyDate: "2026-11-02" });
+    const removed = removeHolding(added, added.holdings[0].id, "2026-11-12");
+    expect(removed.transactions).toEqual([]);
+    expect(hasPortfolioData(removed)).toBe(true);
+    expect(parseImportPayload({ ...removed, holdings: added.holdings })).toMatchObject({ ok: true, portfolio: { holdings: [] } });
+  });
   it("preserves newer records, preferences and the existing quote on a conflicting date", () => {
     const older = savedPortfolio();
     const id = older.holdings[0].id;
@@ -49,6 +116,7 @@ describe("backup merging", () => {
 
     expect(merged.holdings).toEqual([]);
     expect(merged.sales).toEqual(sold.sales);
+    expect(merged.holdingRemovals).toEqual([]);
   });
 
   it("reconciles an older open position with a backup that has sold it completely", () => {

@@ -52,6 +52,86 @@ describe("loan calculations", () => {
     expect(schedule.at(-1)?.remainingPrincipal).toBe(0);
   });
 
+  it("updates projected installments for dated rate changes without charging the old days at the new rate", () => {
+    const rate = (effectiveDate: string, annualInterestRate: number) => ({
+      id: effectiveDate, effectiveDate, annualInterestRate, createdAt: `${effectiveDate}T00:00:00.000Z`,
+    });
+    const repriced = loan({ repaymentMethod: "equal_principal", rateType: "floating", rateHistory: [
+      rate("2026-02-01", 12), rate("2026-01-17", 12.2),
+    ] });
+    const forecast = calculateLoanSnapshot(repriced, "2026-01-20");
+    expect(forecast.nextPayment).toMatchObject({ paymentDate: "2026-02-01", principal: 10_000, interest: 900, payment: 10_900 });
+    expect(forecast.schedule[1]).toMatchObject({ principal: 10_000, interest: 1_100, remainingPrincipal: 100_000 });
+    expect(calculatePortfolioLoanSummary([repriced], { asOfDate: "2026-01-20" }).nextPaymentAmount).toBe(10_900);
+  });
+
+  it("uses a mid-period principal snapshot in the forecast and never projects negative principal", () => {
+    const loanWithBalance = loan({ repaymentMethod: "equal_principal", balanceHistory: [{
+      effectiveDate: "2026-02-15", balance: 60_000, recordedAt: "2026-02-15T00:00:00.000Z",
+    }] });
+    const result = calculateLoanSnapshot(loanWithBalance, "2026-02-20");
+    expect(result.currentPrincipal).toBe(60_000);
+    expect(result.nextPayment).toMatchObject({ openingPrincipal: 60_000, interest: 425, payment: 10_425, remainingPrincipal: 50_000 });
+    expect(result.schedule.findLast((row) => row.payment > 0)?.installment).toBe(7);
+    expect(result.schedule.every((row) => row.remainingPrincipal >= 0)).toBe(true);
+    expect(calculateLoanSnapshot(loanWithBalance, "2026-08-01").nextPayment).toBeNull();
+  });
+
+  it("recalculates equal payments for the remaining periods when the rate changes", () => {
+    const base = loan({ openingBalance: 12_000, remainingTermMonths: 3, annualInterestRate: 0 });
+    const repriced = { ...base, rateHistory: [{ id: "new-rate", effectiveDate: "2026-02-01",
+      annualInterestRate: 12, createdAt: "2026-02-01T00:00:00.000Z" }] };
+    const [first, second, third] = buildLoanSchedule(repriced);
+    expect(first.payment).toBe(4_000);
+    expect(second).toMatchObject({ openingPrincipal: 8_000, interest: 80 });
+    expect(second.payment).toBeGreaterThan(4_000);
+    expect(third.payment).toBeCloseTo(second.payment, 4);
+    expect(third.remainingPrincipal).toBe(0);
+  });
+
+  it.each(["equal_principal", "equal_payment"] as const)("allocates early installments without double-counting %s principal", (repaymentMethod) => {
+    const base = loan({ repaymentMethod });
+    const first = buildLoanSchedule(base)[0];
+    const balance = 120_000 - first.principal;
+    const paid = {
+      ...base,
+      paymentHistory: [{ id: "early", paymentDate: "2026-01-25", installmentDueDate: "2026-02-01",
+        principalPaid: first.principal, interestPaid: first.interest, feePaid: 0, subsidyReceived: 0,
+        remainingPrincipalAfter: balance, createdAt: "2026-01-25T00:00:00.000Z" }],
+      balanceHistory: [{ effectiveDate: "2026-01-25", balance, recordedAt: "2026-01-25T00:00:00.000Z" }],
+    };
+    const snapshot = calculateLoanSnapshot(paid, "2026-01-26");
+    expect(snapshot.schedule[0]).toMatchObject({ payment: 0, principal: 0, creditedAmount: first.payment });
+    expect(snapshot.nextPayment?.paymentDate).toBe("2026-03-01");
+    expect(calculateLoanSnapshot(paid, "2026-02-01").currentPrincipal).toBeCloseTo(balance, 5);
+    expect(snapshot.effectiveAprPercent).toBe(calculateLoanEffectiveApr(base));
+    expect(calculateLoanSnapshot(paid, "2026-01-26").currentPrincipal).toBeCloseTo(balance, 5);
+  });
+
+  it("keeps known late principal outstanding until the receipt date and recognizes fees on that date", () => {
+    const base = loan({ repaymentMethod: "equal_principal" });
+    const paid = { ...base, paymentHistory: [{ id: "late", paymentDate: "2026-02-04", installmentDueDate: "2026-02-01",
+      principalPaid: 10_000, interestPaid: 600, feePaid: 90, subsidyReceived: 0,
+      remainingPrincipalAfter: 110_000, createdAt: "2026-02-04T00:00:00.000Z" }],
+    balanceHistory: [{ effectiveDate: "2026-02-04", balance: 110_000, recordedAt: "2026-02-04T00:00:00.000Z" }] };
+    const dailyInterest = (120_000 * 0.06) / 365;
+    const days = buildDailyInvestmentFinancingCosts([paid], "2026-02-01", "2026-02-05");
+    expect(calculateLoanSnapshot(paid, "2026-02-02").currentPrincipal).toBe(120_000);
+    expect(calculateLoanSnapshot(paid, "2026-02-04").currentPrincipal).toBe(110_000);
+    expect(days["2026-02-01"]).toBeCloseTo(dailyInterest, 5);
+    expect(days["2026-02-03"]).toBeCloseTo(dailyInterest, 5);
+    expect(days["2026-02-04"]).toBeCloseTo(dailyInterest + 90, 5);
+    expect(days["2026-02-05"]).toBeCloseTo((110_000 * 0.06) / 365, 5);
+
+    const partial = { ...paid,
+      paymentHistory: [{ ...paid.paymentHistory[0], principalPaid: 5_000, interestPaid: 350, remainingPrincipalAfter: 115_000 }],
+      balanceHistory: [{ ...paid.balanceHistory[0], balance: 115_000 }],
+    };
+    expect(buildLoanSchedule(partial)[0]).toMatchObject({ payment: 5_250, principal: 5_000 });
+    expect(calculateLoanSnapshot(partial, "2026-02-02").currentPrincipal).toBe(120_000);
+    expect(calculateLoanSnapshot(partial, "2026-02-04").currentPrincipal).toBe(115_000);
+  });
+
   it("keeps principal outstanding until the final interest-only payment", () => {
     const schedule = buildLoanSchedule(
       loan({ repaymentMethod: "interest_only" })
@@ -317,9 +397,12 @@ describe("loan calculations", () => {
       ],
     });
 
-    expect(
-      calculateLoanSnapshot(corrected, schedule[1].paymentDate)
-        .currentPrincipal
-    ).toBeCloseTo(schedule[1].remainingPrincipal - 5_000, 4);
+    const next = calculateLoanSnapshot(corrected, schedule[0].paymentDate);
+    expect(next.currentPrincipal).toBeCloseTo(correctedBalance, 4);
+    expect(next.nextPayment?.payment).toBeCloseTo(schedule[1].payment, 4);
+    expect(next.nextPayment?.interest).toBeCloseTo(schedule[1].interest - 5_000 * 0.06 / 12, 4);
+    expect(calculateLoanSnapshot(corrected, schedule[1].paymentDate).currentPrincipal)
+      .toBeCloseTo(next.nextPayment!.remainingPrincipal, 4);
+    expect(next.effectiveAprPercent).toBe(calculateLoanEffectiveApr(base));
   });
 });

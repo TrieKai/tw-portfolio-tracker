@@ -13,12 +13,13 @@ export interface DividendLot extends Pick<Holding, "id" | "name" | "symbol" | "m
 export function listDividendLots(state: PortfolioStorage): DividendLot[] {
   const holdings = state.holdings.filter((holding) => holding.assetType !== "property");
   const archived = new Map<string, SaleTransaction>();
+  const removedIds = new Set((state.holdingRemovals ?? []).map(({ holding }) => holding.id));
   const acquisitionDates = new Map<string, string>();
   for (const transaction of state.transactions) {
     if (transaction.type === "buy") acquisitionDates.set(transaction.holdingId, transaction.date);
   }
   for (const sale of state.sales) {
-    if (sale.assetType === "property" || !parseIsoDate(sale.sellDate)) continue;
+    if (removedIds.has(sale.holdingId) || sale.assetType === "property" || !parseIsoDate(sale.sellDate)) continue;
     const previous = archived.get(sale.holdingId);
     if (!previous || sale.sellDate > previous.sellDate ||
        (sale.sellDate === previous.sellDate && sale.createdAt > previous.createdAt)) {

@@ -2,10 +2,11 @@ import { corporateActionAdjustmentRatio, costOnDate, holdingActions, shareAdjust
 import { reconcileCorporateDividends } from "@/lib/portfolio/corporate-dividends";
 import { linkSaleEvents } from "@/lib/portfolio/sale-events";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
-import type { CorporateActionRecord, Holding, PortfolioStorage, PortfolioTransaction, SaleTransaction } from "@/lib/types/holding";
+import type { CorporateActionRecord, Holding, HoldingRemoval, PortfolioStorage, PortfolioTransaction, SaleTransaction } from "@/lib/types/holding";
 import { mergePriceHistory, repairCorporateActionPriceHistory } from "@/lib/storage/portfolio-store";
 import type { Loan, LoanPaymentRecord } from "@/lib/types/loan";
-import { normalizePortfolioStorage } from "@/lib/storage/parse-portfolio";
+import { decodePortfolioStorage, hasPortfolioData, type PortfolioDecodeResult } from "@/lib/storage/parse-portfolio";
+import { isRecord } from "@/lib/storage/portfolio-shape";
 
 /** 匯出檔外層格式（含版本與時間戳，方便日後遷移） */
 export interface PortfolioExportFile {
@@ -30,36 +31,17 @@ export function buildExportFile(
 
 export function describePortfolioStorage(state: PortfolioStorage): string {
   const historyKeys = Object.keys(state.priceHistory).length;
-  return `${state.holdings.length} 筆持倉、${state.loans.length} 筆貸款、${state.sales.length} 筆賣出紀錄、${historyKeys} 組價格歷史`;
+  const removals = state.holdingRemovals?.length ? `、${state.holdingRemovals.length} 筆已移除持倉` : "";
+  return `${state.holdings.length} 筆持倉、${state.loans.length} 筆貸款、${state.sales.length} 筆賣出、${state.transactions.length} 筆交易、${historyKeys} 組價格歷史${removals}`;
 }
 
 /** 從匯出檔或裸 PortfolioStorage JSON 解析 */
-export function parseImportPayload(
-  raw: unknown
-): { ok: true; portfolio: PortfolioStorage } | { ok: false; error: string } {
-  if (!raw || typeof raw !== "object") {
-    return { ok: false, error: "檔案格式無效" };
+export function parseImportPayload(raw: unknown): PortfolioDecodeResult {
+  if (isRecord(raw) && raw.app === "tw-portfolio-tracker") {
+    if (raw.exportVersion !== 1) return { ok: false, error: "無法辨識備份檔版本。" };
+    return decodePortfolioStorage(raw.portfolio);
   }
-
-  const obj = raw as Record<string, unknown>;
-
-  if (obj.app === "tw-portfolio-tracker" && obj.exportVersion === 1) {
-    const portfolio = normalizePortfolioStorage(obj.portfolio);
-    if (!portfolio) {
-      return { ok: false, error: "匯出檔內的投資組合資料無效" };
-    }
-    return { ok: true, portfolio };
-  }
-
-  const direct = normalizePortfolioStorage(raw);
-  if (direct) {
-    return { ok: true, portfolio: direct };
-  }
-
-  return {
-    ok: false,
-    error: "無法辨識的備份格式（需為本 App 匯出的 JSON 或 version:1／2 的持倉資料）",
-  };
+  return decodePortfolioStorage(raw);
 }
 
 function mergeRecords<T extends { id: string }>(
@@ -109,7 +91,7 @@ function mergeManualDividends(transactions: PortfolioTransaction[]): PortfolioTr
 
 function instrumentKeys(state: PortfolioStorage) {
   const keys = new Map<string, string>();
-  for (const item of [...state.sales, ...state.transactions, ...state.holdings]) {
+  for (const item of [...state.sales, ...state.transactions, ...state.holdings, ...(state.holdingRemovals ?? []).map(({ holding }) => holding)]) {
     const id = "holdingId" in item ? item.holdingId : item.id;
     keys.set(id, holdingGroupKey({ ...item, id }));
   }
@@ -339,7 +321,8 @@ function mergeLoans(current: PortfolioStorage, incoming: PortfolioStorage, choic
     const rateHistory = mergeRecords(local.rateHistory ?? [], backup.rateHistory ?? [])
       .filter((entry) => entry.effectiveDate >= contract.trackingStartDate)
       .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.createdAt.localeCompare(b.createdAt));
-    const paymentHistory = mergeRecords(local.paymentHistory ?? [], backup.paymentHistory ?? [])
+    const paymentHistory = mergeRecords(local.paymentHistory ?? [], backup.paymentHistory ?? [],
+      (payment) => payment.installmentAssignedAt ?? payment.createdAt)
       .filter((entry) => entry.paymentDate >= contract.trackingStartDate)
       .sort((a, b) => a.paymentDate.localeCompare(b.paymentDate) || a.createdAt.localeCompare(b.createdAt));
     const paymentImportReviews = mergeRecords(local.paymentImportReviews ?? [], backup.paymentImportReviews ?? [],
@@ -370,7 +353,7 @@ function mergeLoans(current: PortfolioStorage, incoming: PortfolioStorage, choic
       const events = [
         ...(loan.balanceHistory ?? []).map((entry) => entry.recordedAt),
         ...(loan.rateHistory ?? []).map((entry) => entry.createdAt),
-        ...(loan.paymentHistory ?? []).map((entry) => entry.createdAt),
+        ...(loan.paymentHistory ?? []).flatMap((entry) => [entry.createdAt, entry.installmentAssignedAt]),
       ];
       const legacy = [...contractRevisions, events.includes(loan.updatedAt) ? loan.createdAt : loan.updatedAt].sort().at(-1)!;
       const versioned = { ...loan, contractUpdatedAt: loan.contractUpdatedAt ?? legacy };
@@ -406,6 +389,14 @@ export function mergePortfolioStorage(
 ): PortfolioStorage {
   const current = repairCorporateActionPriceHistory(local);
   const incoming = repairCorporateActionPriceHistory(backup);
+  const removals = new Map<string, HoldingRemoval>();
+  for (const removal of [...(current.holdingRemovals ?? []), ...(incoming.holdingRemovals ?? [])]) {
+    const previous = removals.get(removal.holding.id);
+    if (!previous || removal.removedOn < previous.removedOn ||
+        (removal.removedOn === previous.removedOn && removal.removedAt < previous.removedAt)) {
+      removals.set(removal.holding.id, removal);
+    }
+  }
   const currentKeys = instrumentKeys(current);
   const incomingKeys = instrumentKeys(incoming);
   const actionsByEvent = new Map(
@@ -580,7 +571,7 @@ export function mergePortfolioStorage(
     }, 0);
     const cost = Math.max(0, holding.buyPrice / quantityRatio - costReduction);
     mergedCosts.set(holding.id, { holding, cost, actions: mergedBasis });
-    if (currentClosed.has(holding.id) || closedInBackup ||
+    if (removals.has(holding.id) || currentClosed.has(holding.id) || closedInBackup ||
         holdingSales.some((sale) => sale.positionClosed === true) ||
         quantity <= Number.EPSILON * Math.max(holding.quantity, soldQuantity)) return [];
     const sameInstrument = (candidate?: Holding): candidate is Holding =>
@@ -637,7 +628,9 @@ export function mergePortfolioStorage(
 
   let priceHistory: PortfolioStorage["priceHistory"] = {};
   for (const holdingId of new Set([...Object.keys(current.priceHistory), ...Object.keys(incoming.priceHistory)])) {
-    const instrument = selectedKeys.get(holdingId) ?? currentKeys.get(holdingId) ?? incomingKeys.get(holdingId);
+    const removed = removals.get(holdingId);
+    const instrument = removed ? holdingGroupKey(removed.holding)
+      : selectedKeys.get(holdingId) ?? currentKeys.get(holdingId) ?? incomingKeys.get(holdingId);
     const matchingActions = (actions: PortfolioStorage["corporateActions"]) =>
       actions.filter((action) =>
         action.holdingId === holdingId &&
@@ -665,16 +658,21 @@ export function mergePortfolioStorage(
       dailySummaries[date] = summary;
     }
   }
+  for (const [id, removal] of removals) {
+    for (const point of priceHistory[id] ?? []) {
+      if (point.date >= removal.removedOn) delete dailySummaries[point.date];
+    }
+  }
   for (const date of repricedDates) delete dailySummaries[date];
   if (droppedLocal.size || droppedBackup.size) {
     const rejectedDates = mergedSales.filter((sale) => droppedLocal.has(sale.id) || droppedBackup.has(sale.id));
     for (const sale of rejectedDates) delete dailySummaries[sale.sellDate];
   }
-  const currentHasData = current.holdings.length > 0 || current.loans.length > 0 ||
-    current.transactions.length > 0 || current.sales.length > 0;
+  const currentHasData = hasPortfolioData(current);
   const result: PortfolioStorage = {
     version: 2,
     holdings,
+    holdingRemovals: [...removals.values()],
     ...mergedLoans,
     sales: repricedSales,
     corporateActions,

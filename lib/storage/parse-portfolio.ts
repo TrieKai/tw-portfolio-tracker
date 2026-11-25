@@ -21,6 +21,7 @@ import {
 } from "@/lib/types/loan";
 import { normalizeUiPreferences } from "@/lib/ui/preferences";
 import { migratePortfolioStorage } from "@/lib/storage/portfolio-migration";
+import { invalidLoanHistoryField, invalidPortfolioField, isRecord } from "@/lib/storage/portfolio-shape";
 
 const DEFAULT_SETTINGS: PortfolioSettings = {
   autoUpdateEnabled: false,
@@ -31,6 +32,7 @@ export function defaultPortfolioStorage(): PortfolioStorage {
   return {
     version: 2,
     holdings: [],
+    holdingRemovals: [],
     loans: [],
     loanRevisions: [],
     priceHistory: {},
@@ -58,10 +60,6 @@ const LOAN_REPAYMENT_METHODS: LoanRepaymentMethod[] = [
   "revolving",
 ];
 const LOAN_STATUSES: LoanStatus[] = ["active", "paid_off", "refinanced"];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
 
 function isOneOf<T extends string>(values: readonly T[], value: unknown): value is T {
   return typeof value === "string" && values.includes(value as T);
@@ -162,6 +160,9 @@ function normalizePaymentHistory(
       typeof payment.interestPeriodStartDate === "string"
         ? normalizeToIsoDate(payment.interestPeriodStartDate)
         : null;
+    const installmentDueDate = typeof payment.installmentDueDate === "string"
+      ? normalizeToIsoDate(payment.installmentDueDate)
+      : undefined;
     const periodEnd =
       typeof payment.interestPeriodEndDate === "string"
         ? normalizeToIsoDate(payment.interestPeriodEndDate)
@@ -175,6 +176,9 @@ function normalizePaymentHistory(
     payments.push({
       id: payment.id,
       paymentDate,
+      ...(installmentDueDate && installmentDueDate >= trackingStartDate ? { installmentDueDate } : {}),
+      ...(typeof payment.installmentAssignedAt === "string" && Number.isFinite(Date.parse(payment.installmentAssignedAt))
+        ? { installmentAssignedAt: new Date(payment.installmentAssignedAt).toISOString() } : {}),
       principalPaid: payment.principalPaid as number,
       interestPaid: payment.interestPaid as number,
       feePaid: payment.feePaid as number,
@@ -490,56 +494,85 @@ function normalizePriceHistoryMap(priceHistory: PriceHistoryMap): PriceHistoryMa
   return next;
 }
 
-/** 驗證並正規化未知 JSON 為 PortfolioStorage */
-export function normalizePortfolioStorage(
+export type PortfolioDecodeResult =
+  | { ok: true; portfolio: PortfolioStorage }
+  | { ok: false; error: string };
+
+function invalidPortfolio(path: string): PortfolioDecodeResult {
+  return { ok: false, error: `資料欄位 ${path} 的格式無效。` };
+}
+
+/** 統一檢查匯入、瀏覽器儲存與雲端讀寫共用的格式。 */
+export function decodePortfolioStorage(
   raw: unknown,
   options?: { migratedAt?: string }
-): PortfolioStorage | null {
-  if (!raw || typeof raw !== "object") return null;
-  const version = (raw as { version?: unknown }).version;
+): PortfolioDecodeResult {
+  if (!isRecord(raw)) return { ok: false, error: "投資組合資料必須是 JSON 物件。" };
+  const version = raw.version;
+  if (version !== 1 && version !== 2) return { ok: false, error: "無法辨識投資組合版本，目前支援第 1、2 版。" };
+  const invalid = invalidPortfolioField(raw);
+  if (invalid) return invalidPortfolio(invalid);
   let migrated: unknown = raw;
   if (version === 1) {
     try {
       migrated = migratePortfolioStorage(raw, {
-      migratedAt: options?.migratedAt ?? new Date().toISOString(),
+        migratedAt: options?.migratedAt ?? new Date().toISOString(),
       });
     } catch {
-      return null;
+      return { ok: false, error: "第 1 版資料缺少價格歷史、賣出紀錄、公司行動或設定欄位。" };
     }
   }
   const parsed = migrated as PortfolioStorage;
-  if (parsed.version !== 2 || !Array.isArray(parsed.holdings)) return null;
-
   const rawSettings =
     parsed.settings && typeof parsed.settings === "object"
       ? parsed.settings
       : DEFAULT_SETTINGS;
 
-  const normalizedHoldings = parsed.holdings.map(normalizeHoldingDates);
+  const holdingRemovals = (parsed.holdingRemovals ?? []).map((removal) => ({
+    ...removal, holding: normalizeHoldingDates(removal.holding),
+  }));
+  const removedIds = new Set(holdingRemovals.map(({ holding }) => holding.id));
+  const normalizedHoldings = parsed.holdings.filter((holding) => !removedIds.has(holding.id)).map(normalizeHoldingDates);
   const hasLoanCollection = Object.prototype.hasOwnProperty.call(
     migrated,
     "loans"
   );
   const migratedAt = options?.migratedAt ?? new Date().toISOString();
-  const loans = hasLoanCollection
-    ? (Array.isArray(parsed.loans) ? parsed.loans : [])
-        .map(normalizeLoan)
-        .filter((loan): loan is Loan => loan !== null)
-    : migrateLegacyLoans(normalizedHoldings, rawSettings, migratedAt);
+  const loans = hasLoanCollection ? [] : migrateLegacyLoans(normalizedHoldings, rawSettings, migratedAt);
+  if (hasLoanCollection) {
+    if (!Array.isArray(parsed.loans)) return invalidPortfolio("loans");
+    const ids = new Set<string>();
+    for (const [index, rawLoan] of parsed.loans.entries()) {
+      const invalidHistory = invalidLoanHistoryField(rawLoan, `loans[${index}]`);
+      if (invalidHistory) return invalidPortfolio(invalidHistory);
+      const loan = normalizeLoan(rawLoan);
+      if (!loan) return invalidPortfolio(`loans[${index}]`);
+      if (!loan.id.trim() || ids.has(loan.id)) return invalidPortfolio(`loans[${index}].id`);
+      ids.add(loan.id);
+      loans.push(loan);
+    }
+  }
+  const loanRevisions: PortfolioStorage["loanRevisions"] = [];
+  for (const [index, revision] of (parsed.loanRevisions ?? []).entries()) {
+    const invalidHistory = invalidLoanHistoryField(revision.previous, `loanRevisions[${index}].previous`);
+    if (invalidHistory) return invalidPortfolio(invalidHistory);
+    const previous = normalizeLoan(revision.previous);
+    if (!previous) return invalidPortfolio(`loanRevisions[${index}].previous`);
+    loanRevisions.push({ ...revision, previous });
+  }
   const holdings = hasLoanCollection
     ? normalizedHoldings
     : normalizedHoldings.map(({ mortgageBalance: _legacyMortgage, ...holding }) =>
         holding
       );
 
-  return {
+  const portfolio: PortfolioStorage = {
     ...defaultPortfolioStorage(),
     ...parsed,
     holdings,
+    holdingRemovals,
     loans,
-    loanRevisions: Array.isArray(parsed.loanRevisions)
-      ? parsed.loanRevisions
-      : [],
+    loanRevisions,
     priceHistory: normalizePriceHistoryMap(
       parsed.priceHistory && typeof parsed.priceHistory === "object"
         ? parsed.priceHistory
@@ -576,13 +609,26 @@ export function normalizePortfolioStorage(
         : {}),
     },
   };
+  return { ok: true, portfolio };
+}
+
+export function normalizePortfolioStorage(
+  raw: unknown,
+  options?: { migratedAt?: string }
+): PortfolioStorage | null {
+  const decoded = decodePortfolioStorage(raw, options);
+  return decoded.ok ? decoded.portfolio : null;
 }
 
 export function hasPortfolioData(state: PortfolioStorage): boolean {
   return (
     state.holdings.length > 0 ||
+    (state.holdingRemovals?.length ?? 0) > 0 ||
     state.loans.length > 0 ||
     state.sales.length > 0 ||
-    state.corporateActions.length > 0
+    state.corporateActions.length > 0 || state.transactions.length > 0 ||
+    state.loanRevisions.length > 0 || state.transactionRevisions.length > 0 ||
+    Object.values(state.priceHistory).some((points) => points.length > 0) ||
+    Object.keys(state.pnlTracking.dailySummaries).length > 0
   );
 }

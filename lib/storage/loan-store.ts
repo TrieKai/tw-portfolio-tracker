@@ -1,4 +1,5 @@
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
+import { loanInstallmentOptions } from "@/lib/loans/calculations";
 import { earliestLoanClosureDate, isDateInLoanTracking, loanActualEntryEndDate, recordedPrincipalOn } from "@/lib/loans/history";
 import type { PortfolioStorage } from "@/lib/types/holding";
 import type {
@@ -231,6 +232,8 @@ export function recordLoanPayment(
   const loan = state.loans.find((item) => item.id === loanId);
   if (!loan || !isDateInLoanTracking(loan, input.paymentDate) ||
       input.paymentDate > loanActualEntryEndDate(loan)) return state;
+  if (input.installmentDueDate && !loanInstallmentOptions(loan)
+    .some((row) => row.paymentDate === input.installmentDueDate)) return state;
   const amounts = [
     input.principalPaid,
     input.interestPaid,
@@ -297,6 +300,27 @@ export function recordLoanPayment(
     );
   }
   return next;
+}
+
+export function assignLoanPaymentInstallment(
+  state: PortfolioStorage,
+  loanId: string,
+  paymentId: string,
+  dueDate?: string,
+  now = new Date().toISOString()
+): PortfolioStorage {
+  const loan = state.loans.find((item) => item.id === loanId);
+  const payment = loan?.paymentHistory?.find((entry) => entry.id === paymentId);
+  if (!loan || !payment || payment.installmentDueDate === dueDate) return state;
+  if (dueDate && !loanInstallmentOptions(loan).some((row) => row.paymentDate === dueDate)) return state;
+  const updated: Loan = {
+    ...loan,
+    updatedAt: now,
+    paymentHistory: loan.paymentHistory!.map((entry) => entry.id === paymentId ? {
+      ...entry, installmentDueDate: dueDate, installmentAssignedAt: now,
+    } : entry),
+  };
+  return { ...state, loans: state.loans.map((item) => item.id === loanId ? updated : item) };
 }
 
 export function recordLoanRateChange(

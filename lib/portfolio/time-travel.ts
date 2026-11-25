@@ -1,5 +1,6 @@
 import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import { costInCurrentUnits, costOnDate, holdingActions, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
+import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import type {
   CorporateActionRecord,
   Holding,
@@ -12,6 +13,7 @@ interface HistoryLot {
   holding: Holding;
   sales: SaleTransaction[];
   actions: CorporateActionRecord[];
+  removedOn?: string;
 }
 
 function groupByHoldingId<T extends { holdingId: string }>(records: T[]) {
@@ -65,6 +67,26 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
     });
   }
 
+  for (const { holding, removedOn } of storage.holdingRemovals ?? []) {
+    if (holding.buyDate >= removedOn) continue;
+    const actions = holdingActions(actionsFor(holding.id), holding);
+    const instrument = holdingGroupKey(holding);
+    const sales = (salesById.get(holding.id) ?? [])
+      .filter((sale) => sale.sellDate <= removedOn && holdingGroupKey({ ...sale, id: holding.id }) === instrument);
+    const buy = (entriesById.get(holding.id) ?? []).find((entry) => entry.type === "buy" && entry.date === holding.buyDate &&
+      holdingGroupKey({ ...entry, id: holding.id }) === instrument);
+    const quantity = buy?.quantity === undefined
+      ? holding.quantity * shareAdjustmentAfter(actions, removedOn)
+      : Math.max(0, buy.quantity - sales.reduce((sum, sale) => sum + sale.quantity * shareAdjustmentAfter(actions, sale.sellDate), 0));
+    lots.set(holding.id, {
+      holding: { ...holding, quantity, buyPrice: costInCurrentUnits(holding.buyPrice, actions, removedOn),
+        currentPrice: holding.currentPrice === undefined ? undefined : holding.currentPrice / shareAdjustmentAfter(actions, removedOn) },
+      actions, sales, removedOn,
+    });
+    dates.add(removedOn);
+    exitDates.add(removedOn);
+  }
+
   for (const [id, sales] of salesById) {
     if (lots.has(id)) continue;
     const orderedSales = [...sales].sort((a, b) => a.sellDate.localeCompare(b.sellDate) || a.createdAt.localeCompare(b.createdAt));
@@ -102,20 +124,20 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
     positionOn(lot, lot.holding.buyDate, true)
   );
 
-  for (const { holding, sales, actions } of lots.values()) {
+  for (const { holding, sales, actions, removedOn } of lots.values()) {
     dates.add(holding.buyDate);
     if (holding.priceDate) dates.add(holding.priceDate);
     for (const { sellDate } of sales) dates.add(sellDate);
     for (const { effectiveDate } of actions) dates.add(effectiveDate);
     for (const point of storage.priceHistory[holding.id] ?? []) {
-      if (point.date >= holding.buyDate) dates.add(point.date);
+      if (point.date >= holding.buyDate && (!removedOn || point.date < removedOn)) dates.add(point.date);
     }
   }
 
   function snapshotOn(date: string): Holding[] {
     const snapshots: Holding[] = [];
     for (const lot of lots.values()) {
-      if (date < lot.holding.buyDate) continue;
+      if (date < lot.holding.buyDate || (lot.removedOn && date >= lot.removedOn)) continue;
       const position = positionOn(lot, date);
       if (position.quantity <= 0) continue;
       let point;
@@ -142,7 +164,7 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
     return Object.fromEntries(Array.from(lots, ([id, lot]) => {
       const ratio = shareAdjustmentAfter(lot.actions, date);
       return [id, (storage.priceHistory[id] ?? [])
-        .filter((point) => point.date <= date)
+        .filter((point) => point.date <= date && (!lot.removedOn || point.date < lot.removedOn))
         .map((point) => ratio === 1 ? point : { ...point, price: point.price * ratio })];
     }));
   }

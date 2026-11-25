@@ -88,6 +88,7 @@ import {
 import { applyHistoryResults, applyQuoteResults, hasUnchangedQuote, isSamePriceTarget } from "@/lib/storage/portfolio-price-results";
 import {
   addLoan as addLoanToStorage,
+  assignLoanPaymentInstallment as assignLoanPaymentInstallmentInStorage,
   editLoan as editLoanInStorage,
   recordLoanBalance as recordLoanBalanceInStorage,
   recordLoanPayment as recordLoanPaymentInStorage,
@@ -204,6 +205,7 @@ interface PortfolioContextValue {
     effectiveDate: string
   ) => Promise<boolean>;
   recordLoanPayment: (id: string, input: CreateLoanPaymentInput) => Promise<boolean>;
+  assignLoanPaymentInstallment: (loanId: string, paymentId: string, dueDate?: string) => Promise<boolean>;
   recordLoanRateChange: (id: string, input: CreateLoanRateChangeInput) => Promise<boolean>;
   setLoanStatus: (
     id: string,
@@ -686,6 +688,12 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     [persist]
   );
 
+  const assignLoanPaymentInstallment = useCallback(
+    (loanId: string, paymentId: string, dueDate?: string) =>
+      persist((latest) => assignLoanPaymentInstallmentInStorage(latest, loanId, paymentId, dueDate)),
+    [persist]
+  );
+
   const recordLoanRateChange = useCallback(
     (id: string, input: CreateLoanRateChangeInput) =>
       persist((latest) => recordLoanRateChangeInStorage(latest, id, input)),
@@ -1133,6 +1141,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       editLoan,
       updateLoanBalance,
       recordLoanPayment,
+      assignLoanPaymentInstallment,
       recordLoanRateChange,
       setLoanStatus,
       setManualPrice,
@@ -1186,6 +1195,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       editLoan,
       updateLoanBalance,
       recordLoanPayment,
+      assignLoanPaymentInstallment,
       recordLoanRateChange,
       setLoanStatus,
       setManualPrice,

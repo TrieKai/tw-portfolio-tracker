@@ -1,10 +1,10 @@
 "use client";
 
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useRef, useState } from "react";
 import { LoanFormModal } from "@/components/loans/LoanFormModal";
 import { LoanBalanceModal } from "@/components/loans/LoanBalanceModal";
-import { LoanPaymentModal } from "@/components/loans/LoanPaymentModal";
+import { LoanInstallmentEditForm, LoanPaymentModal } from "@/components/loans/LoanPaymentModal";
 import { LoanRateModal } from "@/components/loans/LoanRateModal";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -13,7 +13,8 @@ import { DatePicker } from "@/components/ui/DatePicker";
 import { ErrorAlert } from "@/components/ui/ErrorAlert";
 import { Modal } from "@/components/ui/Modal";
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
-import { calculateLoanSnapshot } from "@/lib/loans/calculations";
+import { calculateLoanSnapshot, loanInstallmentOptions } from "@/lib/loans/calculations";
+import { earliestLoanClosureDate } from "@/lib/loans/history";
 import {
   calculateLoanCollateralValuation,
   calculatePortfolioLoanRiskSummary,
@@ -52,12 +53,15 @@ export function LoanManager() {
   } = usePortfolio();
   const [formOpen, setFormOpen] = useState(false);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
-  const [balanceLoan, setBalanceLoan] = useState<Loan | null>(null);
-  const [paymentLoan, setPaymentLoan] = useState<Loan | null>(null);
-  const [rateLoan, setRateLoan] = useState<Loan | null>(null);
+  const [balanceLoanId, setBalanceLoanId] = useState<string | null>(null);
+  const [paymentEntry, setPaymentEntry] = useState<{ loanId: string; installmentDueDate?: string } | null>(null);
+  const [rateLoanId, setRateLoanId] = useState<string | null>(null);
   const [closingLoan, setClosingLoan] = useState<Loan | null>(null);
   const [reopeningLoan, setReopeningLoan] = useState<Loan | null>(null);
   const [restartOf, setRestartOf] = useState<Loan | null>(null);
+  const balanceLoan = loans.find((loan) => loan.id === balanceLoanId);
+  const paymentLoan = loans.find((loan) => loan.id === paymentEntry?.loanId);
+  const rateLoan = loans.find((loan) => loan.id === rateLoanId);
   const today = todayIsoDate();
   const snapshots = useMemo(
     () => loans.map((loan) => calculateLoanSnapshot(loan, today)),
@@ -133,7 +137,7 @@ export function LoanManager() {
                 <div key={reminder.id} className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${reminder.severity === "critical" ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300" : reminder.severity === "warning" ? "border-amber-400/40 bg-amber-400/10 text-amber-700 dark:text-amber-300" : "border-border bg-surface-raised text-muted"}`}>
                   <p><span className="font-medium">{reminder.loanName}</span> · {reminder.message}{reminder.amount !== undefined && ` ${formatAmount(reminder.amount)}`}</p>
                   {loan && (reminder.kind === "payment_due" ? (
-                    <button type="button" className="btn-secondary" onClick={() => setPaymentLoan(loan)}>
+                    <button type="button" className="btn-secondary" onClick={() => setPaymentEntry({ loanId: loan.id, installmentDueDate: reminder.date })}>
                       記錄繳款
                     </button>
                   ) : (
@@ -166,7 +170,7 @@ export function LoanManager() {
         {activeSnapshots.length === 0 ? (
           <EmptyState
             title={loans.length ? "目前沒有進行中的貸款" : "尚無貸款資料"}
-            description="新增貸款後，即可查看還款預估與扣息後投資損益。"
+            description={loans.length ? "下方可查看已清償或轉貸的帳務紀錄。" : "新增貸款後，即可查看還款預估與扣息後投資損益。"}
             action={loans.length === 0 ? <button type="button" className="btn-primary" onClick={() => setFormOpen(true)}>新增第一筆貸款</button> : undefined}
           />
         ) : (
@@ -179,9 +183,9 @@ export function LoanManager() {
                 linkedHoldingName={storage.holdings.find((holding) => holding.id === snapshot.loan.linkedHoldingId)?.name}
                 risk={riskByLoanId.get(snapshot.loan.id)}
                 onEdit={() => setEditingLoan(snapshot.loan)}
-                onRecordPayment={() => setPaymentLoan(snapshot.loan)}
-                onRecordRate={() => setRateLoan(snapshot.loan)}
-                onUpdateBalance={hasFlexibleCredit(snapshot.loan) ? () => setBalanceLoan(snapshot.loan) : undefined}
+                onRecordPayment={() => setPaymentEntry({ loanId: snapshot.loan.id })}
+                onRecordRate={() => setRateLoanId(snapshot.loan.id)}
+                onUpdateBalance={hasFlexibleCredit(snapshot.loan) ? () => setBalanceLoanId(snapshot.loan.id) : undefined}
                 onPaidOff={() => setClosingLoan(snapshot.loan)}
               />
             ))}
@@ -200,6 +204,7 @@ export function LoanManager() {
                 linkedHoldingName={storage.holdings.find((holding) => holding.id === snapshot.loan.linkedHoldingId)?.name}
                 risk={riskByLoanId.get(snapshot.loan.id)}
                 onEdit={() => setEditingLoan(snapshot.loan)}
+                onRecordPayment={snapshot.loan.closedAt ? () => setPaymentEntry({ loanId: snapshot.loan.id }) : undefined}
                 onReopen={loans.some((loan) => loan.restartedFromLoanId === snapshot.loan.id) ? undefined : () => setReopeningLoan(snapshot.loan)}
               />
             ))}
@@ -219,37 +224,35 @@ export function LoanManager() {
       {balanceLoan ? (
         <LoanBalanceModal
           loan={balanceLoan}
-          currentPrincipal={calculateLoanSnapshot(balanceLoan, today).currentPrincipal}
           onSave={async (balance, effectiveDate) => {
             const saved = await updateLoanBalance(balanceLoan.id, balance, effectiveDate);
-            if (saved) setBalanceLoan(null);
+            if (saved) setBalanceLoanId(null);
             return saved;
           }}
-          onClose={() => setBalanceLoan(null)}
+          onClose={() => setBalanceLoanId(null)}
         />
       ) : null}
       {paymentLoan ? (
         <LoanPaymentModal
           loan={paymentLoan}
-          currentPrincipal={calculateLoanSnapshot(paymentLoan, today).currentPrincipal}
+          defaultInstallmentDueDate={paymentEntry?.installmentDueDate}
           onSave={async (input) => {
             const saved = await recordLoanPayment(paymentLoan.id, input);
-            if (saved) setPaymentLoan(null);
+            if (saved) setPaymentEntry(null);
             return saved;
           }}
-          onClose={() => setPaymentLoan(null)}
+          onClose={() => setPaymentEntry(null)}
         />
       ) : null}
       {rateLoan ? (
         <LoanRateModal
           loan={rateLoan}
-          currentRate={calculateLoanSnapshot(rateLoan, today).currentAnnualInterestRate}
           onSave={async (input) => {
             const saved = await recordLoanRateChange(rateLoan.id, input);
-            if (saved) setRateLoan(null);
+            if (saved) setRateLoanId(null);
             return saved;
           }}
-          onClose={() => setRateLoan(null)}
+          onClose={() => setRateLoanId(null)}
         />
       ) : null}
       {reopeningLoan && (
@@ -333,11 +336,7 @@ function LoanClosureModal({
 }) {
   const [error, setError] = useState<string | null>(null);
   const today = todayIsoDate();
-  const earliest = [
-    loan.trackingStartDate,
-    ...(loan.paymentHistory ?? []).map((payment) => payment.paymentDate),
-    ...(loan.balanceHistory ?? []).map((balance) => balance.effectiveDate),
-  ].reduce((latest, date) => (date <= today && date > latest ? date : latest), loan.trackingStartDate);
+  const earliest = earliestLoanClosureDate(loan, today);
 
   const [saving, setSaving] = useState(false);
 
@@ -402,8 +401,10 @@ function LoanCard({
   const { formatAmount } = useAmountPrivacy();
   const { loan } = snapshot;
   const flexibleCredit = hasFlexibleCredit(loan);
-  const futureSchedule = loan.status === "active"
-    ? snapshot.schedule.filter((row) => row.paymentDate > todayIsoDate())
+  const showSchedule = loan.status === "active" && !flexibleCredit;
+  const today = todayIsoDate();
+  const futureSchedule = showSchedule
+    ? snapshot.schedule.filter((row) => row.paymentDate > today && row.payment > 0)
     : [];
   return (
     <article id={`loan-${loan.id}`} className="glass-card p-4 sm:p-5">
@@ -419,10 +420,11 @@ function LoanCard({
             {loan.lender || "未填貸款人"} · {LOAN_PURPOSE_LABELS[loan.purpose]}
             {loan.investmentUsePercent > 0 && loan.investmentUsePercent < 100 ? ` ${loan.investmentUsePercent}%` : ""}
             {linkedHoldingName ? ` · ${linkedHoldingName}` : ""}
+            {loan.closedAt && loan.status !== "active" ? ` · ${loan.status === "refinanced" ? "轉貸" : "清償"} ${loan.closedAt}` : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {onRecordPayment ? <button type="button" className="btn-secondary text-sm" onClick={onRecordPayment}>記錄繳款</button> : null}
+          {onRecordPayment ? <button type="button" className="btn-secondary text-sm" onClick={onRecordPayment}>{loan.status === "active" ? "記錄繳款" : "補登繳款"}</button> : null}
           {onRecordRate ? <button type="button" className="btn-secondary text-sm" onClick={onRecordRate}>利率異動</button> : null}
           {onUpdateBalance ? <button type="button" className="btn-secondary text-sm" onClick={onUpdateBalance}>更新餘額</button> : null}
           <button type="button" className="btn-secondary text-sm" onClick={onEdit}>更正資料</button>
@@ -435,7 +437,7 @@ function LoanCard({
         <Stat label="目前本金" value={formatAmount(snapshot.currentPrincipal)} />
         <Stat label="目前年利率" value={`${snapshot.currentAnnualInterestRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`} />
         <Stat label="實質年利率" value={snapshot.effectiveAprPercent === null ? "—" : `${snapshot.effectiveAprPercent.toFixed(2)}%`} sub={snapshot.effectiveAprPercent === null ? "未來利率或現金流不固定" : "含開辦費的年化估算"} />
-        <Stat label="下次應繳" value={snapshot.nextPayment ? formatAmount(snapshot.nextPayment.payment) : "—"} sub={snapshot.nextPayment?.paymentDate} />
+        <Stat label="下次應繳預估" value={snapshot.nextPayment ? formatAmount(snapshot.nextPayment.payment) : "—"} sub={snapshot.nextPayment?.paymentDate} />
         <Stat
           label={flexibleCredit ? "契約額度" : "預估剩餘利息"}
           value={
@@ -456,22 +458,43 @@ function LoanCard({
 
       <LoanHistoryDetails loan={loan} />
 
-      {!flexibleCredit ? <details className="mt-5 border-t border-border pt-4">
+      {showSchedule ? <details className="mt-5 border-t border-border pt-4">
         <summary className="cursor-pointer text-sm font-medium text-accent">
           查看還款預估{futureSchedule.length > 0 ? `（剩餘 ${futureSchedule.length} 期）` : ""}
         </summary>
         {futureSchedule.length === 0 ? (
-          <p className="mt-3 text-sm text-muted">尚未填寫剩餘期數，無法建立還款預估。</p>
+          <p className="mt-3 text-sm text-muted">{loan.remainingTermMonths ? "目前沒有可預估的後續款項。" : "尚未填寫剩餘期數，無法建立還款預估。"}</p>
         ) : (
           <div className="mt-3 max-h-96 overflow-auto [content-visibility:auto]">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead className="sticky top-0 bg-surface text-left text-muted">
-                <tr><th className="px-3 py-2">期數</th><th className="px-3 py-2">日期</th><th className="px-3 py-2 text-right">本金</th><th className="px-3 py-2 text-right">利息</th><th className="px-3 py-2 text-right">應繳</th><th className="px-3 py-2 text-right">剩餘本金</th></tr>
+            <table aria-label="還款預估" className="block w-full text-sm md:table md:min-w-[640px]">
+              <thead className="sr-only bg-surface text-left text-muted md:not-sr-only md:sticky md:top-0 md:table-header-group">
+                <tr><th scope="col" className="px-3 py-2">期數</th><th scope="col" className="px-3 py-2">日期</th><th scope="col" className="px-3 py-2 text-right">本金</th><th scope="col" className="px-3 py-2 text-right">利息</th><th scope="col" className="px-3 py-2 text-right">應繳</th><th scope="col" className="px-3 py-2 text-right">剩餘本金</th></tr>
               </thead>
-              <tbody>
+              <tbody className="block md:table-row-group">
                 {futureSchedule.map((row) => (
-                  <tr key={row.installment} className="border-t border-border/60">
-                    <td className="px-3 py-2">{row.installment}</td><td className="px-3 py-2">{row.paymentDate}</td><td className="px-3 py-2 text-right tabular-nums">{formatAmount(row.principal)}</td><td className="px-3 py-2 text-right tabular-nums">{formatAmount(row.interest)}</td><td className="px-3 py-2 text-right font-medium tabular-nums">{formatAmount(row.payment)}</td><td className="px-3 py-2 text-right tabular-nums text-muted">{formatAmount(row.remainingPrincipal)}</td>
+                  <tr key={row.installment} className="grid grid-cols-3 items-start gap-x-2 gap-y-3 border-t border-border/60 py-3 first:border-t-0 md:table-row md:first:border-t">
+                    <td className="col-start-1 row-start-1 font-medium md:px-3 md:py-2">
+                      {row.installment}<span aria-hidden="true" className="ml-1 md:hidden">期</span>
+                    </td>
+                    <td className="col-start-2 row-start-1 tabular-nums md:px-3 md:py-2">
+                      <time dateTime={row.paymentDate}>{row.paymentDate}</time>
+                    </td>
+                    <td className="col-start-1 row-start-2 break-words tabular-nums md:px-3 md:py-2 md:text-right">
+                      <span aria-hidden="true" className="block text-xs text-muted md:hidden">本金</span>
+                      {formatAmount(row.principal)}
+                    </td>
+                    <td className="col-start-2 row-start-2 break-words tabular-nums md:px-3 md:py-2 md:text-right">
+                      <span aria-hidden="true" className="block text-xs text-muted md:hidden">利息</span>
+                      {formatAmount(row.interest)}
+                    </td>
+                    <td className="col-start-3 row-start-1 break-words text-right font-medium tabular-nums md:px-3 md:py-2">
+                      <span aria-hidden="true" className="mr-1 text-xs font-normal text-muted md:hidden">應繳</span>
+                      {formatAmount(row.payment)}
+                    </td>
+                    <td className="col-start-3 row-start-2 break-words text-right tabular-nums text-muted md:px-3 md:py-2">
+                      <span aria-hidden="true" className="block text-xs md:hidden">剩餘本金</span>
+                      {formatAmount(row.remainingPrincipal)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -479,7 +502,7 @@ function LoanCard({
           </div>
         )}
       </details> : null}
-      <p className="mt-3 text-xs text-muted">{REPAYMENT_METHOD_LABELS[loan.repaymentMethod]} · {flexibleCredit ? "本金快照保留歷史計息基準；損益利息採實際天數／365 日估算" : "還款表採月利率預估；損益利息採實際天數／365 日估算"}</p>
+      <p className="mt-3 text-xs text-muted">{REPAYMENT_METHOD_LABELS[loan.repaymentMethod]} · {showSchedule && "還款表採月利率，依本金與利率的生效日分段計算。"}損益利息採實際天數／365 日估算。</p>
     </article>
   );
 }
@@ -535,8 +558,16 @@ function FlexibleCreditDetails({
   );
 }
 
+const HISTORY_BATCH_SIZE = 8;
+
 function LoanHistoryDetails({ loan }: { loan: Loan }) {
   const { formatAmount } = useAmountPrivacy();
+  const { assignLoanPaymentInstallment } = usePortfolio();
+  const [visiblePayments, setVisiblePayments] = useState(HISTORY_BATCH_SIZE);
+  const [visibleRates, setVisibleRates] = useState(HISTORY_BATCH_SIZE);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const assignmentTrigger = useRef<HTMLButtonElement>(null);
+  const installments = useMemo(() => loan.paymentHistory?.length ? loanInstallmentOptions(loan) : [], [loan]);
   const payments = [...(loan.paymentHistory ?? [])].sort(
     (a, b) =>
       b.paymentDate.localeCompare(a.paymentDate) ||
@@ -549,30 +580,61 @@ function LoanHistoryDetails({ loan }: { loan: Loan }) {
   );
   if (payments.length === 0 && rates.length === 0) return null;
 
+  function closeAssignment() {
+    setEditingPaymentId(null);
+    assignmentTrigger.current?.focus();
+  }
+
   return (
     <details className="mt-5 border-t border-border pt-4">
       <summary className="cursor-pointer text-sm font-medium text-accent">帳務紀錄（繳款 {payments.length}、利率異動 {rates.length}）</summary>
       <div className="mt-3 space-y-4">
         {payments.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted">最近繳款</p>
-            {payments.slice(0, 8).map((payment) => {
+            <p className="text-xs font-medium text-muted">繳款紀錄</p>
+            {payments.slice(0, visiblePayments).map((payment) => {
               const cashOutflow = payment.principalPaid + payment.interestPaid + payment.feePaid - payment.subsidyReceived;
               const reconciled = !!payment.interestPeriodStartDate && !!payment.interestPeriodEndDate;
+              const editing = editingPaymentId === payment.id;
               return (
                 <div key={payment.id} className="rounded-lg bg-surface-raised p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{payment.paymentDate}</span><span className="tabular-nums">實付 {formatAmount(cashOutflow)}</span></div>
+                  {payment.installmentDueDate && <p className="mt-1 text-xs text-muted">對應期別 {payment.installmentDueDate}</p>}
                   <p className="mt-1 text-xs text-muted">本金 {formatAmount(payment.principalPaid)} · 利息 {formatAmount(payment.interestPaid)} · 費用 {formatAmount(payment.feePaid)}{payment.subsidyReceived > 0 ? ` · 補貼 ${formatAmount(payment.subsidyReceived)}` : ""}</p>
                   <p className={`mt-1 text-xs ${reconciled ? "text-emerald-600 dark:text-emerald-300" : payment.interestPaid > 0 ? "text-amber-600 dark:text-amber-300" : "text-muted"}`}>{reconciled ? `已對帳 ${payment.interestPeriodStartDate}～${payment.interestPeriodEndDate}` : payment.interestPaid > 0 ? "尚未指定計息期間，損益仍採估算" : "本次無利息對帳"}{payment.remainingPrincipalAfter !== undefined ? ` · 餘額 ${formatAmount(payment.remainingPrincipalAfter)}` : ""}</p>
+                  {payment.note && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted">{payment.note}</p>}
+                  {(installments.length > 0 || payment.installmentDueDate) && (
+                    <button type="button" className="btn-secondary mt-2 text-sm" aria-expanded={editing}
+                      onClick={(event) => { assignmentTrigger.current = event.currentTarget; setEditingPaymentId(editing ? null : payment.id); }}>
+                      {payment.installmentDueDate ? "更改期別" : "指定期別"}
+                    </button>
+                  )}
+                  {editing && <LoanInstallmentEditForm installments={installments} payment={payment}
+                    onCancel={closeAssignment}
+                    onSave={async (dueDate) => {
+                      const saved = await assignLoanPaymentInstallment(loan.id, payment.id, dueDate);
+                      if (saved) closeAssignment();
+                      return saved;
+                    }} />}
                 </div>
               );
             })}
+            {visiblePayments < payments.length && (
+              <button type="button" className="btn-secondary text-sm" onClick={() => setVisiblePayments((count) => count + HISTORY_BATCH_SIZE)}>
+                顯示更早的繳款（還有 {payments.length - visiblePayments} 筆）
+              </button>
+            )}
           </div>
         ) : null}
         {rates.length > 0 ? (
           <div className="space-y-2">
             <p className="text-xs font-medium text-muted">利率異動</p>
-            {rates.slice(0, 8).map((change) => <div key={change.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-raised p-3 text-sm"><span>{change.effectiveDate}{change.note ? ` · ${change.note}` : ""}</span><span className="font-medium tabular-nums">{change.annualInterestRate}%</span></div>)}
+            {rates.slice(0, visibleRates).map((change) => <div key={change.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-raised p-3 text-sm"><span className="min-w-0 break-words">{change.effectiveDate}{change.note ? ` · ${change.note}` : ""}</span><span className="font-medium tabular-nums">{change.annualInterestRate}%</span></div>)}
+            {visibleRates < rates.length && (
+              <button type="button" className="btn-secondary text-sm" onClick={() => setVisibleRates((count) => count + HISTORY_BATCH_SIZE)}>
+                顯示更早的利率異動（還有 {rates.length - visibleRates} 筆）
+              </button>
+            )}
           </div>
         ) : null}
       </div>

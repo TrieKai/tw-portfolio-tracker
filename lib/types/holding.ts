@@ -67,6 +67,13 @@ export interface Holding {
   positionUpdatedAt?: string;
 }
 
+/** 停止追蹤一筆持倉時，保留當天的資料供歷史查閱與備份合併。 */
+export interface HoldingRemoval {
+  holding: Holding;
+  removedOn: string;
+  removedAt: string;
+}
+
 /** 單日價格快照（用於趨勢圖） */
 export interface PricePoint {
   /** YYYY-MM-DD */
@@ -248,6 +255,7 @@ export interface CashDividendInput {
 export interface PortfolioStorage {
   version: 2;
   holdings: Holding[];
+  holdingRemovals?: HoldingRemoval[];
   /** 每筆貸款獨立保存；本金與利息不可再合併成單一負債欄位。 */
   loans: Loan[];
   loanRevisions: LoanRevision[];

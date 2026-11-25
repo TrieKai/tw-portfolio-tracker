@@ -1,9 +1,7 @@
 import { createClient } from "@vercel/kv";
 import type { CloudPortfolioEnvelope } from "@/lib/types/portfolio-sync";
-import {
-  defaultPortfolioStorage,
-  normalizePortfolioStorage,
-} from "@/lib/storage/parse-portfolio";
+import { normalizePortfolioStorage } from "@/lib/storage/parse-portfolio";
+import { isRecord } from "@/lib/storage/portfolio-shape";
 import { getKvRestConfig } from "@/lib/storage/kv-config";
 
 const KV_KEY_PREFIX = "portfolio:user:";
@@ -38,32 +36,33 @@ export function portfolioKvKey(userId: string): string {
   return `${KV_KEY_PREFIX}${userId}`;
 }
 
-function parseEnvelope(raw: unknown): CloudPortfolioEnvelope | null {
-  if (!raw || typeof raw !== "object") return null;
-  const envelope = raw as CloudPortfolioEnvelope;
-  const portfolio = normalizePortfolioStorage(envelope.portfolio);
-  if (!portfolio || typeof envelope.updatedAt !== "string") return null;
-  return { updatedAt: envelope.updatedAt, portfolio };
-}
-
 /** 讀取所有可能 key，回傳 updatedAt 最新的一份 */
 export async function getCloudPortfolio(
   userId: string,
   email?: string | null
 ): Promise<CloudPortfolioEnvelope | null> {
   const kv = getKvClient();
-  let best: CloudPortfolioEnvelope | null = null;
+  const copies: { updatedAt: string; portfolio: unknown }[] = [];
 
   for (const key of portfolioKvKeys(userId, email)) {
     const raw = await kv.get<unknown>(key);
-    const parsed = parseEnvelope(raw);
-    if (!parsed) continue;
-    if (!best || parsed.updatedAt > best.updatedAt) {
-      best = parsed;
+    if (raw === null) continue;
+    if (!isRecord(raw) || typeof raw.updatedAt !== "string" || !Number.isFinite(Date.parse(raw.updatedAt))) {
+      throw new Error("雲端資料版本無法讀取");
     }
+    copies.push({ updatedAt: raw.updatedAt, portfolio: raw.portfolio });
   }
 
-  return best;
+  copies.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const latest = copies[0]?.updatedAt;
+  if (!latest) return null;
+  for (const copy of copies) {
+    if (copy.updatedAt !== latest) break;
+    const portfolio = normalizePortfolioStorage(copy.portfolio);
+    if (portfolio) return { updatedAt: latest, portfolio };
+  }
+  // 讀不到最新的資料時保留原狀，避免把損毀的資料當作首次同步。
+  throw new Error("雲端投資組合資料無法讀取");
 }
 
 const WRITE_IF_CURRENT = `
@@ -111,6 +110,6 @@ export function createCloudEnvelope(
   const previousTime = previousVersion ? Date.parse(previousVersion) : NaN;
   return {
     updatedAt: new Date(Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : 0)).toISOString(),
-    portfolio: normalizePortfolioStorage(portfolio) ?? defaultPortfolioStorage(),
+    portfolio,
   };
 }

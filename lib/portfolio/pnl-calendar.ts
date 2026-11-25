@@ -110,6 +110,7 @@ interface CalendarInstrument {
   buyPrice?: number;
   fallbackQuantity: number;
   knownBuyDate?: boolean;
+  removedOn?: string;
 }
 
 interface ContributionAccumulator extends PnlCalendarContribution {
@@ -138,14 +139,15 @@ function matchesFilter(
 
 function quantityAtEndOfDay(
   storage: PortfolioStorage,
-  holdingId: string,
+  instrument: CalendarInstrument,
   date: string,
-  fallbackQuantity: number
+  fallbackQuantity = instrument.fallbackQuantity
 ): number {
+  if (instrument.removedOn && date >= instrument.removedOn) return 0;
   const transactions = storage.transactions
     .filter(
       (transaction) =>
-        transaction.holdingId === holdingId &&
+        transaction.holdingId === instrument.id &&
         transaction.date <= date &&
         (transaction.type === "opening_balance" ||
           transaction.type === "buy" ||
@@ -297,7 +299,9 @@ export function buildPnlCalendar(
   options: PnlCalendarOptions
 ): PnlCalendarResult {
   const instrumentById = new Map<string, CalendarInstrument>();
-  for (const holding of storage.holdings) {
+  const removals = storage.holdingRemovals ?? [];
+  const removedById = new Map(removals.map(({ holding, removedOn }) => [holding.id, removedOn]));
+  for (const holding of [...storage.holdings, ...removals.map((removal) => removal.holding)]) {
     if (holding.assetType === "property") continue;
     instrumentById.set(holding.id, {
       id: holding.id,
@@ -309,6 +313,7 @@ export function buildPnlCalendar(
       buyPrice: holding.buyPrice,
       knownBuyDate: true,
       fallbackQuantity: holding.quantity,
+      removedOn: removedById.get(holding.id),
     });
   }
   for (const transaction of storage.transactions) {
@@ -345,7 +350,7 @@ export function buildPnlCalendar(
 
   for (const instrument of instruments) {
     const points = (storage.priceHistory[instrument.id] ?? [])
-      .filter((point) => point.date <= options.asOfDate)
+      .filter((point) => point.date <= options.asOfDate && (!instrument.removedOn || point.date < instrument.removedOn))
       .sort((a, b) => a.date.localeCompare(b.date));
 
     const purchase = purchaseByHolding.get(instrument.id);
@@ -362,9 +367,8 @@ export function buildPnlCalendar(
 
       const quantity = quantityAtEndOfDay(
         storage,
-        instrument.id,
-        current.date,
-        instrument.fallbackQuantity
+        instrument,
+        current.date
       );
       if (quantity <= 0) continue;
       // 首筆持有期間行情不可從建倉前收盤價起算，否則會計入尚未持有時的漲跌。
@@ -408,9 +412,8 @@ export function buildPnlCalendar(
 
     const existing =
       contributionsByDate.get(transaction.date) ?? emptyDayAccumulator();
-    const retainedQuantity = Math.min(quantity, quantityAtEndOfDay(
-      storage, transaction.holdingId, transaction.date, quantity
-    ));
+    const instrument = instrumentById.get(transaction.holdingId)!;
+    const retainedQuantity = Math.min(quantity, quantityAtEndOfDay(storage, instrument, transaction.date, quantity));
     const marketPnl = close ? (close.price - buyPrice) * retainedQuantity : 0;
     existing.pnl += marketPnl - transaction.fee - transaction.tax;
     if (close) {
@@ -418,7 +421,6 @@ export function buildPnlCalendar(
       existing.pricedHoldingIds.add(transaction.holdingId);
     }
     existing.totalHoldingIds.add(transaction.holdingId);
-    const instrument = instrumentById.get(transaction.holdingId)!;
     const detail = getContribution(existing, instrument);
     detail.marketPnl += marketPnl;
     detail.fee += transaction.fee;
@@ -510,13 +512,7 @@ export function buildPnlCalendar(
         .filter((point) => point.date < transaction.date)
         .sort((a, b) => b.date.localeCompare(a.date))[0];
       if (previous) {
-        const instrument = instrumentById.get(transaction.holdingId);
-        const quantity = quantityAtEndOfDay(
-          storage,
-          transaction.holdingId,
-          transaction.date,
-          instrument?.fallbackQuantity ?? 0
-        );
+        const quantity = quantityAtEndOfDay(storage, instrument, transaction.date);
         existing.baseValue += previous.price * quantity;
         existing.pricedHoldingIds.add(transaction.holdingId);
       }
@@ -529,7 +525,7 @@ export function buildPnlCalendar(
     contributionsByDate,
     ([date, value]): PnlCalendarDay => {
       for (const instrument of instruments) {
-        if (instrument.buyDate <= date && quantityAtEndOfDay(storage, instrument.id, date, instrument.fallbackQuantity) > 0) {
+        if (instrument.buyDate <= date && quantityAtEndOfDay(storage, instrument, date) > 0) {
           value.totalHoldingIds.add(instrument.id);
         }
       }

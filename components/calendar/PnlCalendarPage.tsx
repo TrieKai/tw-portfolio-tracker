@@ -330,6 +330,9 @@ export function PnlCalendarPage() {
         { id: holding.id, name: holding.name, symbol: holding.symbol },
       ])
     );
+    for (const { holding } of storage.holdingRemovals ?? []) {
+      if (holding.assetType !== "property") options.set(holding.id, { id: holding.id, name: holding.name, symbol: holding.symbol });
+    }
     for (const record of [...storage.transactions, ...storage.sales]) {
       if (record.assetType !== "property" && !options.has(record.holdingId)) {
         options.set(record.holdingId, {
@@ -340,7 +343,7 @@ export function PnlCalendarPage() {
       }
     }
     return Array.from(options.values());
-  }, [investmentHoldings, storage.transactions, storage.sales]);
+  }, [investmentHoldings, storage.holdingRemovals, storage.transactions, storage.sales]);
   const filter = useMemo(() => filterFromValue(filterValue), [filterValue]);
   const showNetPerformance = performanceView === "net" && filter.kind === "investment";
   const calendar = useMemo(

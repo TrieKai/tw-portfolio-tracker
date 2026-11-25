@@ -5,7 +5,7 @@ import {
   isKvConfigured,
   writeCloudPortfolioIfCurrent,
 } from "@/lib/storage/cloud-portfolio";
-import { normalizePortfolioStorage } from "@/lib/storage/parse-portfolio";
+import { decodePortfolioStorage } from "@/lib/storage/parse-portfolio";
 import type {
   PortfolioSyncErrorResponse,
   PortfolioSyncGetResponse,
@@ -77,11 +77,8 @@ export async function PUT(request: Request) {
     body && typeof body === "object" && "portfolio" in body
       ? (body as { portfolio: unknown }).portfolio
       : undefined;
-  const portfolio = normalizePortfolioStorage(rawPortfolio);
-
-  if (!portfolio) {
-    return error(400, "INVALID_BODY", "投資組合資料格式無效");
-  }
+  const decoded = decodePortfolioStorage(rawPortfolio);
+  if (!decoded.ok) return error(400, "INVALID_BODY", decoded.error);
 
   const suppliedVersion =
     body &&
@@ -97,7 +94,7 @@ export async function PUT(request: Request) {
     const existing = await getCloudPortfolio(user.id, user.email);
     const currentVersion = existing?.updatedAt ?? null;
     const expectedVersion = suppliedVersion === undefined ? currentVersion : suppliedVersion;
-    const envelope = createCloudEnvelope(portfolio, currentVersion);
+    const envelope = createCloudEnvelope(decoded.portfolio, currentVersion);
     if (expectedVersion !== currentVersion ||
         !await writeCloudPortfolioIfCurrent(user.id, envelope, expectedVersion, user.email)) {
       const conflict: PortfolioSyncGetResponse = {

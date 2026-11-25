@@ -40,6 +40,9 @@ export interface LoanBalanceSnapshot {
 export interface LoanPaymentRecord {
   id: string;
   paymentDate: string;
+  /** 要沖抵的帳單應繳日。本金快照與實付費用仍按 paymentDate 入帳。 */
+  installmentDueDate?: string;
+  installmentAssignedAt?: string;
   principalPaid: number;
   interestPaid: number;
   feePaid: number;
@@ -71,7 +74,7 @@ export interface LoanRateChange {
 
 export type CreateLoanPaymentInput = Omit<
   LoanPaymentRecord,
-  "id" | "createdAt"
+  "id" | "createdAt" | "installmentAssignedAt"
 >;
 
 export type CreateLoanRateChangeInput = Omit<
@@ -156,6 +159,7 @@ export interface LoanScheduleRow {
   interest: number;
   payment: number;
   remainingPrincipal: number;
+  creditedAmount?: number;
 }
 
 export interface LoanSnapshot {

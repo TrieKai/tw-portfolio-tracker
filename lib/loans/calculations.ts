@@ -64,46 +64,16 @@ function buildPrincipalEvents(
   loan: Loan,
   schedule: LoanScheduleRow[]
 ): Array<{ date: string; principal: number; priority: number }> {
-  const scheduleChanges = schedule
+  const scheduled = schedule
     .filter((row) => row.principal > 0)
-    .map((row) => ({ date: row.paymentDate, row, priority: 0 as const }));
-  const snapshots = (loan.balanceHistory ?? []).map((snapshot) => ({
-    date: snapshot.effectiveDate,
-    snapshot,
-    priority: 1 as const,
+    .map((row) => ({ date: row.paymentDate, principal: row.remainingPrincipal, priority: 0 }));
+  const recorded = (loan.balanceHistory ?? []).map((snapshot) => ({
+    date: snapshot.effectiveDate, principal: snapshot.balance, priority: 1,
   }));
-  const sources = [...scheduleChanges, ...snapshots].sort(
+  // 同日的本金快照代表實際期末餘額，優先於攤還預估。
+  return [...scheduled, ...recorded].sort(
     (a, b) => a.date.localeCompare(b.date) || a.priority - b.priority
   );
-  let scheduleOffset = 0;
-  const events: Array<{ date: string; principal: number; priority: number }> = [];
-
-  for (const source of sources) {
-    if ("row" in source) {
-      events.push({
-        date: source.date,
-        principal:
-          source.row.remainingPrincipal === 0
-            ? 0
-            : Math.max(0, source.row.remainingPrincipal + scheduleOffset),
-        priority: source.priority,
-      });
-      continue;
-    }
-
-    let scheduledPrincipal = loan.openingBalance;
-    for (const row of scheduleChanges) {
-      if (row.date > source.date) break;
-      scheduledPrincipal = row.row.remainingPrincipal;
-    }
-    scheduleOffset = source.snapshot.balance - scheduledPrincipal;
-    events.push({
-      date: source.date,
-      principal: source.snapshot.balance,
-      priority: source.priority,
-    });
-  }
-  return events;
 }
 
 function annuityPayment(principal: number, monthlyRate: number, periods: number) {
@@ -113,82 +83,133 @@ function annuityPayment(principal: number, monthlyRate: number, periods: number)
   return (principal * monthlyRate * factor) / (factor - 1);
 }
 
-export function interestRateAtDate(loan: Loan, asOfDate: string): number {
-  let rate = loan.annualInterestRate;
-  const changes = [...(loan.rateHistory ?? [])].sort(
+function orderedRateChanges(loan: Loan) {
+  return [...(loan.rateHistory ?? [])].sort(
     (a, b) =>
       a.effectiveDate.localeCompare(b.effectiveDate) ||
       a.createdAt.localeCompare(b.createdAt)
   );
-  for (const change of changes) {
+}
+
+export function interestRateAtDate(loan: Loan, asOfDate: string): number {
+  let rate = loan.annualInterestRate;
+  for (const change of orderedRateChanges(loan)) {
     if (change.effectiveDate > asOfDate) break;
     rate = change.annualInterestRate;
   }
   return Math.max(0, rate);
 }
 
+function installmentCredits(loan: Loan) {
+  const credits = new Map<string, { principal: number; interest: number; beforeDuePrincipal: number; postedLate: boolean }>();
+  for (const payment of loan.paymentHistory ?? []) {
+    const dueDate = payment.installmentDueDate;
+    if (!dueDate || payment.principalPaid + payment.interestPaid <= 0) continue;
+    const credit = credits.get(dueDate) ?? { principal: 0, interest: 0, beforeDuePrincipal: 0, postedLate: false };
+    credit.principal += payment.principalPaid;
+    credit.interest += payment.interestPaid;
+    if (payment.paymentDate < dueDate) credit.beforeDuePrincipal += payment.principalPaid;
+    if (payment.paymentDate > dueDate) credit.postedLate = true;
+    credits.set(dueDate, credit);
+  }
+  return credits;
+}
+
 /**
- * 以 trackingStartDate 的本金快照建立還款預估。呼叫端不需要理解各種
- * 攤還法的尾差、寬限期或零利率處理。
+ * 採月利率預估還款，每期按天數分配生效前後的本金與利率。
  */
 export function buildLoanSchedule(loan: Loan): LoanScheduleRow[] {
   const periods = loan.remainingTermMonths;
   if (
     !periods ||
     periods <= 0 ||
-    loan.openingBalance <= 0 ||
+    (loan.openingBalance <= 0 && !loan.balanceHistory?.some((snapshot) => snapshot.balance > 0)) ||
     loan.repaymentMethod === "revolving"
   ) {
     return [];
   }
 
-  const monthlyRate = Math.max(0, loan.annualInterestRate) / 1_200;
   const gracePeriods = Math.min(
     Math.max(0, loan.gracePeriodMonths ?? 0),
     Math.max(0, periods - 1)
   );
   const amortizationPeriods = Math.max(1, periods - gracePeriods);
-  const fixedPayment = annuityPayment(
+  let fixedPrincipal = loan.openingBalance / amortizationPeriods;
+  let monthlyRate = Math.max(0, loan.annualInterestRate) / 1_200;
+  let paymentRate = monthlyRate;
+  let fixedPayment = annuityPayment(
     loan.openingBalance,
     monthlyRate,
     amortizationPeriods
   );
-  const fixedPrincipal = loan.openingBalance / amortizationPeriods;
+  const terms = [
+    ...orderedRateChanges(loan).map((change) => ({ date: change.effectiveDate, rate: change.annualInterestRate })),
+    ...(loan.balanceHistory ?? []).map((snapshot) => ({ date: snapshot.effectiveDate, balance: snapshot.balance })),
+  ].filter((event) => event.date >= loan.trackingStartDate).sort((a, b) => a.date.localeCompare(b.date));
   const firstPaymentDate = resolveFirstPaymentDate(loan);
   const preferredDay = Number(firstPaymentDate.slice(8, 10));
   const rows: LoanScheduleRow[] = [];
+  const credits = installmentCredits(loan);
   let balance = loan.openingBalance;
+  let periodStart = loan.trackingStartDate;
+  let nextEvent = 0;
+  let deferredInterest = 0;
 
   for (let installment = 1; installment <= periods; installment += 1) {
+    const paymentDate = addMonthsClamped(firstPaymentDate, installment - 1, preferredDay);
+    if (loan.closedAt && paymentDate > loan.closedAt) break;
+    const periodDays = Math.max(1, daysBetween(periodStart, paymentDate));
+    let cursor = periodStart;
+    let weightedInterest = 0;
+    while (nextEvent < terms.length && terms[nextEvent].date < paymentDate) {
+      const event = terms[nextEvent++];
+      weightedInterest += balance * monthlyRate * daysBetween(cursor, event.date);
+      if ("rate" in event) monthlyRate = Math.max(0, event.rate) / 1_200;
+      else balance = event.balance;
+      cursor = event.date;
+    }
+    weightedInterest += balance * monthlyRate * daysBetween(cursor, paymentDate);
     const openingPrincipal = balance;
     const inGrace = installment <= gracePeriods;
-    let interest = openingPrincipal * monthlyRate;
+    let interest = weightedInterest / periodDays;
     let principal = 0;
 
     if (loan.repaymentMethod === "bullet") {
-      principal = installment === periods ? openingPrincipal : 0;
-      interest = installment === periods
-        ? openingPrincipal * monthlyRate * periods
-        : 0;
+      deferredInterest += interest;
+      interest = installment === periods ? deferredInterest : 0;
     } else if (!inGrace) {
+      const remainingPeriods = periods - installment + 1;
       if (loan.repaymentMethod === "equal_payment") {
-        principal = fixedPayment - interest;
+        if (monthlyRate !== paymentRate || fixedPayment === 0) {
+          fixedPayment = annuityPayment(openingPrincipal, monthlyRate, remainingPeriods);
+          paymentRate = monthlyRate;
+        }
+        principal = Math.max(0, fixedPayment - interest);
       } else if (loan.repaymentMethod === "equal_principal") {
+        if (fixedPrincipal === 0) fixedPrincipal = openingPrincipal / remainingPeriods;
         principal = fixedPrincipal;
-      } else if (loan.repaymentMethod === "interest_only") {
-        principal = installment === periods ? openingPrincipal : 0;
       }
     }
 
-    if (installment === periods || principal > openingPrincipal) {
-      principal = openingPrincipal;
+    const credit = credits.get(paymentDate);
+    const beforeCredit = openingPrincipal + (credit?.beforeDuePrincipal ?? 0);
+    if (installment === periods || principal > beforeCredit) {
+      principal = beforeCredit;
     }
-    balance = Math.max(0, openingPrincipal - principal);
-    const paymentDate = addMonthsClamped(
-      firstPaymentDate,
-      installment - 1,
-      preferredDay
-    );
+    const creditedAmount = credit ? credit.principal + credit.interest : undefined;
+    if (credit && creditedAmount !== undefined) {
+      const remainingPrincipal = Math.max(0, principal - credit.principal);
+      // 本金已在實付日更新，應繳日只推估尚未沖抵的數額。
+      // 最後一期仍須預估清償全部未償本金，不把多付的利息視為本金。
+      const remainingPayment = installment === periods
+        ? remainingPrincipal + Math.max(0, interest - credit.interest)
+        : Math.max(0, roundMoney(principal + interest - creditedAmount));
+      principal = Math.min(openingPrincipal, remainingPrincipal, remainingPayment);
+      interest = Math.max(0, remainingPayment - remainingPrincipal);
+    }
+    // 已知這期有逾期入帳時，未結清部分仍留在本金，直到有實際快照。
+    balance = credit?.postedLate ? openingPrincipal : Math.max(0, openingPrincipal - principal);
+    periodStart = paymentDate;
 
     rows.push({
       installment,
@@ -198,10 +219,16 @@ export function buildLoanSchedule(loan: Loan): LoanScheduleRow[] {
       interest: roundMoney(interest),
       payment: roundMoney(principal + interest),
       remainingPrincipal: roundMoney(balance),
+      ...(creditedAmount === undefined ? {} : { creditedAmount: roundMoney(creditedAmount) }),
     });
   }
 
   return rows;
+}
+
+export function loanInstallmentOptions(loan: Loan): LoanScheduleRow[] {
+  if (isFlexiblePrincipalLoan(loan)) return [];
+  return buildLoanSchedule(loan).filter((row) => loan.repaymentMethod !== "bullet" || row.installment === loan.remainingTermMonths);
 }
 
 function effectiveEndDate(loan: Loan, asOfDate: string): string {
@@ -255,7 +282,7 @@ export function estimateLoanInterestForPeriod(
       ...event,
       kind: "principal" as const,
     })),
-    ...(loan.rateHistory ?? []).map((change) => ({
+    ...orderedRateChanges(loan).map((change) => ({
       date: change.effectiveDate,
       kind: "rate" as const,
       rate: change.annualInterestRate,
@@ -308,10 +335,10 @@ function estimateInterestForStatementPeriods(
 export function estimateLoanFinancingCostForPeriod(
   loan: Loan,
   fromDate: string,
-  toDate: string
+  toDate: string,
+  schedule: LoanScheduleRow[] = buildLoanSchedule(loan)
 ): number {
   if (toDate <= fromDate) return 0;
-  const schedule = buildLoanSchedule(loan);
   const interest = estimateLoanInterestForPeriod(loan, fromDate, toDate, schedule);
   const includesInitialFee =
     loan.trackingStartDate > fromDate && loan.trackingStartDate <= toDate;
@@ -352,7 +379,7 @@ export function calculateLoanEffectiveApr(loan: Loan): number | null {
   ) {
     return null;
   }
-  const schedule = buildLoanSchedule(loan);
+  const schedule = buildLoanSchedule({ ...loan, balanceHistory: undefined, paymentHistory: undefined, closedAt: undefined });
   const netProceeds = loan.openingBalance - (loan.initialFees ?? 0);
   if (schedule.length === 0 || netProceeds <= 0) return null;
   const payments = schedule.map((row) => row.payment);
@@ -382,13 +409,14 @@ export function calculateLoanEffectiveApr(loan: Loan): number | null {
 export function estimateInvestmentFinancingCostForPeriod(
   loans: Loan[],
   fromDate: string,
-  toDate: string
+  toDate: string,
+  schedules?: ReadonlyMap<Loan, LoanScheduleRow[]>
 ): number {
   return roundMoney(
     loans.reduce((sum, loan) => {
       if (loan.investmentUsePercent <= 0) return sum;
       const share = Math.min(100, loan.investmentUsePercent) / 100;
-      return sum + estimateLoanFinancingCostForPeriod(loan, fromDate, toDate) * share;
+      return sum + estimateLoanFinancingCostForPeriod(loan, fromDate, toDate, schedules?.get(loan)) * share;
     }, 0)
   );
 }
@@ -408,14 +436,12 @@ export function calculateLoanSnapshot(
   const estimatedFinancingCostToDate = estimateLoanFinancingCostForPeriod(
     loan,
     addDaysToIsoDate(loan.trackingStartDate, -1),
-    asOfDate
+    asOfDate,
+    schedule
   );
-  const flexiblePrincipal = isFlexiblePrincipalLoan(loan);
-  const nextPayment =
-    loan.status === "active" && !flexiblePrincipal
-      ? schedule.find((row) => row.paymentDate > asOfDate) ?? null
-      : null;
-  const remainingRows = schedule.filter((row) => row.paymentDate > asOfDate);
+  const canForecast = loan.status === "active" && !isFlexiblePrincipalLoan(loan) && schedule.length > 0;
+  const remainingRows = canForecast ? schedule.filter((row) => row.paymentDate > asOfDate) : [];
+  const nextPayment = remainingRows.find((row) => row.payment > 0) ?? null;
 
   return {
     loan,
@@ -427,11 +453,11 @@ export function calculateLoanSnapshot(
     estimatedInterestToDate,
     estimatedFinancingCostToDate,
     projectedInterest:
-      schedule.length > 0 && !flexiblePrincipal
+      canForecast
         ? roundMoney(remainingRows.reduce((sum, row) => sum + row.interest, 0))
         : null,
     projectedTotalPayment:
-      schedule.length > 0 && !flexiblePrincipal
+      canForecast
         ? roundMoney(remainingRows.reduce((sum, row) => sum + row.payment, 0))
         : null,
   };
@@ -511,10 +537,12 @@ export function buildDailyInvestmentFinancingCosts(
   toDate: string
 ): Record<string, number> {
   const result: Record<string, number> = {};
+  const schedules = new Map(loans.filter((loan) => loan.investmentUsePercent > 0)
+    .map((loan) => [loan, buildLoanSchedule(loan)]));
   let date = fromDate;
   while (date <= toDate) {
     const previous = addDaysToIsoDate(date, -1);
-    const cost = estimateInvestmentFinancingCostForPeriod(loans, previous, date);
+    const cost = estimateInvestmentFinancingCostForPeriod(loans, previous, date, schedules);
     if (Math.abs(cost) > 1e-9) result[date] = cost;
     date = addDaysToIsoDate(date, 1);
   }

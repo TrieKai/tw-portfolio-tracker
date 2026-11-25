@@ -188,7 +188,7 @@ export default function TrendsPage() {
               <div className="glass-card p-4 sm:p-5">
                 <h2 className="mb-1 font-semibold">持倉建倉明細</h2>
                 <p className="mb-4 text-xs text-muted">
-                  各筆持倉自買入日起計入趨勢圖。
+                  各筆持倉自買入日起計入趨勢圖，出清或移除後停止計入。
                 </p>
                 <HoldingLotsTable lots={holdingLots} />
               </div>
@@ -199,7 +199,7 @@ export default function TrendsPage() {
               </p>}
             </section>
           ) : !activeGroup ? (
-            <EmptyState title="目前沒有持倉" description="已賣出的部位可在「我的資產」查看歷史市值。" />
+            <EmptyState title="目前沒有持倉" description="已出清或移除的部位可在「我的資產」查看歷史市值。" />
           ) : (
             <section className="space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">

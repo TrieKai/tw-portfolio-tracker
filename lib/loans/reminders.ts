@@ -1,5 +1,5 @@
 import { parseIsoDate } from "@/lib/date/iso-date";
-import { calculateLoanSnapshot } from "@/lib/loans/calculations";
+import { buildLoanSchedule } from "@/lib/loans/calculations";
 import {
   calculateLoanCollateralValuation,
   hasCollateralRisk,
@@ -33,18 +33,25 @@ export function buildLoanReminders(
 
   for (const loan of loans) {
     if (!isOpenAt(loan, asOfDate)) continue;
-    const snapshot = calculateLoanSnapshot(loan, asOfDate);
-    const recordedPaymentDates = new Set(
-      (loan.paymentHistory ?? []).map((payment) => payment.paymentDate)
-    );
-    const upcomingPayment = snapshot.schedule.find(
-      (row) =>
-        row.paymentDate >= asOfDate &&
-        !recordedPaymentDates.has(row.paymentDate)
-    );
+    const recordedByDate = new Map<string, number>();
+    for (const payment of loan.paymentHistory ?? []) {
+      if (payment.installmentDueDate) continue;
+      const paid = recordedByDate.get(payment.paymentDate) ?? 0;
+      recordedByDate.set(payment.paymentDate, paid + payment.principalPaid + payment.interestPaid);
+    }
+    const schedule = hasFlexibleCredit(loan) ? [] : buildLoanSchedule(loan);
+    const unpaidAmount = (row: (typeof schedule)[number]) =>
+      row.payment - (recordedByDate.get(row.paymentDate) ?? 0);
+    // 舊的未核對排程仍作估算。已有明確期別入帳的部分繳款，才追蹤逾期待補差額。
+    const overdue = schedule.find((row) => row.paymentDate < asOfDate &&
+      (row.creditedAmount ?? 0) > 0 && Math.round(unpaidAmount(row)) > 0);
+    const upcomingPayment = overdue ?? schedule.find((row) => row.paymentDate >= asOfDate &&
+      Math.round(unpaidAmount(row)) > 0);
     if (upcomingPayment) {
       const days = daysBetween(asOfDate, upcomingPayment.paymentDate);
-      if (days !== null && days >= 0 && days <= 7) {
+      if (days !== null && days <= 7) {
+        const recorded = (recordedByDate.get(upcomingPayment.paymentDate) ?? 0) + (upcomingPayment.creditedAmount ?? 0);
+        const dateLabel = days === 0 ? "今天" : `${days} 天後`;
         reminders.push({
           id: `${loan.id}:payment_due:${upcomingPayment.paymentDate}`,
           loanId: loan.id,
@@ -52,8 +59,9 @@ export function buildLoanReminders(
           kind: "payment_due",
           severity: days <= 1 ? "warning" : "info",
           date: upcomingPayment.paymentDate,
-          amount: upcomingPayment.payment,
-          message: days === 0 ? "今天預計繳款" : `${days} 天後預計繳款`,
+          amount: unpaidAmount(upcomingPayment),
+          message: days < 0 ? `${upcomingPayment.paymentDate} 期已過應繳日，預估尚需繳款`
+            : `${dateLabel}${recorded > 0 ? "預計尚需繳款" : "預計繳款"}`,
         });
       }
     }

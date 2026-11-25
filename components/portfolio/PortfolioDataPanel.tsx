@@ -2,6 +2,7 @@
 
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
+import { ErrorAlert } from "@/components/ui/ErrorAlert";
 import { Modal } from "@/components/ui/Modal";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -30,6 +31,7 @@ export function PortfolioDataPanel() {
   const { storage, storageMode, syncStatus, importPortfolio, refreshFromCloud } =
     usePortfolio();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileSelection = useRef(0);
   const reviewRef = useRef<HTMLDivElement>(null);
   const [message, setMessage] = useState<{
     type: "ok" | "error";
@@ -62,10 +64,13 @@ export function PortfolioDataPanel() {
       e.target.value = "";
       if (!file) return;
 
+      const selection = ++fileSelection.current;
+      setConfirm(null);
       setMessage(null);
       const parsed = await readPortfolioImportFile(file);
+      if (selection !== fileSelection.current) return;
       if (!parsed.ok) {
-        setMessage({ type: "error", text: parsed.error });
+        setMessage({ type: "error", text: `${parsed.error.replace(/。$/, "")}。請重新匯出備份或改用其他 JSON 檔。` });
         return;
       }
 
@@ -161,15 +166,11 @@ export function PortfolioDataPanel() {
           目前：{describePortfolioStorage(storage)}
         </p>
 
-        {message && !confirm && (
-          <p role={message.type === "error" ? "alert" : "status"}
-            className={`mt-2 text-sm ${
-              message.type === "error" ? "text-rose-500" : "text-accent"
-            }`}
-          >
-            {message.text}
-          </p>
-        )}
+        {message && !confirm && (message.type === "error" ? (
+          <div className="mt-3 [overflow-wrap:anywhere]">
+            <ErrorAlert title="無法匯入備份" message={message.text} />
+          </div>
+        ) : <p role="status" className="mt-2 text-sm text-accent">{message.text}</p>)}
       </section>
 
       {confirm && (
@@ -378,6 +379,9 @@ function LoanPaymentReview({
                     <span className="font-medium">保留{source}繳款</span>
                     {Number.isFinite(recordedAt) && (
                       <span className="block text-sm text-muted">登錄於 {paymentRecordedAt.format(recordedAt)}</span>
+                    )}
+                    {record.installmentDueDate && (
+                      <span className="block text-sm text-muted">對應期別 {record.installmentDueDate}</span>
                     )}
                     {record.interestPeriodStartDate && record.interestPeriodEndDate && (
                       <span className="block text-sm text-muted">計息期間 {record.interestPeriodStartDate} 至 {record.interestPeriodEndDate}</span>

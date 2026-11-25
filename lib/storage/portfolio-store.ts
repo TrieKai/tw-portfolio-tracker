@@ -173,8 +173,8 @@ export function addHolding(
   const id = newId();
   const { fee = 0, mortgageBalance, ...holdingInput } = input;
   const holding: Holding = {
-    id,
     ...holdingInput,
+    id,
     symbol: normalizeSymbolForAsset(input.assetType, input.symbol, input.name, id),
     market: input.assetType === "stock" ? (input.market ?? "tse") : undefined,
     createdAt: now,
@@ -508,7 +508,7 @@ export function sellHolding(
   }
 
   const afterSale = positionClosed
-    ? removeHolding(next, input.id)
+    ? { ...next, holdings: next.holdings.filter((holding) => holding.id !== input.id) }
     : updateHolding(next, input.id, { quantity: holding.quantity - quantityInCurrentUnits, lastError: undefined });
   const reconciled = reconcileCorporateDividends(afterSale, input.id);
   return persistPnlSummariesForDates(reconciled.storage, [input.sellDate, ...reconciled.dates]);
@@ -579,12 +579,23 @@ export function addCashDividend(
 
 export function removeHolding(
   state: PortfolioStorage,
-  holdingId: string
+  holdingId: string,
+  removedOn = todayIsoDate()
 ): PortfolioStorage {
-  return {
+  const holding = state.holdings.find((item) => item.id === holdingId);
+  if (!holding || !parseIsoDate(removedOn)) return state;
+  const dailySummaries = { ...state.pnlTracking.dailySummaries };
+  delete dailySummaries[removedOn];
+  for (const point of state.priceHistory[holdingId] ?? []) {
+    if (point.date > removedOn) delete dailySummaries[point.date];
+  }
+  const next: PortfolioStorage = {
     ...state,
     holdings: state.holdings.filter((h) => h.id !== holdingId),
+    holdingRemovals: [...(state.holdingRemovals ?? []), { holding, removedOn, removedAt: new Date().toISOString() }],
+    pnlTracking: { ...state.pnlTracking, dailySummaries },
   };
+  return persistPnlSummariesForDates(next, [removedOn]);
 }
 
 export function updateHolding(

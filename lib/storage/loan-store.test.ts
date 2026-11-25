@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { buildDailyInvestmentFinancingCosts, principalAtDate } from "@/lib/loans/calculations";
 import { addDaysToIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
+import { buildExportFile, mergePortfolioStorage, parseImportPayload } from "@/lib/storage/portfolio-export";
 import {
   addLoan,
+  assignLoanPaymentInstallment,
   editLoan,
   recordLoanBalance,
   recordLoanPayment,
@@ -191,7 +193,10 @@ describe("loan store", () => {
       feePaid: 200, subsidyReceived: 0, remainingPrincipalAfter: 0 };
     const paid = recordLoanPayment(closed, id, payment);
     expect(paid.loans[0]).toMatchObject({ status: "paid_off", closedAt: "2026-09-20", paymentHistory: [payment] });
-    expect(buildDailyInvestmentFinancingCosts(paid.loans, "2026-09-20", "2026-09-21")['2026-09-21']).toBeUndefined();
+    const before = buildDailyInvestmentFinancingCosts(closed.loans, "2026-09-20", "2026-09-21");
+    const after = buildDailyInvestmentFinancingCosts(paid.loans, "2026-09-20", "2026-09-21");
+    expect(after["2026-09-20"] - before["2026-09-20"]).toBeCloseTo(200);
+    expect(after["2026-09-21"]).toBeUndefined();
     expect(recordLoanPayment(closed, id, { ...payment, paymentDate: "2026-09-21" })).toBe(closed);
     expect(recordLoanPayment(started, id, { ...payment, paymentDate: "2026-09-31" })).toBe(started);
     expect(recordLoanPayment(started, id, { ...payment, paymentDate: addDaysToIsoDate(todayIsoDate(), 1) })).toBe(started);
@@ -210,6 +215,38 @@ describe("loan store", () => {
     });
 
     expect(next).toBe(added);
+  });
+
+  it("keeps the selected installment separate from the receipt date in a backup round trip", () => {
+    const started = addLoan(defaultPortfolioStorage(), input);
+    const id = started.loans[0].id;
+    const payment = { paymentDate: "2026-09-20", installmentDueDate: "2026-09-30", principalPaid: 10_000,
+      interestPaid: 500, feePaid: 200, subsidyReceived: 0, remainingPrincipalAfter: 990_000 };
+    expect(recordLoanPayment(started, id, { ...payment, installmentDueDate: "2026-09-29" })).toBe(started);
+    const paid = recordLoanPayment(started, id, payment);
+    expect(paid.loans[0].balanceHistory?.[0].effectiveDate).toBe(payment.paymentDate);
+    expect(parseImportPayload(JSON.parse(JSON.stringify(buildExportFile(paid)))))
+      .toMatchObject({ ok: true, portfolio: { loans: [{ paymentHistory: [payment] }] } });
+  });
+
+  it("links and unlinks an old receipt while preserving its amount, date and ending balance across imports", () => {
+    const base = addLoan(defaultPortfolioStorage(), { ...input, annualInterestRate: 0, remainingTermMonths: 1 });
+    const id = base.loans[0].id;
+    const paid = recordLoanPayment(base, id, { paymentDate: "2026-09-20", principalPaid: 1_000_000,
+      interestPaid: 0, feePaid: 0, subsidyReceived: 0, remainingPrincipalAfter: 0, note: "依銀行帳單核對" }, "2026-09-20T00:00:00.000Z");
+    const receipt = paid.loans[0].paymentHistory![0];
+    const linked = assignLoanPaymentInstallment(paid, id, receipt.id, "2026-09-30", "2026-09-21T00:00:00.000Z");
+    const expected = { ...receipt, installmentDueDate: "2026-09-30", installmentAssignedAt: "2026-09-21T00:00:00.000Z" };
+    for (const merged of [mergePortfolioStorage(paid, linked), mergePortfolioStorage(linked, paid)]) {
+      expect(merged.loans[0].paymentHistory).toEqual([expected]);
+      expect(merged.loans[0].balanceHistory).toEqual(paid.loans[0].balanceHistory);
+    }
+    const cleared = assignLoanPaymentInstallment(linked, id, receipt.id, undefined, "2026-09-22T00:00:00.000Z");
+    const imported = parseImportPayload(JSON.parse(JSON.stringify(cleared)));
+    if (!imported.ok) throw new Error(imported.error);
+    const merged = mergePortfolioStorage(linked, imported.portfolio).loans[0].paymentHistory![0];
+    expect(merged).toMatchObject({ ...receipt, installmentAssignedAt: "2026-09-22T00:00:00.000Z" });
+    expect(merged.installmentDueDate).toBeUndefined();
   });
 
   it("keeps dated rate changes instead of rewriting the contract rate", () => {
