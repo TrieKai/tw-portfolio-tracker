@@ -10,8 +10,9 @@ import type {
   LoanSnapshot,
   PortfolioLoanSummary,
 } from "@/lib/types/loan";
-import { isDateInLoanTracking, loanPaymentInterestPeriod, loanPaymentsInTracking } from "@/lib/loans/history";
+import { isDateInLoanTracking, isLoanOpenAt, loanEstimateEndDate, loanPaymentInterestPeriod, loanPaymentsInTracking } from "@/lib/loans/history";
 import { loansWithConsistentPhases } from "@/lib/loans/phases";
+import { investmentUsePercentForPurpose } from "@/lib/loans/purpose";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -92,7 +93,7 @@ function orderedRateChanges(loan: Loan) {
 }
 
 export function interestRateAtDate(loan: Loan, asOfDate: string): number {
-  const date = effectiveEndDate(loan, asOfDate);
+  const date = loanEstimateEndDate(loan, asOfDate);
   let rate = loan.annualInterestRate;
   for (const change of orderedRateChanges(loan)) {
     if (change.effectiveDate > date) break;
@@ -234,20 +235,12 @@ export function loanInstallmentOptions(loan: Loan): LoanScheduleRow[] {
   return buildLoanSchedule(loan).filter((row) => loan.repaymentMethod !== "bullet" || row.installment === loan.remainingTermMonths);
 }
 
-function effectiveEndDate(loan: Loan, asOfDate: string): string {
-  if (loan.status !== "active" && loan.closedAt && loan.closedAt < asOfDate) return loan.closedAt;
-  return asOfDate;
-}
-
 export function principalAtDate(
   loan: Loan,
   asOfDate: string,
   schedule: LoanScheduleRow[] = buildLoanSchedule(loan)
 ): number {
-  if (asOfDate < loan.trackingStartDate) return 0;
-  if (loan.status !== "active" && loan.closedAt && asOfDate >= loan.closedAt) {
-    return 0;
-  }
+  if (!isLoanOpenAt(loan, asOfDate)) return 0;
   let principal = loan.openingBalance;
   const events = buildPrincipalEvents(loan, schedule);
   for (const event of events) {
@@ -271,7 +264,7 @@ export function estimateLoanInterestForPeriod(
     return 0;
   }
 
-  const endDate = effectiveEndDate(loan, toDate);
+  const endDate = loanEstimateEndDate(loan, toDate);
   if (endDate <= fromDate) return 0;
   const startDate = fromDate > loan.trackingStartDate
     ? fromDate
@@ -430,8 +423,8 @@ function sumInvestmentFinancingCosts(
 ): number {
   return roundMoney(
     loans.reduce((sum, loan) => {
-      if (loan.investmentUsePercent <= 0) return sum;
-      const share = Math.min(100, loan.investmentUsePercent) / 100;
+      const share = investmentUsePercentForPurpose(loan.purpose, loan.investmentUsePercent) / 100;
+      if (share <= 0) return sum;
       return sum + estimateLoanFinancingCostForPeriod(loan, fromDate, toDate, schedules?.get(loan)) * share;
     }, 0)
   );
@@ -455,7 +448,7 @@ export function calculateLoanSnapshot(
     asOfDate,
     schedule
   );
-  const canForecast = loan.status === "active" && !isFlexiblePrincipalLoan(loan) && schedule.length > 0;
+  const canForecast = isLoanOpenAt(loan, asOfDate) && !isFlexiblePrincipalLoan(loan) && schedule.length > 0;
   const remainingRows = canForecast ? schedule.filter((row) => row.paymentDate > asOfDate) : [];
   const nextPayment = remainingRows.find((row) => row.payment > 0) ?? null;
 
@@ -495,7 +488,7 @@ export function calculatePortfolioLoanSummary(
   for (const snapshot of snapshots) {
     const { loan, currentPrincipal } = snapshot;
     totalDebt += currentPrincipal;
-    const investmentShare = Math.min(100, Math.max(0, loan.investmentUsePercent)) / 100;
+    const investmentShare = investmentUsePercentForPurpose(loan.purpose, loan.investmentUsePercent) / 100;
     investmentDebt += currentPrincipal * investmentShare;
     if (loan.purpose === "property") propertyDebt += currentPrincipal;
     estimatedInterestToDate += snapshot.estimatedInterestToDate;
@@ -525,11 +518,7 @@ export function calculatePortfolioLoanSummary(
     : 0;
 
   return {
-    activeLoanCount: consistentLoans.filter(
-      (loan) =>
-        loan.trackingStartDate <= asOfDate &&
-        (!loan.closedAt || loan.closedAt > asOfDate)
-    ).length,
+    activeLoanCount: consistentLoans.filter((loan) => isLoanOpenAt(loan, asOfDate)).length,
     totalDebt: roundMoney(totalDebt),
     investmentDebt: roundMoney(investmentDebt),
     propertyDebt: roundMoney(propertyDebt),
@@ -543,7 +532,8 @@ export function calculatePortfolioLoanSummary(
     netInvestmentPnl: roundMoney(
       grossInvestmentPnl - investmentFinancingCostToDate
     ),
-    hasIncompleteData: loans.some((loan) => loan.dataQuality !== "complete"),
+    hasIncompleteData: loans.some((loan) => loan.trackingStartDate <= asOfDate &&
+      (loan.dataQuality !== "complete" || (loan.status !== "active" && !loan.closedAt))),
   };
 }
 
@@ -554,7 +544,8 @@ export function buildDailyInvestmentFinancingCosts(
   toDate: string
 ): Record<string, number> {
   const result: Record<string, number> = {};
-  const consistentLoans = loansWithConsistentPhases(loans).filter((loan) => loan.investmentUsePercent > 0);
+  const consistentLoans = loansWithConsistentPhases(loans).filter((loan) =>
+    investmentUsePercentForPurpose(loan.purpose, loan.investmentUsePercent) > 0);
   if (consistentLoans.length === 0) return result;
   const schedules = new Map(consistentLoans
     .map((loan) => [loan, buildLoanSchedule(loan)]));

@@ -1,6 +1,6 @@
 import { parseIsoDate } from "@/lib/date/iso-date";
 import { buildLoanSchedule } from "@/lib/loans/calculations";
-import { loanPaymentsInTracking } from "@/lib/loans/history";
+import { isLoanOpenAt, loanPaymentsInTracking } from "@/lib/loans/history";
 import { loansWithConsistentPhases } from "@/lib/loans/phases";
 import {
   calculatePortfolioLoanRisk,
@@ -19,13 +19,6 @@ function daysBetween(fromDate: string, toDate: string): number | null {
   return Math.ceil((to.getTime() - from.getTime()) / MS_PER_DAY);
 }
 
-function isOpenAt(loan: Loan, asOfDate: string): boolean {
-  return (
-    loan.trackingStartDate <= asOfDate &&
-    (loan.closedAt ? loan.closedAt > asOfDate : loan.status === "active")
-  );
-}
-
 export function buildLoanReminders(
   loans: Loan[],
   holdings: Holding[],
@@ -36,7 +29,7 @@ export function buildLoanReminders(
   const reminders: LoanReminder[] = [];
 
   for (const loan of loansWithConsistentPhases(loans)) {
-    if (!isOpenAt(loan, asOfDate)) continue;
+    if (!isLoanOpenAt(loan, asOfDate)) continue;
     const recordedByDate = new Map<string, number>();
     const payments = loanPaymentsInTracking(loan);
     for (const payment of payments) {

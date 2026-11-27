@@ -1,6 +1,17 @@
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import type { Loan, LoanPaymentRecord, LoanRevision } from "@/lib/types/loan";
 
+/** 清償日當日起退出未償本金、還款預估與風險監控。 */
+export function isLoanOpenAt(loan: Loan, date: string): boolean {
+  return date >= loan.trackingStartDate && (loan.closedAt ? date < loan.closedAt : loan.status === "active");
+}
+
+/** 已結束但缺少清償日的舊資料，無法推算持續計息的期間。 */
+export function loanEstimateEndDate(loan: Loan, date: string): string {
+  if (loan.closedAt) return loan.closedAt < date ? loan.closedAt : date;
+  return loan.status === "active" ? date : loan.trackingStartDate;
+}
+
 export function isDateInLoanTracking(loan: Loan, date: string): boolean {
   return !!parseIsoDate(date) && date >= loan.trackingStartDate &&
     (loan.status === "active" || (!!loan.closedAt && date <= loan.closedAt));
@@ -11,7 +22,9 @@ export function loanActualEntryEndDate(loan: Loan, today = todayIsoDate()): stri
 }
 
 export function loanPaymentsInTracking(loan: Loan) {
-  return (loan.paymentHistory ?? []).filter((payment) => isDateInLoanTracking(loan, payment.paymentDate));
+  // 舊貸款缺少清償日時，仍可使用已有日期的實付單據。
+  return (loan.paymentHistory ?? []).filter((payment) => isDateInLoanTracking(loan, payment.paymentDate) ||
+    (!loan.closedAt && !!parseIsoDate(payment.paymentDate) && payment.paymentDate >= loan.trackingStartDate));
 }
 
 export function loanPaymentInterestPeriod(loan: Loan, payment: LoanPaymentRecord) {

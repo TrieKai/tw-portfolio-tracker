@@ -8,8 +8,10 @@
 
 import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
 import { resolveLeverage } from "@/lib/portfolio/leverage";
-import { calculateLoanSnapshot } from "@/lib/loans/calculations";
+import { principalAtDate } from "@/lib/loans/calculations";
+import { isLoanOpenAt } from "@/lib/loans/history";
 import { loansWithConsistentPhases } from "@/lib/loans/phases";
+import { investmentUsePercentForPurpose } from "@/lib/loans/purpose";
 import { todayIsoDate } from "@/lib/date/iso-date";
 import type {
   AssetType,
@@ -40,7 +42,7 @@ export interface PortfolioExposureSummary {
   totalExposure: number;
   /** 淨資產（自有資金） */
   netAssets: number;
-  /** 曝險比例（%）；淨資產為 0 時為 null */
+  /** 曝險比例（%）；僅在淨資產為正時有值。 */
   exposureRatioPct: number | null;
   /** 投資用途貸款本金。 */
   investmentLiabilities: number;
@@ -51,18 +53,8 @@ export interface PortfolioExposureSummary {
   personalLiabilities: number;
   /** 是否使用 settings.netAssets 直接指定 */
   usesNetAssetsOverride: boolean;
+  estimatedHoldingCount: number;
   rows: HoldingExposureRow[];
-}
-
-/** 加總指定日期仍未清償的房貸本金。 */
-export function sumPropertyMortgages(
-  loans: Loan[],
-  asOfDate: string = todayIsoDate()
-): number {
-  return loansWithConsistentPhases(loans).reduce((sum, loan) => {
-    if (loan.purpose !== "property") return sum;
-    return sum + calculateLoanSnapshot(loan, asOfDate).currentPrincipal;
-  }, 0);
 }
 
 /** 解析投資組合淨資產；個人消費用途負債不混入投資曝險分母。 */
@@ -79,7 +71,7 @@ export function resolveNetAssets(
   propertyMortgages: number;
   totalLiabilities: number;
 } {
-  if (settings.netAssets !== undefined && settings.netAssets >= 0) {
+  if (settings.netAssets !== undefined && Number.isFinite(settings.netAssets) && settings.netAssets >= 0) {
     return {
       netAssets: settings.netAssets,
       usesOverride: true,
@@ -90,10 +82,7 @@ export function resolveNetAssets(
   }
 
   return {
-    netAssets: Math.max(
-      0,
-      totalMarketValue - investmentLiabilities - propertyMortgages
-    ),
+    netAssets: totalMarketValue - investmentLiabilities - propertyMortgages,
     usesOverride: false,
     investmentLiabilities,
     propertyMortgages,
@@ -108,16 +97,23 @@ export function computePortfolioExposure(
   asOfDate: string = todayIsoDate()
 ): PortfolioExposureSummary {
   const groups = groupHoldingsWithMetrics(holdings);
-  const loanSnapshots = loansWithConsistentPhases(loans).map((loan) => calculateLoanSnapshot(loan, asOfDate));
-  const propertyMortgages = sumPropertyMortgages(loans, asOfDate);
-  const totalLiabilities = loanSnapshots.reduce(
-    (sum, snapshot) => sum + snapshot.currentPrincipal,
-    0
-  );
-  const investmentLiabilities = loanSnapshots.reduce((sum, snapshot) => {
-    const share = Math.min(100, Math.max(0, snapshot.loan.investmentUsePercent)) / 100;
-    return sum + snapshot.currentPrincipal * share;
-  }, 0);
+  let propertyMortgages = 0;
+  let totalLiabilities = 0;
+  let investmentLiabilities = 0;
+  const mortgageByHoldingId = new Map<string, number>();
+  for (const loan of loansWithConsistentPhases(loans)) {
+    if (!isLoanOpenAt(loan, asOfDate)) continue;
+    const principal = principalAtDate(loan, asOfDate);
+    totalLiabilities += principal;
+    const investmentShare = investmentUsePercentForPurpose(loan.purpose, loan.investmentUsePercent) / 100;
+    investmentLiabilities += principal * investmentShare;
+    if (loan.purpose === "property") {
+      propertyMortgages += principal;
+      if (loan.linkedHoldingId) {
+        mortgageByHoldingId.set(loan.linkedHoldingId, (mortgageByHoldingId.get(loan.linkedHoldingId) ?? 0) + principal);
+      }
+    }
+  }
   const rows: HoldingExposureRow[] = [];
   let totalMarketValue = 0;
   let totalExposure = 0;
@@ -128,18 +124,9 @@ export function computePortfolioExposure(
     totalMarketValue += g.marketValue;
     totalExposure += exposureAmount;
 
-    const holdingIds = new Set(g.lots.map((lot) => lot.id));
     const mortgageBalance =
       g.assetType === "property"
-        ? loanSnapshots.reduce(
-            (sum, snapshot) =>
-              snapshot.loan.purpose === "property" &&
-              snapshot.loan.linkedHoldingId &&
-              holdingIds.has(snapshot.loan.linkedHoldingId)
-                ? sum + snapshot.currentPrincipal
-                : sum,
-            0
-          )
+        ? g.lots.reduce((sum, lot) => sum + (mortgageByHoldingId.get(lot.id) ?? 0), 0)
         : undefined;
 
     rows.push({
@@ -191,6 +178,7 @@ export function computePortfolioExposure(
       totalLiabilities - investmentLiabilities - propertyMortgages
     ),
     usesNetAssetsOverride: resolved.usesOverride,
+    estimatedHoldingCount: holdings.filter((holding) => !holding.hasLivePrice).length,
     rows,
   };
 }

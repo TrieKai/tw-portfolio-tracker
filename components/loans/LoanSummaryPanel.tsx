@@ -19,7 +19,7 @@ export function LoanSummaryPanel({
   reminders?: LoanReminder[];
 }) {
   const { formatAmount, maskAmount } = useAmountPrivacy();
-  if (summary.activeLoanCount === 0) {
+  if (summary.activeLoanCount === 0 && summary.investmentFinancingCostToDate === 0 && !summary.hasIncompleteData) {
     return (
       <section className="glass-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <div><h2 className="font-semibold">貸款與融資成本</h2><p className="mt-1 text-sm text-muted">新增貸款後，系統會另外顯示扣息後淨損益。</p></div>

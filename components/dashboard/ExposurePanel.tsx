@@ -34,6 +34,8 @@ export function ExposurePanel({
     settings.netAssets !== undefined ? String(settings.netAssets) : ""
   );
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!editing) {
@@ -45,22 +47,34 @@ export function ExposurePanel({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (readOnly || saving) return;
+    setError(null);
     const patch: Pick<PortfolioSettings, "netAssets"> = {};
 
     const netRaw = netAssetsInput.trim();
     if (netRaw === "") {
       patch.netAssets = undefined;
     } else {
-      const n = Number.parseFloat(netRaw.replace(/,/g, ""));
-      if (!Number.isFinite(n) || n < 0) return;
+      const validAmount = /^\+?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+      const n = Number(netRaw.replace(/,/g, ""));
+      if (!validAmount.test(netRaw) || !Number.isFinite(n)) {
+        setError("請輸入有效的淨資產金額，例如 100,000。");
+        return;
+      }
       patch.netAssets = n;
     }
 
-    if (!(await onSaveSettings(patch))) return;
+    setSaving(true);
+    const saved = await onSaveSettings(patch);
+    setSaving(false);
+    if (!saved) {
+      setError("未能儲存淨資產設定，請再試一次。");
+      return;
+    }
     setEditing(false);
   }
 
-  if (exposure.rows.length === 0) {
+  if (exposure.rows.length === 0 && exposure.totalLiabilities === 0 && !exposure.usesNetAssetsOverride) {
     return (
       <div className="glass-card flex h-48 items-center justify-center p-5 text-sm text-muted">
         尚無持倉，無法計算曝險
@@ -76,28 +90,32 @@ export function ExposurePanel({
         <div>
           <h2 className="text-lg font-semibold">曝險分析</h2>
           <p className="mt-1 text-sm text-muted">
-            曝險金額 = 市值 × 槓桿倍數；曝險比例 = 總曝險 ÷ 淨資產
+            {readOnly ? "依所選日期的持倉估值與未償本金推算。" : "曝險金額 = 市值 × 槓桿倍數；曝險比例 = 總曝險 ÷ 淨資產"}
           </p>
         </div>
         {!readOnly && (
           <button
             type="button"
             className="btn-secondary text-sm"
-            onClick={() => setEditing((v) => !v)}
+            onClick={() => {
+              setError(null);
+              setEditing((v) => !v);
+            }}
+            disabled={saving}
           >
             {editing ? "取消" : "設定淨資產"}
           </button>
         )}
       </div>
 
-      {editing && (
+      {!readOnly && editing && (
         <form
           onSubmit={handleSubmit}
           className="glass-card space-y-4 p-4 sm:p-5"
         >
           <p className="text-sm text-muted">
-            貸款本金會依用途自動納入曝險。若你要直接指定自有資金，可在此覆蓋系統推算值；
-            房貸、信貸與其他借款請到
+            指定金額會用於目前的曝險比例。留空時，系統會依持倉與貸款本金推算。
+            貸款本金可到
             <Link href="/loans" className="mx-1 text-accent hover:underline">
               貸款頁
             </Link>
@@ -112,12 +130,17 @@ export function ExposurePanel({
                 className="input-field mt-1 w-full"
                 placeholder="留空則由市值 − 房貸 − 投資負債推算"
                 value={netAssetsInput}
-                onChange={(e) => setNetAssetsInput(e.target.value)}
+                onChange={(e) => {
+                  setNetAssetsInput(e.target.value);
+                  setError(null);
+                }}
+                aria-describedby={error ? "net-assets-error" : undefined}
               />
             </label>
           </div>
-          <button type="submit" className="btn-primary text-sm">
-            儲存
+          {error && <p id="net-assets-error" role="alert" className="text-sm text-rose-700 dark:text-rose-300">{error}</p>}
+          <button type="submit" disabled={saving} className="btn-primary text-sm">
+            {saving ? "儲存中…" : "儲存"}
           </button>
         </form>
       )}
@@ -126,6 +149,7 @@ export function ExposurePanel({
         <MetricCard
           label="持倉市值"
           value={formatAmount(exposure.totalMarketValue)}
+          sub={exposure.estimatedHoldingCount > 0 ? `${exposure.estimatedHoldingCount} 筆按買入成本估值` : undefined}
         />
         <MetricCard
           label="總曝險金額"
@@ -136,6 +160,7 @@ export function ExposurePanel({
           label="淨資產"
           value={formatAmount(exposure.netAssets)}
           sub={netAssetsHint}
+          highlight={exposure.netAssets < 0 ? "warn" : undefined}
         />
         <MetricCard
           label="曝險比例"
@@ -143,7 +168,7 @@ export function ExposurePanel({
           sub={
             exposure.exposureRatioPct !== null
               ? "總曝險 ÷ 淨資產"
-              : "請設定淨資產"
+              : "淨資產須大於 0 才能計算比例"
           }
           highlight={
             exposure.exposureRatioPct !== null &&
@@ -154,7 +179,7 @@ export function ExposurePanel({
         />
       </div>
 
-      {view !== "compact" && <div className="glass-card overflow-x-auto">
+      {view !== "compact" && exposure.rows.length > 0 && <div className="glass-card overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
             <tr className="border-b border-border/60 text-left text-muted">
@@ -243,7 +268,7 @@ function MetricCard({
     <div className="glass-card min-w-0 p-4">
       <p className="text-sm text-muted">{label}</p>
       <p
-        className={`exposure-metric-value mt-1 whitespace-nowrap text-xl font-semibold tabular-nums ${
+        className={`exposure-metric-value mt-1 text-xl font-semibold tabular-nums [overflow-wrap:anywhere] ${
           highlight === "warn"
             ? "text-amber-600 dark:text-amber-400"
             : "text-foreground"

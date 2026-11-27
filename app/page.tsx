@@ -110,13 +110,13 @@ export default function DashboardPage() {
       ),
       exposure: computePortfolioExposure(
         enriched,
-        { netAssets: storage.settings.netAssets },
+        {},
         storage.loans,
         travelDate
       ),
       pnlBreakdowns: buildPortfolioPnlBreakdowns(enriched, history, travelDate),
     };
-  }, [portfolioHistory, sales, storage.loans, storage.corporateActions, storage.settings.netAssets, travelDate]);
+  }, [portfolioHistory, sales, storage.loans, storage.corporateActions, travelDate]);
 
   if (!ready) {
     return <LoadingSpinner />;
@@ -168,7 +168,7 @@ export default function DashboardPage() {
   const mainLayout = analysisLayout.length > 0
     ? visibleLayout.filter((item) => !ANALYSIS_SECTIONS.has(item.section))
     : visibleLayout;
-  const loanPanel = shownLoanSummary.activeLoanCount > 0 ? (
+  const loanPanel = shownLoanSummary.activeLoanCount > 0 || shownLoanSummary.investmentFinancingCostToDate !== 0 || shownLoanSummary.hasIncompleteData ? (
     <div data-grid-width="full">
       <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} reminders={shownLoanReminders} />
     </div>

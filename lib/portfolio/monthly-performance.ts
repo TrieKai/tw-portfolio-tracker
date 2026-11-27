@@ -5,6 +5,8 @@ import {
   monthPrefixFromIsoDate,
 } from "@/lib/date/iso-date";
 import { loansWithConsistentPhases } from "@/lib/loans/phases";
+import { loanEstimateEndDate, loanPaymentsInTracking } from "@/lib/loans/history";
+import { investmentUsePercentForPurpose } from "@/lib/loans/purpose";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import type { PortfolioStorage } from "@/lib/types/holding";
 
@@ -37,8 +39,9 @@ function monthsWithRecords(storage: PortfolioStorage, asOfDate: string) {
   }
   // 貸款可能在沒有行情及交易的月份繼續計息。
   for (const loan of loansWithConsistentPhases(storage.loans)) {
-    if (loan.investmentUsePercent <= 0 || loan.trackingStartDate > asOfDate) continue;
-    const lastDate = loan.status !== "active" && loan.closedAt && loan.closedAt < asOfDate ? loan.closedAt : asOfDate;
+    if (investmentUsePercentForPurpose(loan.purpose, loan.investmentUsePercent) <= 0 || loan.trackingStartDate > asOfDate) continue;
+    for (const payment of loanPaymentsInTracking(loan)) addDate(payment.paymentDate);
+    const lastDate = loanEstimateEndDate(loan, asOfDate);
     for (const month of listMonthPrefixesDescending(monthPrefixFromIsoDate(loan.trackingStartDate), monthPrefixFromIsoDate(lastDate))) {
       months.add(month);
     }

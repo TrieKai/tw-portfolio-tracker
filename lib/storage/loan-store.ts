@@ -1,5 +1,6 @@
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { loanInstallmentOptions } from "@/lib/loans/calculations";
+import { investmentUsePercentForPurpose } from "@/lib/loans/purpose";
 import { collateralShareFactor, restoreCollateralShareBases } from "@/lib/loans/collateral";
 import { earliestLoanClosureDate, isDateInLoanTracking, loanActualEntryEndDate, loanTrackingStartIssue, recordedPrincipalOn, resolveLoanVersions } from "@/lib/loans/history";
 import type { PortfolioStorage } from "@/lib/types/holding";
@@ -20,10 +21,7 @@ function newId(prefix: string): string {
 }
 
 function normalizeLoanInput(state: PortfolioStorage, input: CreateLoanInput, previous?: Loan): CreateLoanInput {
-  const investmentUsePercent = Math.min(
-    100,
-    Math.max(0, input.investmentUsePercent)
-  );
+  const investmentUsePercent = investmentUsePercentForPurpose(input.purpose, input.investmentUsePercent);
   const previousPositions = previous?.collateralPositions?.some((position) => position.shareBasisFactor === undefined)
     ? restoreCollateralShareBases(state).loans.find((loan) => loan.id === previous.id)?.collateralPositions
     : previous?.collateralPositions;

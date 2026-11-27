@@ -202,6 +202,41 @@ describe("loan calculations", () => {
     expect(snapshot.projectedInterest).toBeGreaterThan(0);
   });
 
+  it("forecasts payments only for loan phases open on the selected date", () => {
+    const future = loan({ trackingStartDate: "2026-03-01", firstPaymentDate: "2026-04-01" });
+    expect(calculatePortfolioLoanSummary([future], { asOfDate: "2026-01-20" })).toMatchObject({
+      activeLoanCount: 0, totalDebt: 0, nextPaymentDate: null,
+    });
+    const closed = loan({ status: "paid_off", closedAt: "2026-03-03", firstPaymentDate: "2026-02-01" });
+    expect(calculatePortfolioLoanSummary([closed], { asOfDate: "2026-01-20" })).toMatchObject({
+      activeLoanCount: 1, totalDebt: 120_000, nextPaymentDate: "2026-02-01",
+    });
+    expect(calculatePortfolioLoanSummary([closed], { asOfDate: "2026-03-03" })).toMatchObject({
+      activeLoanCount: 0, totalDebt: 0, nextPaymentDate: null,
+    });
+  });
+
+  it("does not keep carrying debt and interest forward for a closed legacy loan with no closure date", () => {
+    const closed = loan({ status: "paid_off", closedAt: undefined });
+    const summary = calculatePortfolioLoanSummary([closed], { asOfDate: "2026-03-03" });
+    expect(summary).toMatchObject({
+      activeLoanCount: 0, totalDebt: 0, monthlyInvestmentFinancingCost: 0, hasIncompleteData: true,
+    });
+  });
+
+  it("retains dated financing receipts for a closed loan without inferring a missing closure date", () => {
+    const closed = loan({ status: "paid_off", closedAt: undefined, paymentHistory: [{
+      id: "old-statement", paymentDate: "2026-02-10", createdAt: "2026-02-10T10:00:00Z",
+      principalPaid: 12_000, interestPaid: 350, feePaid: 20, subsidyReceived: 0,
+      interestPeriodStartDate: "2026-01-01", interestPeriodEndDate: "2026-02-10",
+    }] });
+    expect(calculatePortfolioLoanSummary([closed], { asOfDate: "2026-03-03" })).toMatchObject({
+      totalDebt: 0, investmentFinancingCostToDate: 370, monthlyInvestmentFinancingCost: 0,
+    });
+    expect(buildDailyInvestmentFinancingCosts([closed], "2026-02-09", "2026-02-11"))
+      .toEqual({ "2026-02-10": 370 });
+  });
+
   it("preserves dated balance changes when estimating revolving interest", () => {
     const revolving = loan({
       repaymentMethod: "revolving",

@@ -288,8 +288,7 @@ export interface PortfolioSettings {
   /** AI 版面助理與手動介面設定共用的安全白名單偏好。 */
   uiPreferences?: import("@/lib/types/ui-preferences").UiPreferences;
   /**
-   * 淨資產／自有資金（元）
-   * 用於曝險比例 = 總曝險 ÷ 淨資產；未設定時以「持倉市值 − liabilities」推算
+   * 目前的淨資產／自有資金（元）。未設定或回看歷史時，由市值扣除房貸與投資負債推算。
    */
   netAssets?: number;
   /** @deprecated 僅供舊資料遷移；新資料使用 PortfolioStorage.loans。 */

@@ -1,6 +1,7 @@
 import { parseIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot } from "@/lib/loans/calculations";
 import { collateralQuantityOn } from "@/lib/loans/collateral";
+import { isLoanOpenAt } from "@/lib/loans/history";
 import { loansWithConsistentPhases } from "@/lib/loans/phases";
 import { quantityAvailability } from "@/lib/portfolio/quantity";
 import type { CorporateActionRecord, Holding } from "@/lib/types/holding";
@@ -204,9 +205,7 @@ export function calculatePortfolioLoanRisk(
 ) {
   const monitoredLoans = loansWithConsistentPhases(loans).filter(
     (loan) =>
-      hasFlexibleCredit(loan) &&
-      loan.trackingStartDate <= asOfDate &&
-      (loan.closedAt ? loan.closedAt > asOfDate : loan.status === "active")
+      hasFlexibleCredit(loan) && isLoanOpenAt(loan, asOfDate)
   );
   const holdingById = new Map(holdings.map((holding) => [holding.id, holding]));
   const quantitiesByLoan = new Map(monitoredLoans.map((loan) => [

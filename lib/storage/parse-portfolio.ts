@@ -2,6 +2,7 @@ import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import { restoreLatestQuote } from "@/lib/portfolio/price-history";
 import { restoreCollateralShareBases } from "@/lib/loans/collateral";
 import { repairLoanPhaseClosures } from "@/lib/loans/phases";
+import { investmentUsePercentForPurpose } from "@/lib/loans/purpose";
 import type {
   Holding,
   PortfolioSettings,
@@ -297,13 +298,8 @@ function normalizeLoan(raw: unknown): Loan | null {
   }
 
   const now = new Date().toISOString();
-  const investmentUsePercent =
-    typeof raw.investmentUsePercent === "number" &&
-    Number.isFinite(raw.investmentUsePercent)
-      ? Math.min(100, Math.max(0, raw.investmentUsePercent))
-      : raw.purpose === "investment"
-        ? 100
-        : 0;
+  const investmentUsePercent = investmentUsePercentForPurpose(raw.purpose,
+    typeof raw.investmentUsePercent === "number" ? raw.investmentUsePercent : undefined);
   const status = isOneOf(LOAN_STATUSES, raw.status) ? raw.status : "active";
   const dataQuality =
     raw.dataQuality === "complete" ||
