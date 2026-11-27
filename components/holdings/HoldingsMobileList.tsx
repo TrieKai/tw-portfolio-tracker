@@ -1,5 +1,6 @@
 "use client";
 
+import { formatQuantity } from "@/lib/portfolio/quantity";
 import { useState } from "react";
 import {
   formatPercent,
@@ -70,7 +71,7 @@ export function HoldingsMobileList({
                 {!g.isMerged && (
                   <p className="text-xs text-muted tabular-nums">
                     買入價 {maskAmount(formatQuotePrice(g.lots[0].buyPrice, g.assetType))} · 數量{" "}
-                    {g.quantity}
+                    {formatQuantity(g.quantity)}
                   </p>
                 )}
               </div>
@@ -107,7 +108,7 @@ export function HoldingsMobileList({
 
             {g.isMerged && (
               <p className="text-xs text-muted tabular-nums">
-                合計數量 {g.quantity} · 總成本 {formatAmount(g.costBasis)}
+                合計數量 {formatQuantity(g.quantity)} · 總成本 {formatAmount(g.costBasis)}
               </p>
             )}
 

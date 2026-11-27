@@ -1,5 +1,6 @@
 import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import { restoreLatestQuote } from "@/lib/portfolio/price-history";
+import { restoreCollateralShareBases } from "@/lib/loans/collateral";
 import { repairLoanPhaseClosures } from "@/lib/loans/phases";
 import type {
   Holding,
@@ -24,6 +25,7 @@ import {
 import { normalizeUiPreferences } from "@/lib/ui/preferences";
 import { migratePortfolioStorage } from "@/lib/storage/portfolio-migration";
 import { invalidLoanHistoryField, invalidPortfolioField, isRecord } from "@/lib/storage/portfolio-shape";
+import { repairCorporateActionAccounting } from "@/lib/storage/repair-corporate-action-accounting";
 
 const DEFAULT_SETTINGS: PortfolioSettings = {
   autoUpdateEnabled: false,
@@ -88,7 +90,10 @@ function normalizeCollateralPositions(
     ) {
       return [];
     }
-    return [{ holdingId: position.holdingId, quantity: position.quantity }];
+    const shareBasisFactor = optionalPositiveNumber(position.shareBasisFactor);
+    return [{ holdingId: position.holdingId, quantity: position.quantity,
+      ...(shareBasisFactor !== undefined ? { shareBasisFactor } : {}),
+    }];
   });
   return positions.length > 0 ? positions : undefined;
 }
@@ -594,7 +599,7 @@ export function decodePortfolioStorage(
         : {}),
     },
   };
-  return { ok: true, portfolio };
+  return { ok: true, portfolio: restoreCollateralShareBases(repairCorporateActionAccounting(portfolio)) };
 }
 
 export function normalizePortfolioStorage(

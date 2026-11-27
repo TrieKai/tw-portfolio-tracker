@@ -45,7 +45,7 @@ const saleFields = {
   createdAt: string, updatedAt: optional(string),
 };
 const actionFields = {
-  id, holdingId: id, ...instrument, effectiveDate: date, createdAt: string,
+  id, holdingId: id, ...instrument, effectiveDate: date, createdAt: string, updatedAt: optional(string),
   actionType: oneOf("stock_dividend", "cash_dividend", "rights_issue", "mixed", "split",
     "reverse_split", "capital_reduction", "share_exchange", "manual_review"),
   source: oneOf("twse", "tpex", "manual"), sourceEventId: id,
@@ -55,7 +55,7 @@ const actionFields = {
   subscriptionPrice: optional(nonnegative), cashDividend: optional(nonnegative),
   adjustmentRatio: optional(positive), cashReturnPerShare: optional(nonnegative),
   totalCostBefore: optional(nonnegative), totalCostAfter: optional(nonnegative),
-  priceHistoryAdjustedAt: optional(string), note: optional(string),
+  priceHistoryAdjustedAt: optional(string), usesEffectiveDateShares: optional(boolean), note: optional(string),
 };
 const transactionFields = {
   id, holdingId: id, ...instrument, assetType: oneOf("stock", "fund"),

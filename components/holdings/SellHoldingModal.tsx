@@ -2,12 +2,13 @@
 
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { Modal } from "@/components/ui/Modal";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { holdingSaleTerms } from "@/lib/corporate-actions/adjustment";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
+import { formatQuantity, removeQuantityRoundoff, quantityAvailability } from "@/lib/portfolio/quantity";
 import type { HoldingWithMetrics, SellHoldingInput } from "@/lib/types/holding";
 
 export function SellHoldingModal({
@@ -22,7 +23,7 @@ export function SellHoldingModal({
   const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
   const { storage: { corporateActions } } = usePortfolio();
   const unitLabel = getSellUnitLabel(holding.assetType);
-  const [quantity, setQuantity] = useState(String(holding.quantity));
+  const [quantity, setQuantity] = useState<string | null>(null);
   const [sellPrice, setSellPrice] = useState(
     holding.currentPrice !== undefined ? String(holding.currentPrice) : ""
   );
@@ -33,51 +34,40 @@ export function SellHoldingModal({
   const [error, setError] = useState<string | null>(null);
 
   const terms = holdingSaleTerms(holding, corporateActions, sellDate);
+  const quantityInput = quantity ?? String(removeQuantityRoundoff(terms.quantity));
+  const qty = Number(quantityInput);
+  const price = Number(sellPrice);
+  const feeAmount = Number(fee);
+  const taxAmount = Number(tax);
+  const saleStatus = quantityAvailability(qty, terms.quantity);
+  const validPrice = Number.isFinite(price) && price > 0;
+  const validFee = Number.isFinite(feeAmount) && feeAmount >= 0;
+  const validTax = Number.isFinite(taxAmount) && taxAmount >= 0;
 
   function changeSellDate(date: string) {
     if (holdingSaleTerms(holding, corporateActions, date).shareFactor !== terms.shareFactor) {
       setSellPrice("");
     }
     setSellDate(date);
+    setError(null);
   }
 
-  const preview = useMemo(() => {
-    const qty = Number.parseFloat(quantity);
-    const price = Number.parseFloat(sellPrice);
-    const feeAmount = fee.trim() ? Number.parseFloat(fee) : 0;
-    const taxAmount = tax.trim() ? Number.parseFloat(tax) : 0;
-    if (
-      Number.isNaN(qty) ||
-      qty <= 0 ||
-      qty > terms.quantity ||
-      Number.isNaN(price) ||
-      price <= 0
-    ) {
-      return null;
-    }
-    const proceeds = price * qty;
-    const cost = terms.buyPrice * qty;
-    if (!Number.isFinite(feeAmount) || !Number.isFinite(taxAmount)) return null;
-    const realizedPnl = proceeds - cost - feeAmount - taxAmount;
-    const isFullSell = qty >= terms.quantity;
-    return { proceeds, realizedPnl, isFullSell };
-  }, [quantity, sellPrice, fee, tax, terms.buyPrice, terms.quantity]);
+  const preview = saleStatus && validPrice && validFee && validTax ? {
+    proceeds: price * qty,
+    realizedPnl: price * qty - terms.buyPrice * qty - feeAmount - taxAmount,
+    isFullSell: saleStatus === "full",
+  } : null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
     setError(null);
 
-    const qty = Number.parseFloat(quantity);
-    const price = Number.parseFloat(sellPrice);
-    const feeAmount = fee.trim() ? Number.parseFloat(fee) : 0;
-    const taxAmount = tax.trim() ? Number.parseFloat(tax) : 0;
-
-    if (Number.isNaN(qty) || qty <= 0) {
+    if (!Number.isFinite(qty) || qty <= 0) {
       setError("請輸入有效賣出數量");
       return;
     }
-    if (Number.isNaN(price) || price <= 0) {
+    if (!validPrice) {
       setError("請輸入有效賣出價格");
       return;
     }
@@ -85,15 +75,15 @@ export function SellHoldingModal({
       setError(`賣出日須介於買入日 ${holding.buyDate} 與今天之間。`);
       return;
     }
-    if (qty > terms.quantity) {
-      setError(`以成交日數量計算，最多可賣出 ${terms.quantity} ${unitLabel}。`);
+    if (!saleStatus) {
+      setError(`以成交日數量計算，最多可賣出 ${formatQuantity(terms.quantity)} ${unitLabel}。`);
       return;
     }
-    if (!Number.isFinite(feeAmount) || feeAmount < 0) {
+    if (!validFee) {
       setError("請輸入有效手續費");
       return;
     }
-    if (!Number.isFinite(taxAmount) || taxAmount < 0) {
+    if (!validTax) {
       setError("請輸入有效交易稅");
       return;
     }
@@ -122,7 +112,7 @@ export function SellHoldingModal({
           賣出持倉
         </h3>
         <p className="text-sm text-muted">
-          {holding.name}（{holding.symbol}）· 當日可賣出 {terms.quantity}{" "}
+          {holding.name}（{holding.symbol}）· 當日可賣出 {formatQuantity(terms.quantity)}{" "}
           {unitLabel} · 成本均價{" "}
           {formatQuoteAmount(terms.buyPrice, holding.assetType)}
         </p>
@@ -136,15 +126,22 @@ export function SellHoldingModal({
               type="number"
               step="any"
               min="0"
-              max={terms.quantity}
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
+              inputMode="decimal"
+              value={quantityInput}
+              onChange={(e) => {
+                setQuantity(e.target.value);
+                setError(null);
+              }}
               className="input-field min-w-0 flex-1"
               required
             />
             <button
               type="button"
-              onClick={() => setQuantity(String(terms.quantity))}
+              onClick={() => {
+                setQuantity(null);
+                setError(null);
+              }}
+              aria-pressed={quantity === null}
               disabled={terms.quantity <= 0}
               className="btn-secondary shrink-0 text-xs"
             >

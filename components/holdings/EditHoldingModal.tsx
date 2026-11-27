@@ -1,5 +1,6 @@
 "use client";
 
+import { removeQuantityRoundoff } from "@/lib/portfolio/quantity";
 import { Modal } from "@/components/ui/Modal";
 import { FormEvent, useState } from "react";
 import Link from "next/link";
@@ -34,7 +35,7 @@ export function EditHoldingModal({
   const [propertyName, setPropertyName] = useState(holding.name);
   const [resolvedName, setResolvedName] = useState(holding.name);
   const [buyPrice, setBuyPrice] = useState(String(holding.buyPrice));
-  const [quantity, setQuantity] = useState(String(holding.quantity));
+  const [quantity, setQuantity] = useState(String(removeQuantityRoundoff(holding.quantity)));
   const [buyDate, setBuyDate] = useState(holding.buyDate);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -61,7 +62,8 @@ export function EditHoldingModal({
     }
 
     const price = Number.parseFloat(buyPrice);
-    const qty = Number.parseFloat(quantity);
+    const enteredQuantity = Number(quantity);
+    const qty = enteredQuantity === removeQuantityRoundoff(original.quantity) ? original.quantity : enteredQuantity;
 
     if (isProperty) {
       if (!propertyName.trim()) {

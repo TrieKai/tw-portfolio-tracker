@@ -16,9 +16,10 @@ import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot, loanInstallmentOptions } from "@/lib/loans/calculations";
 import { earliestLoanClosureDate, isDateInLoanTracking, loanPaymentInterestPeriod } from "@/lib/loans/history";
 import { conflictingLoanPhaseIds } from "@/lib/loans/phases";
+import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
+import { formatQuantity } from "@/lib/portfolio/quantity";
 import {
   calculateLoanCollateralValuation,
-  calculatePortfolioLoanRiskSummary,
   hasCollateralRisk,
   hasFlexibleCredit,
 } from "@/lib/loans/risk";
@@ -43,6 +44,8 @@ export function LoanManager() {
     ready,
     loans,
     loanSummary,
+    loanRiskSummary: riskSummary,
+    loanRiskValuations,
     loanReminders,
     storage,
     addLoan,
@@ -76,14 +79,10 @@ export function LoanManager() {
       new Map(
         loans.filter((loan) => !conflictingPhases.has(loan.id)).map((loan) => [
           loan.id,
-          calculateLoanCollateralValuation(loan, storage.holdings, today),
+          loanRiskValuations.get(loan.id) ?? calculateLoanCollateralValuation(loan, storage.holdings, today, storage.corporateActions),
         ])
       ),
-    [loans, conflictingPhases, storage.holdings, today]
-  );
-  const riskSummary = useMemo(
-    () => calculatePortfolioLoanRiskSummary(loans, storage.holdings, today),
-    [loans, storage.holdings, today]
+    [loans, conflictingPhases, loanRiskValuations, storage.holdings, storage.corporateActions, today]
   );
 
   if (!ready) return <LoadingSpinner />;
@@ -160,11 +159,33 @@ export function LoanManager() {
           </div>
           <dl className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Stat label="監控中額度" value={`${riskSummary.monitoredLoanCount} 筆`} />
-            <Stat label="最低維持率" value={riskSummary.lowestMaintenanceRatioPercent === null ? "—" : `${riskSummary.lowestMaintenanceRatioPercent.toFixed(1)}%`} />
+            <Stat label={riskSummary.unknownCount > 0 ? "已估算最低維持率" : "最低維持率"} value={riskSummary.lowestMaintenanceRatioPercent === null ? "—" : `${riskSummary.lowestMaintenanceRatioPercent.toFixed(1)}%`} />
             <Stat label="警示／需處理" value={`${riskSummary.warningCount}／${riskSummary.criticalCount}`} />
             <Stat label="最近到期日" value={riskSummary.nextMaturityDate ?? "—"} />
           </dl>
-          {riskSummary.unknownCount > 0 ? <p className="text-xs text-amber-600 dark:text-amber-300">另有 {riskSummary.unknownCount} 筆缺少擔保品、有效現價或契約門檻，暫時無法判斷風險。</p> : null}
+          {riskSummary.collateralOverlaps.length > 0 ? (
+            <div className="space-y-2 rounded-lg bg-amber-400/10 p-3 text-sm text-amber-800 dark:text-amber-200">
+              <p className="font-medium">擔保數量待核對</p>
+              <ul className="space-y-3">
+                {riskSummary.collateralOverlaps.map((overlap) => {
+                  const holding = storage.holdings.find((item) => item.id === overlap.holdingId);
+                  const unit = holding ? getSellUnitLabel(holding.assetType) : "單位";
+                  return (
+                    <li key={overlap.holdingId} className="space-y-1 [overflow-wrap:anywhere]">
+                      <p>{holding?.name}（{holding?.symbol}）合計列為擔保 {formatQuantity(overlap.requestedQuantity)} {unit}，目前持有 {formatQuantity(overlap.availableQuantity)} {unit}。</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        {overlap.loanIds.map((id) => {
+                          const loan = loans.find((item) => item.id === id);
+                          return loan ? <a key={id} href={`#loan-${id}`} className="underline underline-offset-2">{loan.name}</a> : null;
+                        })}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
+          {riskSummary.unknownCount > 0 ? <p className="text-xs text-amber-600 dark:text-amber-300">有 {riskSummary.unknownCount} 筆維持率待核對，詳細原因請查看各筆貸款。</p> : null}
         </section>
       ) : null}
 
@@ -222,6 +243,7 @@ export function LoanManager() {
           restartOf={restartOf ?? undefined}
           predecessor={loans.find((loan) => loan.id === editingLoan?.restartedFromLoanId)}
           holdings={storage.holdings}
+          corporateActions={storage.corporateActions}
           onSave={saveLoan}
           onClose={() => { setEditingLoan(null); setRestartOf(null); setFormOpen(false); }}
         />
@@ -414,7 +436,7 @@ function LoanCard({
     ? snapshot.schedule.filter((row) => row.paymentDate > today && row.payment > 0)
     : [];
   return (
-    <article id={`loan-${loan.id}`} className="glass-card p-4 sm:p-5">
+    <article id={`loan-${loan.id}`} className="glass-card scroll-mt-20 p-4 sm:p-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -557,11 +579,13 @@ function FlexibleCreditDetails({
 }) {
   const { formatAmount } = useAmountPrivacy();
   const secured = hasCollateralRisk(loan);
+  const hasOverlap = risk.overlappingPositionCount > 0;
+  const collateralNeedsReview = hasOverlap || risk.missingPositionCount > 0;
   return (
     <div className="mt-5 space-y-3 border-t border-border pt-4">
       <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {secured ? <Stat label="擔保品市值" value={formatAmount(risk.collateralMarketValue)} /> : null}
-        {secured ? <Stat label="目前維持率" value={risk.maintenanceRatioPercent === null ? "—" : `${risk.maintenanceRatioPercent.toFixed(1)}%`} /> : null}
+        {secured ? <Stat label={collateralNeedsReview ? "可核對的擔保市值" : "擔保品市值"} value={collateralNeedsReview && risk.collateralMarketValue === 0 ? "待核對" : formatAmount(risk.collateralMarketValue)} /> : null}
+        {secured ? <Stat label="目前維持率" value={collateralNeedsReview ? "待核對" : risk.maintenanceRatioPercent === null ? "—" : `${risk.maintenanceRatioPercent.toFixed(1)}%`} /> : null}
         {secured ? <Stat label="距警示可跌" value={risk.warningBufferPercent === null ? "—" : `${risk.warningBufferPercent.toFixed(1)}%`} /> : null}
         {secured ? <Stat label="距追繳可跌" value={risk.callBufferPercent === null ? "—" : `${risk.callBufferPercent.toFixed(1)}%`} /> : null}
         {loan.creditLimit !== undefined ? <Stat label="額度使用率" value={risk.creditUtilizationPercent === null ? "—" : `${risk.creditUtilizationPercent.toFixed(1)}%`} /> : null}
@@ -569,6 +593,7 @@ function FlexibleCreditDetails({
         {loan.maturityDate ? <Stat label="契約到期日" value={loan.maturityDate} sub={risk.daysToMaturity === null ? undefined : risk.daysToMaturity < 0 ? `已逾期 ${Math.abs(risk.daysToMaturity)} 天` : `剩餘 ${risk.daysToMaturity} 天`} /> : null}
       </dl>
       {risk.missingPositionCount > 0 ? <p className="rounded-lg bg-amber-400/10 p-3 text-xs text-amber-700 dark:text-amber-300">有 {risk.missingPositionCount} 筆擔保品缺價、遺失或數量超過追蹤持倉，目前維持率不可作為完整判斷。</p> : null}
+      {hasOverlap ? <p className="rounded-lg bg-amber-400/10 p-3 text-xs text-amber-700 dark:text-amber-300">有 {risk.overlappingPositionCount} 筆持倉的擔保數量需分配。核對後會重新估算維持率。</p> : null}
       {risk.usesManualCollateralValue ? <p className="text-xs text-muted">包含手動輸入的外部擔保品市值；價格變動後請自行更新。</p> : null}
       <p className="text-xs text-muted">{secured ? "維持率與可跌幅是依目前價格的即時估算，實際追繳仍以券商或銀行認定為準。" : "循環額度沒有固定還款表；本金變動時請更正目前動用金額。"}</p>
     </div>

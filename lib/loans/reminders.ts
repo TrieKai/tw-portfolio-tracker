@@ -3,12 +3,12 @@ import { buildLoanSchedule } from "@/lib/loans/calculations";
 import { loanPaymentsInTracking } from "@/lib/loans/history";
 import { loansWithConsistentPhases } from "@/lib/loans/phases";
 import {
-  calculateLoanCollateralValuation,
+  calculatePortfolioLoanRisk,
   hasCollateralRisk,
   hasFlexibleCredit,
 } from "@/lib/loans/risk";
-import type { Holding } from "@/lib/types/holding";
-import type { Loan, LoanReminder } from "@/lib/types/loan";
+import type { CorporateActionRecord, Holding } from "@/lib/types/holding";
+import type { Loan, LoanCollateralValuation, LoanReminder } from "@/lib/types/loan";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -22,14 +22,16 @@ function daysBetween(fromDate: string, toDate: string): number | null {
 function isOpenAt(loan: Loan, asOfDate: string): boolean {
   return (
     loan.trackingStartDate <= asOfDate &&
-    (!loan.closedAt || loan.closedAt > asOfDate)
+    (loan.closedAt ? loan.closedAt > asOfDate : loan.status === "active")
   );
 }
 
 export function buildLoanReminders(
   loans: Loan[],
   holdings: Holding[],
-  asOfDate: string
+  asOfDate: string,
+  corporateActions: CorporateActionRecord[] = [],
+  valuations: ReadonlyMap<string, LoanCollateralValuation> = calculatePortfolioLoanRisk(loans, holdings, asOfDate, corporateActions).valuations
 ): LoanReminder[] {
   const reminders: LoanReminder[] = [];
 
@@ -89,12 +91,8 @@ export function buildLoanReminders(
       }
     }
 
-    if (hasFlexibleCredit(loan)) {
-      const valuation = calculateLoanCollateralValuation(
-        loan,
-        holdings,
-        asOfDate
-      );
+    const valuation = valuations.get(loan.id);
+    if (hasFlexibleCredit(loan) && valuation) {
       const collateralCritical =
         hasCollateralRisk(loan) &&
         valuation.maintenanceRatioPercent !== null &&
@@ -105,7 +103,16 @@ export function buildLoanReminders(
         valuation.maintenanceRatioPercent !== null &&
         loan.maintenanceWarningPercent !== undefined &&
         valuation.maintenanceRatioPercent <= loan.maintenanceWarningPercent;
-      if (collateralCritical) {
+      if (valuation.overlappingPositionCount > 0) {
+        reminders.push({
+          id: `${loan.id}:collateral_overlap`,
+          loanId: loan.id,
+          loanName: loan.name,
+          kind: "collateral_overlap",
+          severity: "info",
+          message: "同一持倉的擔保數量超過持有數量，請核對各筆貸款的分配",
+        });
+      } else if (collateralCritical) {
         reminders.push({
           id: `${loan.id}:critical_risk`,
           loanId: loan.id,
@@ -125,7 +132,7 @@ export function buildLoanReminders(
         });
       } else if (
         hasCollateralRisk(loan) &&
-        valuation.riskLevel === "unknown"
+        (valuation.missingPositionCount > 0 || valuation.riskLevel === "unknown")
       ) {
         reminders.push({
           id: `${loan.id}:risk_data_missing`,
@@ -133,7 +140,9 @@ export function buildLoanReminders(
           loanName: loan.name,
           kind: "risk_data_missing",
           severity: "info",
-          message: "缺少擔保品現價或契約門檻，無法判斷維持率",
+          message: valuation.missingPositionCount > 0
+            ? "擔保品資料不完整，請核對持倉數量與現價"
+            : "缺少擔保品市值或契約門檻，請補齊維持率資料",
         });
       }
     }

@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
+import { mergePortfolioStorage } from "@/lib/storage/portfolio-export";
 import {
   addCashDividend,
   addHolding,
   applyCorporateAction,
   applyManualCorporateAction,
+  applyManualCorporateActionToGroup,
   applyPriceUpdate,
   editHolding,
   sellHolding,
@@ -12,9 +14,51 @@ import {
 } from "@/lib/storage/portfolio-store";
 import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
+import { allocateFifoSell, holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import { addDaysToIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 
 describe("portfolio transaction tracking", () => {
+  it("closes a position when its share-adjusted balance differs from the recorded sale only by floating-point error", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", name: "測試股票", symbol: "2330", quantity: 100, buyPrice: 100, buyDate: "2026-11-03",
+    });
+    const id = initial.holdings[0].id;
+    const adjusted = applyManualCorporateAction(initial, {
+      holdingId: id, actionType: "split", effectiveDate: "2026-11-04", adjustmentRatio: 1.1,
+    });
+    const partial = sellHolding(adjusted, { id, quantity: 20, sellPrice: 100, sellDate: "2026-11-05" });
+    const closed = sellHolding(partial, { id, quantity: 90, sellPrice: 100, sellDate: "2026-11-06" });
+    expect(closed.holdings).toHaveLength(0);
+    expect(closed.sales.at(-1)).toMatchObject({ quantity: 90, proceeds: 9000, positionClosed: true });
+    expect(closed.transactions.at(-1)?.quantity).toBe(partial.holdings[0].quantity);
+  });
+
+  it("accepts the last fractional fund units when subtraction understates the balance", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "fund", symbol: "1234", name: "小數單位基金", quantity: 0.3, buyPrice: 10, buyDate: "2026-11-03",
+    });
+    const id = initial.holdings[0].id;
+    const partial = sellHolding(initial, { id, quantity: 0.1, sellPrice: 10, sellDate: "2026-11-05" });
+    expect(sellHolding(partial, { id, quantity: 0.200001, sellPrice: 10, sellDate: "2026-11-06" })).toBe(partial);
+    const closed = sellHolding(partial, { id, quantity: 0.2, sellPrice: 10, sellDate: "2026-11-06" });
+    expect(closed.holdings).toHaveLength(0);
+    expect(closed.sales.at(-1)).toMatchObject({ quantity: 0.2, positionClosed: true });
+  });
+
+  it("sells all fractional FIFO lots with their own units and preserves a real unsold quantity", () => {
+    const fund = { assetType: "fund" as const, symbol: "1234", name: "小數單位基金", buyPrice: 10 };
+    const first = addHolding(defaultPortfolioStorage(), { ...fund, quantity: 0.6, buyDate: "2026-11-03" });
+    const initial = addHolding(first, { ...fund, quantity: 0.1, buyDate: "2026-11-04" });
+    const trade = { sellPrice: 10, sellDate: "2026-11-06" };
+    const allocations = allocateFifoSell(initial.holdings, 0.7);
+    expect(allocations.map((lot) => lot.quantity)).toEqual([0.6, 0.1]);
+    expect(sellHoldings(initial, allocations.map((lot) => ({ ...trade, id: lot.id, quantity: lot.quantity }))).holdings).toHaveLength(0);
+    const partial = allocateFifoSell(initial.holdings, 0.699999999);
+    const sold = sellHoldings(initial, partial.map((lot) => ({ ...trade, id: lot.id, quantity: lot.quantity })));
+    expect(sold.holdings).toHaveLength(1);
+    expect(sold.holdings[0].quantity).toBeCloseTo(1e-9, 14);
+  });
+
   it("refreshes saved later valuations after a backdated sale and keeps the corrected total after price expiry", () => {
     vi.useFakeTimers();
     try {
@@ -447,6 +491,178 @@ describe("portfolio transaction tracking", () => {
       source: "corporate_action",
     });
     expect(calendar.summary.pnl).toBe(0);
+  });
+
+  it.each(["2026-11-10", "2026-11-12"])("uses ex-date shares when applying an official distribution after a sale dated %s", (sellDate) => {
+    let initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2026-11-02",
+    });
+    const id = initial.holdings[0].id;
+    initial = applyPriceUpdate(initial, id, 100, "2026-11-09", "manual");
+    const event = {
+      id: "fixture-late-mixed", holdingId: id, symbol: "2330", market: "tse" as const, name: "驗證股票",
+      type: "mixed" as const, effectiveDate: "2026-11-10", source: "twse" as const, exDividendLabel: "權息",
+      stockDividendRatio: 0.25, subscriptionRatio: 0, cashDividend: 2, autoApplicable: true,
+    };
+    const trade = { id, quantity: 20, sellPrice: 81, sellDate, fee: 5, tax: 8 };
+    const onTime = sellHolding(applyCorporateAction(initial, event), trade);
+    const late = applyCorporateAction(sellHolding(initial, trade), event);
+    for (const state of [onTime, late]) {
+      expect(state.holdings[0]).toMatchObject({ quantity: 105, buyPrice: 80 });
+      expect(state.corporateActions[0]).toMatchObject({ quantityBefore: 100, quantityAfter: 125 });
+      expect(state.sales[0]).toMatchObject({ quantity: 20, sellPrice: 81, fee: 5, tax: 8, buyPrice: 80, realizedPnl: 7 });
+      expect(state.transactions.find((entry) => entry.type === "cash_dividend")?.amount).toBe(200);
+      expect(state.transactions.find((entry) => entry.type === "sell")).toMatchObject({ quantity: 20, price: 81 });
+      expect(buildPortfolioHistory(state).snapshotOn(sellDate)[0]?.quantity).toBe(105);
+      expect(buildPnlCalendar(state, {
+        month: "2026-11", asOfDate: "2026-11-13", filter: { kind: "investment" },
+      }).summary.pnl).toBe(207);
+      expect(applyCorporateAction(state, event)).toBe(state);
+    }
+  });
+
+  it("updates recorded stock entitlements after a backdated pre-ex-date sale", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2026-11-02",
+    });
+    const id = initial.holdings[0].id;
+    const event = {
+      id: "fixture-exstock-earlier-sale", holdingId: id, symbol: "2330", market: "tse" as const, name: "驗證股票",
+      type: "stock_dividend" as const, effectiveDate: "2026-11-10", source: "twse" as const, exDividendLabel: "除權",
+      stockDividendRatio: 0.25, subscriptionRatio: 0, autoApplicable: true,
+    };
+    const trade = { id, quantity: 40, sellPrice: 105, sellDate: "2026-11-06" };
+    const late = sellHolding(applyCorporateAction(initial, event), trade);
+    const onTime = applyCorporateAction(sellHolding(initial, trade), event);
+    for (const state of [onTime, late]) {
+      expect(state.holdings[0]).toMatchObject({ quantity: 75, buyPrice: 80 });
+      expect(state.corporateActions[0]).toMatchObject({ quantityBefore: 60, quantityAfter: 75, totalCostBefore: 6000, totalCostAfter: 6000 });
+      expect(state.sales[0]).toMatchObject({ buyPrice: 100, quantity: 40, realizedPnl: 200 });
+    }
+  });
+
+  it("reconciles an official share distribution and a post-ex-date sale entered on different devices", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "驗證股票", quantity: 100, buyPrice: 100, buyDate: "2026-11-02",
+    });
+    const id = initial.holdings[0].id;
+    const event = {
+      id: "fixture-exstock-merge", holdingId: id, symbol: "2330", market: "tse" as const, name: "驗證股票",
+      type: "stock_dividend" as const, effectiveDate: "2026-11-10", source: "twse" as const, exDividendLabel: "除權",
+      stockDividendRatio: 0.25, subscriptionRatio: 0, autoApplicable: true,
+    };
+    const applied = applyCorporateAction(initial, event);
+    const traded = sellHolding(initial, { id, quantity: 20, sellPrice: 81, sellDate: "2026-11-12", fee: 5, tax: 8 });
+    for (const [local, backup] of [[applied, traded], [traded, applied]]) {
+      const merged = mergePortfolioStorage(local, backup);
+      expect(merged.holdings[0]).toMatchObject({ quantity: 105, buyPrice: 80 });
+      expect(merged.sales[0]).toMatchObject({ quantity: 20, buyPrice: 80, costBasis: 1600, sellPrice: 81, realizedPnl: 7 });
+      expect(mergePortfolioStorage(merged, traded).sales[0]).toEqual(merged.sales[0]);
+    }
+  });
+
+  it("adjusts a capital return when a subsequently recorded sale happened before the effective date", () => {
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "測試股票", quantity: 100, buyPrice: 100, buyDate: "2026-11-02",
+    });
+    const id = initial.holdings[0].id;
+    const input = { holdingId: id, actionType: "capital_reduction" as const, effectiveDate: "2026-11-10", adjustmentRatio: 0.5, cashReturnPerShare: 30 };
+    const trade = { id, quantity: 40, sellPrice: 105, sellDate: "2026-11-06" };
+    const applied = applyManualCorporateAction(initial, input);
+    const late = sellHolding(applied, trade);
+    const onTime = applyManualCorporateAction(sellHolding(initial, trade), input);
+    for (const state of [onTime, late, mergePortfolioStorage(applied, late)]) {
+      expect(state.holdings[0]).toMatchObject({ quantity: 30, buyPrice: 140 });
+      expect(state.corporateActions[0]).toMatchObject({ quantityBefore: 60, quantityAfter: 30 });
+      expect(state.transactions.find((entry) => entry.type === "capital_return")?.amount).toBe(1800);
+    }
+  });
+
+  it("backdates a capital return to the shares held on the effective date and retains execution terms", () => {
+    let state = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "測試股票",
+      buyDate: "2026-10-01", buyPrice: 100, quantity: 100,
+    });
+    const id = state.holdings[0].id;
+    state = applyPriceUpdate(state, id, 100, "2026-10-29", "manual");
+    state = sellHolding(state, { id, sellDate: "2026-11-02", quantity: 20, sellPrice: 140, fee: 5, tax: 8 });
+    state = applyPriceUpdate(state, id, 140, "2026-11-03", "manual");
+    const adjusted = applyManualCorporateAction(state, {
+      holdingId: id, actionType: "capital_reduction", effectiveDate: "2026-10-30",
+      adjustmentRatio: 0.5, cashReturnPerShare: 30,
+    });
+
+    expect(adjusted.transactions.find((event) => event.type === "capital_return")?.amount).toBe(3000);
+    expect(adjusted.corporateActions[0]).toMatchObject({ quantityBefore: 100, quantityAfter: 50 });
+    expect(adjusted.holdings[0]).toMatchObject({ quantity: 30, buyPrice: 140 });
+    expect(adjusted.sales[0]).toMatchObject({
+      quantity: 20, sellPrice: 140, fee: 5, tax: 8, buyPrice: 140, costBasis: 2800, realizedPnl: -13,
+    });
+    expect(buildPortfolioHistory(adjusted).snapshotOn("2026-11-02")[0]?.quantity).toBe(30);
+    expect(buildPnlCalendar(adjusted, {
+      month: "2026-11", asOfDate: "2026-11-03", filter: { kind: "investment" },
+    }).summary.pnl).toBe(-13);
+    expect(mergePortfolioStorage(state, adjusted).holdings[0]).toMatchObject({ quantity: 30, buyPrice: 140 });
+    expect(mergePortfolioStorage(adjusted, state).holdings[0]).toMatchObject({ quantity: 30, buyPrice: 140 });
+  });
+
+  it("recalculates previously entered capital returns and sales after inserting an earlier action", () => {
+    let state = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "測試股票",
+      buyDate: "2026-10-01", buyPrice: 100, quantity: 100,
+    });
+    const id = state.holdings[0].id;
+    state = applyManualCorporateAction(state, {
+      holdingId: id, actionType: "capital_reduction", effectiveDate: "2026-10-30",
+      adjustmentRatio: 0.8, cashReturnPerShare: 20,
+    });
+    state = { ...state, transactions: state.transactions.map((event) => ({ ...event, corporateActionEventId: undefined })) };
+    state = sellHolding(state, { id, sellDate: "2026-10-20", quantity: 10, sellPrice: 140 });
+    state = sellHolding(state, { id, sellDate: "2026-11-02", quantity: 10, sellPrice: 150 });
+    const adjusted = applyManualCorporateAction(state, {
+      holdingId: id, actionType: "capital_reduction", effectiveDate: "2026-10-10",
+      adjustmentRatio: 0.5, cashReturnPerShare: 30,
+    });
+
+    expect(adjusted.holdings[0]).toMatchObject({ quantity: 22, buyPrice: 150 });
+    expect(adjusted.sales.map(({ quantity, buyPrice, realizedPnl }) => [quantity, buyPrice, realizedPnl])).toEqual([
+      [10, 140, 0], [10, 150, 0],
+    ]);
+    const later = adjusted.corporateActions.find((action) => action.effectiveDate === "2026-10-30");
+    expect(later).toMatchObject({ quantityBefore: 40, quantityAfter: 32, buyPriceBefore: 140, buyPriceAfter: 150 });
+    expect(adjusted.transactions.find((event) => event.type === "capital_return" && event.date === "2026-10-30")?.amount).toBe(800);
+    const restored = mergePortfolioStorage(state, adjusted);
+    expect(restored.holdings[0]).toMatchObject({ quantity: 22, buyPrice: 150 });
+    expect(restored.corporateActions.find((action) => action.id === later?.id)).toEqual(later);
+  });
+
+  it("applies a backdated group adjustment atomically when it conflicts with a recorded sale", () => {
+    const stock = { assetType: "stock" as const, symbol: "2330", name: "測試股票", buyPrice: 100, quantity: 100 };
+    let state = addHolding(defaultPortfolioStorage(), { ...stock, buyDate: "2026-10-01" });
+    state = addHolding(state, { ...stock, buyDate: "2026-10-02" });
+    const [first, second] = state.holdings;
+    const input = { actionType: "capital_reduction" as const, effectiveDate: "2026-10-30", adjustmentRatio: 0.5 };
+    state = sellHolding(state, { id: second.id, sellDate: "2026-11-02", quantity: 60, sellPrice: 200 });
+    expect(applyManualCorporateActionToGroup(state, holdingGroupKey(first), input)).toBe(state);
+  });
+
+  it("keeps earlier sales intact and closes the position if a later sale used all shares after adjustment", () => {
+    let state = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "測試股票",
+      buyDate: "2026-10-01", buyPrice: 100, quantity: 100,
+    });
+    const id = state.holdings[0].id;
+    state = sellHolding(state, { id, sellDate: "2026-10-28", quantity: 10, sellPrice: 110 });
+    state = sellHolding(state, { id, sellDate: "2026-10-30", quantity: 45, sellPrice: 140 });
+    const adjusted = applyManualCorporateAction(state, {
+      holdingId: id, actionType: "capital_reduction", effectiveDate: "2026-10-30",
+      adjustmentRatio: 0.5, cashReturnPerShare: 30,
+    });
+
+    expect(adjusted.holdings).toHaveLength(0);
+    expect(adjusted.sales[0]).toBe(state.sales[0]);
+    expect(adjusted.sales[1]).toMatchObject({ quantity: 45, buyPrice: 140, realizedPnl: 0, positionClosed: true });
+    expect(adjusted.transactions.find((event) => event.type === "capital_return")?.amount).toBe(2700);
   });
 
   it("clears only the corrected instrument's prices while retaining same-symbol price history", () => {

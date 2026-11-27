@@ -1,5 +1,6 @@
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { loanInstallmentOptions } from "@/lib/loans/calculations";
+import { collateralShareFactor, restoreCollateralShareBases } from "@/lib/loans/collateral";
 import { earliestLoanClosureDate, isDateInLoanTracking, loanActualEntryEndDate, loanTrackingStartIssue, recordedPrincipalOn, resolveLoanVersions } from "@/lib/loans/history";
 import type { PortfolioStorage } from "@/lib/types/holding";
 import type {
@@ -18,11 +19,14 @@ function newId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function normalizeLoanInput(input: CreateLoanInput): CreateLoanInput {
+function normalizeLoanInput(state: PortfolioStorage, input: CreateLoanInput, previous?: Loan): CreateLoanInput {
   const investmentUsePercent = Math.min(
     100,
     Math.max(0, input.investmentUsePercent)
   );
+  const previousPositions = previous?.collateralPositions?.some((position) => position.shareBasisFactor === undefined)
+    ? restoreCollateralShareBases(state).loans.find((loan) => loan.id === previous.id)?.collateralPositions
+    : previous?.collateralPositions;
   return {
     ...input,
     name: input.name.trim(),
@@ -59,7 +63,18 @@ function normalizeLoanInput(input: CreateLoanInput): CreateLoanInput {
                 Number.isFinite(position.quantity) &&
                 position.quantity > 0
             )
-            .map((position) => ({ ...position })),
+            .map((position) => {
+              if (position.shareBasisFactor !== undefined && Number.isFinite(position.shareBasisFactor) && position.shareBasisFactor > 0) {
+                return { ...position };
+              }
+              const unchanged = previousPositions?.find((old) => old.holdingId === position.holdingId && old.quantity === position.quantity);
+              if (unchanged) return { ...unchanged };
+              const holding = state.holdings.find((item) => item.id === position.holdingId && item.assetType === "stock");
+              const factor = holding ? collateralShareFactor(holding, state.corporateActions, todayIsoDate()) : undefined;
+              return { holdingId: position.holdingId, quantity: position.quantity,
+                ...(factor !== undefined && Number.isFinite(factor) && factor > 0 ? { shareBasisFactor: factor } : {}),
+              };
+            }),
         }
       : {}),
     ...(input.manualCollateralValue !== undefined
@@ -73,7 +88,7 @@ export function addLoan(
   input: CreateLoanInput,
   now = new Date().toISOString()
 ): PortfolioStorage {
-  const normalized = normalizeLoanInput(input);
+  const normalized = normalizeLoanInput(state, input);
   const loan: Loan = {
     ...normalized,
     id: newId("loan"),
@@ -121,7 +136,7 @@ export function editLoan(
   if (!previous) return state;
   const predecessor = state.loans.find((loan) => loan.id === previous.restartedFromLoanId);
   if (loanTrackingStartIssue(input.trackingStartDate, predecessor, previous.closedAt)) return state;
-  const normalized = normalizeLoanInput(input);
+  const normalized = normalizeLoanInput(state, input, previous);
   const { statusUpdatedAt } = resolveLoanVersions(previous, state.loanRevisions.filter((revision) => revision.loanId === previous.id));
   const next: Loan = {
     ...previous,

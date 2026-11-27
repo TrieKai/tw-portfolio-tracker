@@ -32,7 +32,7 @@ import { groupHoldingsWithMetrics } from "@/lib/portfolio/holding-groups";
 import { buildPortfolioPnlBreakdowns } from "@/lib/portfolio/pnl-breakdown";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
 import { calculatePortfolioLoanSummary } from "@/lib/loans/calculations";
-import { calculatePortfolioLoanRiskSummary } from "@/lib/loans/risk";
+import { calculatePortfolioLoanRisk } from "@/lib/loans/risk";
 import { buildLoanReminders } from "@/lib/loans/reminders";
 import { computePortfolioHealth } from "@/lib/portfolio/health";
 import { computeInvestmentWeather } from "@/lib/portfolio/weather";
@@ -89,6 +89,7 @@ export default function DashboardPage() {
       visibleSales
         .filter((sale) => sale.assetType !== "property")
         .reduce((sum, sale) => sum + sale.realizedPnl, 0);
+    const loanRisk = calculatePortfolioLoanRisk(storage.loans, rawHoldings, travelDate, storage.corporateActions);
     return {
       rawHoldings,
       history,
@@ -99,15 +100,13 @@ export default function DashboardPage() {
         asOfDate: travelDate,
         grossInvestmentPnl,
       }),
-      loanRiskSummary: calculatePortfolioLoanRiskSummary(
-        storage.loans,
-        rawHoldings,
-        travelDate
-      ),
+      loanRiskSummary: loanRisk.summary,
       loanReminders: buildLoanReminders(
         storage.loans,
         rawHoldings,
-        travelDate
+        travelDate,
+        storage.corporateActions,
+        loanRisk.valuations
       ),
       exposure: computePortfolioExposure(
         enriched,
@@ -117,7 +116,7 @@ export default function DashboardPage() {
       ),
       pnlBreakdowns: buildPortfolioPnlBreakdowns(enriched, history, travelDate),
     };
-  }, [portfolioHistory, sales, storage.loans, storage.settings.netAssets, travelDate]);
+  }, [portfolioHistory, sales, storage.loans, storage.corporateActions, storage.settings.netAssets, travelDate]);
 
   if (!ready) {
     return <LoadingSpinner />;

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatQuantity } from "@/lib/portfolio/quantity";
 import { useMemo, useState } from "react";
 import {
   formatPercent,
@@ -386,7 +387,7 @@ function GroupRows({
             <div className="text-xs text-muted">{g.priceDate}</div>
           )}
         </td>
-        <td className="px-4 py-3 tabular-nums">{g.quantity}</td>
+        <td className="px-4 py-3 tabular-nums">{formatQuantity(g.quantity)}</td>
         <td className="px-4 py-3 tabular-nums">
           {formatAmount(g.marketValue)}
         </td>

@@ -30,6 +30,8 @@ export interface LoanCollateralPosition {
   holdingId: string;
   /** 實際設質或融資的股數／基金單位數，不必等於整筆持倉。 */
   quantity: number;
+  /** 輸入股數時已反映的累計換股倍率。 */
+  shareBasisFactor?: number;
 }
 
 /** 隨借隨還或提前還本後的本金快照；同日以最後一次輸入為準。 */
@@ -202,6 +204,7 @@ export interface LoanCollateralValuation {
   trackedCollateralValue: number;
   manualCollateralValue: number;
   missingPositionCount: number;
+  overlappingPositionCount: number;
   maintenanceRatioPercent: number | null;
   warningBufferPercent: number | null;
   callBufferPercent: number | null;
@@ -212,6 +215,13 @@ export interface LoanCollateralValuation {
   usesManualCollateralValue: boolean;
 }
 
+export interface LoanCollateralOverlap {
+  holdingId: string;
+  requestedQuantity: number;
+  availableQuantity: number;
+  loanIds: string[];
+}
+
 export interface PortfolioLoanRiskSummary {
   monitoredLoanCount: number;
   criticalCount: number;
@@ -220,6 +230,7 @@ export interface PortfolioLoanRiskSummary {
   lowestMaintenanceRatioPercent: number | null;
   nextMaturityDate: string | null;
   totalCollateralMarketValue: number;
+  collateralOverlaps: LoanCollateralOverlap[];
 }
 
 export type LoanReminderKind =
@@ -228,6 +239,7 @@ export type LoanReminderKind =
   | "payment_due"
   | "maturity_due"
   | "risk_data_missing"
+  | "collateral_overlap"
   | "unreconciled_interest";
 
 export interface LoanReminder {

@@ -1,8 +1,11 @@
 "use client";
 
+import { formatQuantity } from "@/lib/portfolio/quantity";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { useMemo, useState, type FormEvent } from "react";
 import { corporateActionLabel } from "@/lib/client/corporate-actions-api";
+import { cashReturnPerShareBetween, cashReturnsOnPriceBasis, holdingActions } from "@/lib/corporate-actions/adjustment";
+import { planManualCorporateAction } from "@/lib/corporate-actions/share-adjustment";
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import {
   groupHoldingsWithMetrics,
@@ -10,6 +13,7 @@ import {
 } from "@/lib/portfolio/holding-groups";
 import type { CorporateActionEvent } from "@/lib/corporate-actions/types";
 import type {
+  CorporateActionRecord,
   CorporateActionType,
   HoldingWithMetrics,
   ManualCorporateActionInput,
@@ -40,6 +44,7 @@ interface SuspiciousPriceDrop {
   previousPrice: number;
   currentDate: string;
   currentPrice: number;
+  hasCashReturn: boolean;
   dropRate: number;
   estimatedRatio: number;
 }
@@ -102,6 +107,7 @@ function actionTypeLabel(type: CorporateActionType): string {
 function buildSuspiciousDrops(
   holdings: HoldingWithMetrics[],
   priceHistory: PriceHistoryMap,
+  corporateActions: CorporateActionRecord[],
   threshold: number
 ): SuspiciousPriceDrop[] {
   const rowsByEvent = new Map<string, SuspiciousPriceDrop>();
@@ -121,11 +127,14 @@ function buildSuspiciousDrops(
     const points = [...(priceHistory[representative.id] ?? [])]
       .filter((point) => Number.isFinite(point.price) && point.price > 0)
       .sort((a, b) => a.date.localeCompare(b.date));
+    const cashReturns = cashReturnsOnPriceBasis(holdingActions(corporateActions, representative));
 
     for (let i = 1; i < points.length; i++) {
       const previous = points[i - 1];
       const current = points[i];
-      const dropRate = (previous.price - current.price) / previous.price;
+      const returnedCash = cashReturnPerShareBetween(cashReturns, previous.date, current.date);
+      const comparablePreviousPrice = previous.price - returnedCash;
+      const dropRate = (comparablePreviousPrice - current.price) / previous.price;
       if (dropRate < threshold) continue;
 
       const affectedLots = group.lots.filter(
@@ -154,8 +163,9 @@ function buildSuspiciousDrops(
         previousPrice: previous.price,
         currentDate: current.date,
         currentPrice: current.price,
+        hasCashReturn: returnedCash > 0,
         dropRate,
-        estimatedRatio: previous.price / current.price,
+        estimatedRatio: comparablePreviousPrice / current.price,
       });
     }
   }
@@ -172,7 +182,7 @@ export function CorporateActionsPanel() {
     corporateActionMessage,
     pendingCorporateActions,
     scanCorporateActions,
-    applyDetectedCorporateAction,
+    applyDetectedCorporateActions,
     applyManualActionToGroup,
     storage,
   } = usePortfolio();
@@ -199,10 +209,11 @@ export function CorporateActionsPanel() {
     note: "",
   }));
   const [formError, setFormError] = useState<string | null>(null);
+  const [applyingEvent, setApplyingEvent] = useState<string | null>(null);
 
   const suspiciousDrops = useMemo(
-    () => buildSuspiciousDrops(holdings, storage.priceHistory, 0.3),
-    [holdings, storage.priceHistory]
+    () => buildSuspiciousDrops(holdings, storage.priceHistory, storage.corporateActions, 0.3),
+    [holdings, storage.priceHistory, storage.corporateActions]
   );
   const pendingCorporateActionGroups = useMemo(() => {
     const map = new Map<string, CorporateActionEvent[]>();
@@ -222,36 +233,53 @@ export function CorporateActionsPanel() {
     form.cashReturnPerShare.trim() === ""
       ? undefined
       : Number(form.cashReturnPerShare);
-  const cashReturnPerShare =
-    parsedCashReturnPerShare !== undefined &&
-    Number.isFinite(parsedCashReturnPerShare) &&
-    parsedCashReturnPerShare > 0
-      ? parsedCashReturnPerShare
-      : 0;
-  const preview =
-    selectedGroup && parsedAdjustmentRatio > 0
-      ? {
-          quantityAfter: selectedGroup.quantity * parsedAdjustmentRatio,
-          totalCostBefore: selectedGroup.costBasis,
-          totalCostAfter: Math.max(
-            selectedGroup.costBasis -
-              selectedGroup.quantity * cashReturnPerShare,
-            0
-          ),
-        }
+  const adjustment = {
+    actionType: form.actionType,
+    effectiveDate: form.effectiveDate,
+    adjustmentRatio: parsedAdjustmentRatio,
+    cashReturnPerShare: parsedCashReturnPerShare,
+    note: form.note,
+  };
+  const validAdjustment = Number.isFinite(parsedAdjustmentRatio) && parsedAdjustmentRatio > 0 &&
+    (parsedCashReturnPerShare === undefined || (Number.isFinite(parsedCashReturnPerShare) && parsedCashReturnPerShare >= 0)) &&
+    !!parseIsoDate(form.effectiveDate) && form.effectiveDate <= today;
+  const plans = showManualForm && selectedGroup && validAdjustment
+    ? selectedGroup.lots.map((holding) => planManualCorporateAction(storage, holding, adjustment))
+    : [];
+  const readyPlans = plans.filter((plan) => plan?.status === "ready");
+  const conflict = plans.find((plan) => plan?.status === "conflict");
+  const previewError = conflict
+    ? conflict.reason === "sale"
+      ? "套用後換發股數不足以涵蓋已登錄的賣出。請核對生效日、倍率及賣出股數。"
+      : "調整後的股數或金額超出可計算範圍。請核對倍率和退還現金。"
+    : plans.length > 0 && !readyPlans.length
+      ? "生效日前沒有可套用的買入批次，或這筆調整已登錄。"
       : null;
-  const previewBuyPrice =
-    preview && preview.quantityAfter > 0
-      ? preview.totalCostAfter / preview.quantityAfter
-      : null;
+  const preview = readyPlans.reduce((total, plan) => ({
+    quantityBefore: total.quantityBefore + plan.holding.quantity,
+    quantityAfter: total.quantityAfter + plan.balance,
+    totalCostBefore: total.totalCostBefore + plan.holding.buyPrice * plan.holding.quantity,
+    totalCostAfter: total.totalCostAfter + plan.currentBuyPrice * plan.balance,
+    cashReturn: total.cashReturn + plan.cashReturnTotal,
+  }), { quantityBefore: 0, quantityAfter: 0, totalCostBefore: 0, totalCostAfter: 0, cashReturn: 0 });
 
   const handledCount = storage.corporateActions.length;
   const loading = corporateActionStatus === "loading";
 
+  async function applyOfficialGroup(key: string, events: CorporateActionEvent[]) {
+    setApplyingEvent(key);
+    try {
+      await applyDetectedCorporateActions(events);
+    } finally {
+      setApplyingEvent(null);
+    }
+  }
+
   function openManualForm(patch?: Partial<ManualGroupActionInput>) {
     setForm((prev) => ({
       ...prev,
-      groupKey: patch?.groupKey ?? prev.groupKey ?? stockGroups[0]?.groupKey ?? "",
+      groupKey: patch?.groupKey ?? (stockGroups.some((group) => group.groupKey === prev.groupKey)
+        ? prev.groupKey : stockGroups[0]?.groupKey ?? ""),
       actionType: patch?.actionType ?? prev.actionType,
       effectiveDate: patch?.effectiveDate ?? prev.effectiveDate,
       adjustmentRatio:
@@ -270,7 +298,7 @@ export function CorporateActionsPanel() {
 
   async function handleManualSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!form.groupKey) {
+    if (!selectedGroup) {
       setFormError("請選擇標的");
       return;
     }
@@ -293,13 +321,8 @@ export function CorporateActionsPanel() {
       setFormError("請輸入今天或更早的有效生效日");
       return;
     }
-    const saved = await applyManualActionToGroup(form.groupKey, {
-      actionType: form.actionType,
-      effectiveDate: form.effectiveDate,
-      adjustmentRatio: parsedAdjustmentRatio,
-      cashReturnPerShare: parsedCashReturnPerShare,
-      note: form.note,
-    });
+    if (previewError) return;
+    const saved = await applyManualActionToGroup(form.groupKey, adjustment);
     if (!saved) {
       setFormError("未能儲存公司行動，請確認持倉與瀏覽器儲存空間後重試。");
       return;
@@ -321,7 +344,7 @@ export function CorporateActionsPanel() {
           <button
             type="button"
             onClick={() => void scanCorporateActions()}
-            disabled={loading}
+            disabled={loading || applyingEvent !== null}
             className="btn-secondary w-full sm:w-auto"
           >
             {loading ? "掃描中…" : "掃描除權息"}
@@ -345,6 +368,7 @@ export function CorporateActionsPanel() {
 
       {corporateActionMessage && (
         <p
+          role="status"
           className={
             corporateActionStatus === "error"
               ? "text-sm text-rose-500"
@@ -373,8 +397,7 @@ export function CorporateActionsPanel() {
                 <option value="">請選擇</option>
                 {stockGroups.map((group) => (
                   <option key={group.groupKey} value={group.groupKey}>
-                    {group.name}（{group.symbol}）· {group.lots.length} 筆 · 合計{" "}
-                    {formatMultiplier(group.quantity)} 股
+                    {group.name}（{group.symbol}） · {group.market === "otc" ? "上櫃" : "上市"}
                   </option>
                 ))}
               </select>
@@ -465,21 +488,23 @@ export function CorporateActionsPanel() {
             </label>
           </div>
 
-          {preview && selectedGroup && (
-            <p className="mt-3 text-sm text-muted tabular-nums">
-              預覽：{formatMultiplier(selectedGroup.quantity)} 股 →{" "}
-              {formatMultiplier(preview.quantityAfter)} 股，均價{" "}
-              {formatQuoteAmount(selectedGroup.avgBuyPrice, "stock")} →{" "}
-              {previewBuyPrice !== null
-                ? formatQuoteAmount(previewBuyPrice, "stock")
-                : "-"}
-              ，成本 {formatAmount(preview.totalCostBefore)} →{" "}
-              {formatAmount(preview.totalCostAfter)}
-              {selectedGroup.lots.length > 1 ? `（套用至 ${selectedGroup.lots.length} 筆買入）` : ""}
-            </p>
-          )}
+          <div aria-live="polite">
+            {previewError ? <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{previewError}</p> : readyPlans.length > 0 && (
+              <div className="mt-3 space-y-1 text-sm text-muted tabular-nums">
+                <p>
+                  套用至 {readyPlans.length} 筆買入。剩餘股數{" "}
+                  <span className="[overflow-wrap:anywhere]">{formatQuantity(preview.quantityBefore)} 股 → {formatQuantity(preview.quantityAfter)} 股</span>
+                </p>
+                <p>
+                  剩餘成本 {formatAmount(preview.totalCostBefore)} → {formatAmount(preview.totalCostAfter)}
+                  {preview.quantityAfter > 0 && `，均價 ${formatQuoteAmount(preview.totalCostBefore / preview.quantityBefore, "stock")} → ${formatQuoteAmount(preview.totalCostAfter / preview.quantityAfter, "stock")}`}
+                </p>
+                {preview.cashReturn > 0 && <p>預計退還股款 {formatAmount(preview.cashReturn)}</p>}
+              </div>
+            )}
+          </div>
 
-          {formError && <p className="mt-2 text-sm text-rose-500">{formError}</p>}
+          {formError && <p role="alert" className="mt-2 text-sm text-rose-600 dark:text-rose-400">{formError}</p>}
 
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
             <button
@@ -489,7 +514,7 @@ export function CorporateActionsPanel() {
             >
               取消
             </button>
-            <button type="submit" className="btn-primary">
+            <button type="submit" disabled={!!previewError} className="btn-primary">
               套用調整
             </button>
           </div>
@@ -498,8 +523,7 @@ export function CorporateActionsPanel() {
 
       {hasSuspiciousDrops && (
         <div className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-700/70 dark:bg-amber-950/30 dark:text-amber-100">
-          已自動偵測到 {suspiciousDrops.length} 筆相鄰價格下跌超過 30% 的紀錄，
-          可能是分割、減資換股、除權息或單純行情大跌。
+          有 {suspiciousDrops.length} 筆價差待核對。判斷時會計入已登錄的退還股款。
         </div>
       )}
 
@@ -507,7 +531,7 @@ export function CorporateActionsPanel() {
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold">疑似異常價差</h3>
-            <p className="text-xs text-muted">門檻：相鄰價格下跌 30% 以上</p>
+            <p className="text-xs text-muted">相鄰價格下跌 30% 以上</p>
           </div>
           <ul className="space-y-3">
             {suspiciousDrops.map((row) => (
@@ -524,11 +548,11 @@ export function CorporateActionsPanel() {
                       {row.previousDate}{" "}
                       {formatQuoteAmount(row.previousPrice, "stock")} →{" "}
                       {row.currentDate}{" "}
-                      {formatQuoteAmount(row.currentPrice, "stock")}，下跌{" "}
+                      {formatQuoteAmount(row.currentPrice, "stock")}，{row.hasCashReturn ? "計入退還股款後下跌" : "下跌"}{" "}
                       {formatRatio(row.dropRate)}
                     </p>
                     <p className="mt-1 text-xs text-muted tabular-nums">
-                      {row.lotCount} 筆買入，合計 {formatMultiplier(row.quantity)} 股；推估倍率約{" "}
+                      {row.lotCount} 筆買入，合計 {formatQuantity(row.quantity)} 股；推估倍率約{" "}
                       {formatMultiplier(row.estimatedRatio)} 倍，僅供預填確認。
                     </p>
                   </div>
@@ -560,7 +584,7 @@ export function CorporateActionsPanel() {
             const event = events[0];
             const lot = lotsById.get(event.holdingId);
             const groupKey = lot ? holdingGroupKey(lot) : event.holdingId;
-            const group = stockGroups.find((item) => item.groupKey === groupKey);
+            const eventKey = `${groupKey}:${event.id}`;
             const canApply =
               event.stockDividendRatio > 0 ||
               (event.cashDividend !== undefined && event.cashDividend > 0);
@@ -568,7 +592,7 @@ export function CorporateActionsPanel() {
 
             return (
               <li
-                key={`${groupKey}:${event.id}`}
+                key={eventKey}
                 className="rounded-lg border border-border/80 bg-surface px-3 py-3"
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -580,12 +604,8 @@ export function CorporateActionsPanel() {
                     <p className="mt-1 text-sm text-muted">
                       {event.effectiveDate} · {eventDescription(event, formatAmount, formatQuoteAmount)}
                     </p>
-                    {lot && (
-                      <p className="mt-1 text-xs text-muted tabular-nums">
-                        {group?.lots.length ?? events.length} 筆買入 · 合計{" "}
-                        {formatMultiplier(group?.quantity ?? lot.quantity)} 股 · 均價{" "}
-                        {formatQuoteAmount(group?.avgBuyPrice ?? lot.buyPrice, "stock")}
-                      </p>
+                    {lot && canApply && (
+                      <p className="mt-1 text-xs text-muted">{events.length} 筆符合資格的買入 · 依生效日持股入帳</p>
                     )}
                     {!lot && (
                       <p className="mt-1 text-xs text-muted">已出清批次 · 依除息日持有的股數入帳</p>
@@ -605,13 +625,13 @@ export function CorporateActionsPanel() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => events.forEach(applyDetectedCorporateAction)}
-                    disabled={upcoming}
+                    onClick={() => void applyOfficialGroup(eventKey, events)}
+                    disabled={upcoming || loading || applyingEvent !== null}
                     className={
                       canApply && !upcoming ? "btn-primary text-sm" : "btn-secondary text-sm"
                     }
                   >
-                    {upcoming ? "尚未生效" : canApply ? "套用全部" : "全部標記已處理"}
+                    {upcoming ? "尚未生效" : applyingEvent === eventKey ? "套用中…" : canApply ? "套用全部" : "全部標記已處理"}
                   </button>
                 </div>
               </li>
@@ -641,8 +661,8 @@ export function CorporateActionsPanel() {
                   {actionTypeLabel(action.actionType)}
                 </p>
                 <p className="mt-1 text-xs text-muted tabular-nums">
-                  {action.effectiveDate} · {formatMultiplier(action.quantityBefore)} 股 →{" "}
-                  {formatMultiplier(action.quantityAfter)} 股，均價{" "}
+                  {action.effectiveDate} · {formatQuantity(action.quantityBefore)} 股 →{" "}
+                  {formatQuantity(action.quantityAfter)} 股，均價{" "}
                   {formatQuoteAmount(action.buyPriceBefore, "stock")} →{" "}
                   {formatQuoteAmount(action.buyPriceAfter, "stock")}
                 </p>

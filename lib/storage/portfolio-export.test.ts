@@ -21,6 +21,17 @@ function savedPortfolio() {
 }
 
 describe("backup merging", () => {
+  it("requires a review when merging two valid trades oversells an integer share in a large holding", () => {
+    const quantity = 1_000_000_000_000_000;
+    const initial = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "大股數驗證", buyPrice: 1, quantity, buyDate: "2026-11-02",
+    });
+    const id = initial.holdings[0].id;
+    const local = sellHolding(initial, { id, quantity: quantity - 1, sellDate: "2026-11-05", sellPrice: 1 });
+    const backup = sellHolding(initial, { id, quantity: 2, sellDate: "2026-11-06", sellPrice: 1 });
+    expect(() => mergePortfolioStorage(local, backup)).toThrow(PortfolioImportReviewRequired);
+  });
+
   it("reports malformed entries in wrapped and bare backups before using their valid records", () => {
     const portfolio = savedPortfolio();
     const malformed = { ...portfolio, holdings: [...portfolio.holdings, null] };

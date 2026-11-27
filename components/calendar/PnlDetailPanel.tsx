@@ -147,6 +147,14 @@ function DayDetail({
                       {formatSignedAmount(-(contribution.fee + contribution.tax))}
                     </dd>
                   </div>
+                  {contribution.capitalReturnAdjustment !== undefined && (
+                    <div>
+                      <dt className="text-xs text-muted">退還股款沖抵</dt>
+                      <dd className="mt-0.5 tabular-nums">
+                        {formatSignedAmount(contribution.capitalReturnAdjustment)}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
 
                 {contribution.previousPrice !== undefined &&

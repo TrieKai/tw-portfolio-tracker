@@ -50,7 +50,7 @@ import {
   type PortfolioExposureSummary,
 } from "@/lib/portfolio/exposure";
 import { calculatePortfolioLoanSummary } from "@/lib/loans/calculations";
-import { calculatePortfolioLoanRiskSummary } from "@/lib/loans/risk";
+import { calculatePortfolioLoanRisk } from "@/lib/loans/risk";
 import { buildLoanReminders } from "@/lib/loans/reminders";
 import {
   buildPortfolioPnlBreakdowns,
@@ -117,6 +117,7 @@ import type {
   CreateLoanRateChangeInput,
   EditLoanInput,
   Loan,
+  LoanCollateralValuation,
   LoanReminder,
   LoanStatus,
   PortfolioLoanSummary,
@@ -177,6 +178,7 @@ interface PortfolioContextValue {
   loans: Loan[];
   loanSummary: PortfolioLoanSummary;
   loanRiskSummary: PortfolioLoanRiskSummary;
+  loanRiskValuations: ReadonlyMap<string, LoanCollateralValuation>;
   loanReminders: LoanReminder[];
   sales: SaleTransaction[];
   summary: PortfolioSummary;
@@ -217,7 +219,7 @@ interface PortfolioContextValue {
   updateOne: (id: string) => Promise<boolean>;
   updateAll: () => Promise<void>;
   scanCorporateActions: () => Promise<void>;
-  applyDetectedCorporateAction: (event: CorporateActionEvent) => Promise<boolean>;
+  applyDetectedCorporateActions: (events: CorporateActionEvent[]) => Promise<boolean>;
   applyManualAction: (input: ManualCorporateActionInput) => Promise<boolean>;
   applyManualActionToGroup: (
     groupKey: string,
@@ -552,23 +554,27 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       }),
     [grossInvestmentPnl, loans]
   );
-  const loanRiskSummary = useMemo(
+  const riskDate = todayIsoDate();
+  const { summary: loanRiskSummary, valuations: loanRiskValuations } = useMemo(
     () =>
-      calculatePortfolioLoanRiskSummary(
+      calculatePortfolioLoanRisk(
         loans,
         storage?.holdings ?? [],
-        todayIsoDate()
+        riskDate,
+        storage?.corporateActions
       ),
-    [loans, storage?.holdings]
+    [loans, storage?.holdings, storage?.corporateActions, riskDate]
   );
   const loanReminders = useMemo(
     () =>
       buildLoanReminders(
         loans,
         storage?.holdings ?? [],
-        todayIsoDate()
+        riskDate,
+        storage?.corporateActions,
+        loanRiskValuations
       ),
-    [loans, storage?.holdings]
+    [loans, storage?.holdings, storage?.corporateActions, riskDate, loanRiskValuations]
   );
 
   const exposure = useMemo(
@@ -913,10 +919,19 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const applyDetectedCorporateAction = useCallback(
-    async (event: CorporateActionEvent) => {
-      const saved = await persist((latest) => applyCorporateAction(latest, event));
-      if (saved) setCorporateActionMessage("已處理公司行動");
+  const applyDetectedCorporateActions = useCallback(
+    async (events: CorporateActionEvent[]) => {
+      const saved = await persist((latest) => {
+        let next = latest;
+        for (const event of events) {
+          const applied = applyCorporateAction(next, event);
+          if (applied === next) return null;
+          next = applied;
+        }
+        return next;
+      });
+      setCorporateActionStatus(saved ? "done" : "error");
+      setCorporateActionMessage(saved ? "已處理公司行動" : "未能套用公司行動。請重新掃描後再試。");
       return saved;
     },
     [persist]
@@ -1121,6 +1136,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       loans,
       loanSummary,
       loanRiskSummary,
+      loanRiskValuations,
       loanReminders,
       sales,
       summary,
@@ -1153,7 +1169,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       updateOne,
       updateAll,
       scanCorporateActions,
-      applyDetectedCorporateAction,
+      applyDetectedCorporateActions,
       applyManualAction,
       applyManualActionToGroup,
       refreshPortfolioForRange,
@@ -1179,6 +1195,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       loans,
       loanSummary,
       loanRiskSummary,
+      loanRiskValuations,
       loanReminders,
       sales,
       summary,
@@ -1207,7 +1224,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       updateOne,
       updateAll,
       scanCorporateActions,
-      applyDetectedCorporateAction,
+      applyDetectedCorporateActions,
       applyManualAction,
       applyManualActionToGroup,
       refreshPortfolioForRange,

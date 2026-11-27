@@ -1,5 +1,6 @@
 "use client";
 
+import { formatQuantity } from "@/lib/portfolio/quantity";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import {
   formatPercent,
@@ -51,7 +52,7 @@ export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
             <div className="grid grid-cols-2 gap-2 text-xs text-muted">
               <span>賣出日 {s.sellDate}</span>
               <span className="text-right">
-                {s.quantity} × {formatQuoteAmount(s.sellPrice, s.assetType)}
+                {formatQuantity(s.quantity)} × {formatQuoteAmount(s.sellPrice, s.assetType)}
               </span>
             </div>
           </li>
@@ -91,7 +92,7 @@ export function SaleHistoryTable({ sales }: { sales: SaleTransaction[] }) {
                   <td className="px-4 py-3 text-muted">
                     {getAssetTypeLabel(s.assetType)}
                   </td>
-                  <td className="px-4 py-3 tabular-nums">{s.quantity}</td>
+                  <td className="px-4 py-3 tabular-nums">{formatQuantity(s.quantity)}</td>
                   <td className="px-4 py-3 tabular-nums">
                     {formatQuoteAmount(s.sellPrice, s.assetType)}
                   </td>

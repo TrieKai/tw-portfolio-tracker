@@ -5,6 +5,7 @@
 
 import { PORTFOLIO_STORAGE_KEY } from "@/lib/portfolio/constants";
 import { normalizeToIsoDate, parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
+import { nextRecordTime } from "@/lib/date/next-record-time";
 import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
 import { pnlDatesUsingChangedPrices } from "@/lib/portfolio/price-history";
 import {
@@ -13,11 +14,13 @@ import {
 } from "@/lib/storage/parse-portfolio";
 import { normalizeStockSymbol } from "@/lib/prices/stock-symbol";
 import { corporateActionAdjustmentRatio, costOnDate, holdingActions, holdingSaleTerms, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
+import { planManualCorporateAction, planShareAdjustment, type ShareAdjustmentPlan } from "@/lib/corporate-actions/share-adjustment";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
+import { quantityAvailability } from "@/lib/portfolio/quantity";
 import { corporateEventForLot, dividendShareCount, isDividendDateInPosition, listDividendLots } from "@/lib/portfolio/dividend-lots";
-import { reconcileCorporateDividends } from "@/lib/portfolio/corporate-dividends";
+import { reconcileCorporateDistributions } from "@/lib/portfolio/corporate-distributions";
 import { applyDividendPnlChange, dividendPnlByDate, dividendPnlChange, hasNewerTradeOnSummaryDate } from "@/lib/portfolio/dividend-pnl";
-import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
+import { persistPnlSummariesForDates } from "@/lib/portfolio/persist-pnl-summaries";
 import type {
   CorporateActionRecord,
   CashDividendInput,
@@ -102,60 +105,11 @@ export async function commitPortfolio(
   });
 }
 
-function nextRecordTime(previous: string): string {
-  const timestamp = Date.parse(previous);
-  return new Date(Math.max(Date.now(), Number.isFinite(timestamp) ? timestamp + 1 : 0)).toISOString();
-}
-
 function newId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
     return crypto.randomUUID();
   }
   return `h-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-export function persistPnlSummariesForDates(
-  state: PortfolioStorage,
-  dates: string[]
-): PortfolioStorage {
-  const dateSet = new Set(dates);
-  const endByMonth = new Map<string, string>();
-  for (const date of dateSet) {
-    const month = date.slice(0, 7);
-    const existing = endByMonth.get(month);
-    if (!existing || date > existing) endByMonth.set(month, date);
-  }
-  if (endByMonth.size === 0) return state;
-
-  const dailySummaries = { ...state.pnlTracking.dailySummaries };
-  const computedAt = new Date().toISOString();
-  for (const [month, asOfDate] of endByMonth) {
-    const calendar = buildPnlCalendar(state, {
-      month,
-      asOfDate,
-      filter: { kind: "investment" },
-    });
-    for (const day of calendar.days) {
-      if (!dateSet.has(day.date)) continue;
-      dailySummaries[day.date] = {
-        date: day.date,
-        pnl: day.pnl,
-        returnRate: day.returnRate,
-        returnBase: day.returnBase,
-        gapStartDate: day.gapStartDate,
-        saleWithoutPriorPrice: day.saleWithoutPriorPrice,
-        quality: day.quality,
-        computedAt,
-      };
-    }
-  }
-  return {
-    ...state,
-    pnlTracking: {
-      ...state.pnlTracking,
-      dailySummaries,
-    },
-  };
 }
 
 function persistPricePnlSummaries(state: PortfolioStorage, holding: Holding, changedDates: string[]): PortfolioStorage {
@@ -438,7 +392,7 @@ export function editHolding(
       },
     ],
   };
-  const reconciled = reconcileCorporateDividends(corrected, input.id);
+  const reconciled = reconcileCorporateDistributions(corrected, input.id);
   const affectedDates = new Set([originalTransaction.date, correctedTransaction.date, ...reconciled.dates]);
   if (positionChanged) {
     for (const { date } of state.priceHistory[input.id] ?? []) {
@@ -509,12 +463,12 @@ export function sellHolding(
   if (!holding) return state;
 
   const qty = input.quantity;
-  if (!Number.isFinite(qty) || qty <= 0) return state;
   if (!Number.isFinite(input.sellPrice) || input.sellPrice <= 0) return state;
   if (!parseIsoDate(input.sellDate) || input.sellDate < holding.buyDate || input.sellDate > todayIsoDate()) return state;
   const terms = holdingSaleTerms(holding, state.corporateActions, input.sellDate);
-  if (qty > terms.quantity || terms.quantity <= 0) return state;
-  const positionClosed = qty >= terms.quantity;
+  const saleStatus = quantityAvailability(qty, terms.quantity);
+  if (!saleStatus) return state;
+  const positionClosed = saleStatus === "full";
   const quantityInCurrentUnits = positionClosed ? holding.quantity : qty * terms.shareFactor;
   const sale = buildSaleRecord(holding, input, terms.buyPrice, positionClosed);
   let next: PortfolioStorage = {
@@ -556,7 +510,7 @@ export function sellHolding(
     : updateHolding(next, input.id, { quantity: holding.quantity - quantityInCurrentUnits, lastError: undefined });
   if (holding.assetType === "property") return afterSale;
 
-  const reconciled = reconcileCorporateDividends(afterSale, input.id);
+  const reconciled = reconcileCorporateDistributions(afterSale, input.id);
   const affectedDates = new Set([input.sellDate, ...reconciled.dates]);
   for (const point of afterSale.priceHistory[input.id] ?? []) {
     if (point.date > input.sellDate) affectedDates.add(point.date);
@@ -992,12 +946,14 @@ export function applyCorporateAction(
     Number.isFinite(event.stockDividendRatio) && event.stockDividendRatio > 0
       ? event.stockDividendRatio
       : 0;
-  const quantityBefore = holding?.quantity ?? dividendShares ?? 0;
+  const plan = ratio > 0 && holding ? planShareAdjustment(state, holding, {
+    sourceEventId: event.id,
+    effectiveDate: event.effectiveDate,
+    adjustmentRatio: 1 + ratio,
+  }) : null;
+  if (ratio > 0 && plan?.status !== "ready") return state;
+  const quantityBefore = dividendShares ?? holding?.quantity ?? 0;
   const buyPriceBefore = holding?.buyPrice ?? state.sales.find((sale) => sale.holdingId === lot.id)?.buyPrice ?? 0;
-  const totalCost = quantityBefore * buyPriceBefore;
-  const quantityAfter = ratio > 0 ? quantityBefore * (1 + ratio) : quantityBefore;
-  const buyPriceAfter =
-    ratio > 0 && quantityAfter > 0 ? totalCost / quantityAfter : buyPriceBefore;
   const now = new Date().toISOString();
   const cashDividend = event.cashDividend && Number.isFinite(event.cashDividend) && event.cashDividend > 0
     ? event.cashDividend : undefined;
@@ -1023,27 +979,23 @@ export function applyCorporateAction(
     subscriptionPrice: event.subscriptionPrice,
     cashDividend,
     adjustmentRatio: ratio > 0 ? 1 + ratio : undefined,
-    quantityBefore: ratio <= 0 ? dividendShares ?? quantityBefore : quantityBefore,
-    quantityAfter: ratio <= 0 ? dividendShares ?? quantityAfter : quantityAfter,
-    buyPriceBefore,
-    buyPriceAfter,
-    totalCostBefore: ratio <= 0 && dividendShares !== null ? buyPriceBefore * dividendShares : totalCost,
-    totalCostAfter: ratio > 0 ? totalCost : undefined,
+    ...(plan?.status === "ready" ? plan.terms : {
+      quantityBefore, quantityAfter: quantityBefore, buyPriceBefore, buyPriceAfter: buyPriceBefore,
+      totalCostBefore: buyPriceBefore * quantityBefore,
+    }),
     priceHistoryAdjustedAt: ratio > 0 ? now : undefined,
+    usesEffectiveDateShares: plan?.status === "ready" ? true : undefined,
     note: event.note,
     createdAt: now,
   };
 
-  let withRecord: PortfolioStorage = {
-    ...state,
-    corporateActions: [...state.corporateActions, record],
-  };
+  let withDividend = state;
 
   if (cashAmount !== undefined && !sameManualDividend) {
-    withRecord = {
-      ...withRecord,
+    withDividend = {
+      ...state,
       transactions: [
-        ...withRecord.transactions,
+        ...state.transactions,
         {
           id: newId(),
           type: "cash_dividend",
@@ -1067,49 +1019,11 @@ export function applyCorporateAction(
     };
   }
 
-  const finalize = (portfolio: PortfolioStorage) => {
-    const reconciled = reconcileCorporateDividends(portfolio, lot.id);
-    const dates = [event.effectiveDate, ...reconciled.dates];
-    if (ratio <= 0 || !holding) return persistDividendPnlSummaries(state, reconciled.storage, dates);
-    const dailySummaries = { ...reconciled.storage.pnlTracking.dailySummaries };
-    for (const date of dates) delete dailySummaries[date];
-    return persistPnlSummariesForDates({
-      ...reconciled.storage, pnlTracking: { ...reconciled.storage.pnlTracking, dailySummaries },
-    }, dates);
-  };
-  if (ratio <= 0 || !holding) return finalize(withRecord);
-
-  const adjustmentRatio = 1 + ratio;
-  const withAdjustedHistory: PortfolioStorage = {
-    ...withRecord,
-    priceHistory: rebaseHistoricalPricesBeforeDate(
-      withRecord.priceHistory,
-      holding.id,
-      event.effectiveDate,
-      adjustmentRatio
-    ),
-  };
-
-  const withAdjustedLedger = rebaseTransactionsBeforeDate(
-    withAdjustedHistory,
-    holding.id,
-    event.effectiveDate,
-    adjustmentRatio,
-    now
-  );
-
-  return finalize(
-    updateHolding(withAdjustedLedger, holding.id, {
-      quantity: quantityAfter,
-      buyPrice: buyPriceAfter,
-      ...rebaseCurrentPriceBeforeDate(
-        holding,
-        event.effectiveDate,
-        adjustmentRatio
-      ),
-      lastError: undefined,
-    })
-  );
+  if (plan?.status === "ready") return commitShareAdjustment(withDividend, record, plan);
+  const reconciled = reconcileCorporateDistributions({
+    ...withDividend, corporateActions: [...state.corporateActions, record],
+  }, lot.id);
+  return persistDividendPnlSummaries(state, reconciled.storage, [event.effectiveDate, ...reconciled.dates]);
 }
 
 export function applyManualCorporateAction(
@@ -1117,32 +1031,17 @@ export function applyManualCorporateAction(
   input: ManualCorporateActionInput
 ): PortfolioStorage {
   const holding = state.holdings.find((h) => h.id === input.holdingId);
-  if (!holding || holding.assetType !== "stock") return state;
-  if (!parseIsoDate(input.effectiveDate) || input.effectiveDate > todayIsoDate() ||
-      input.effectiveDate <= holding.buyDate) return state;
-  if (!Number.isFinite(input.adjustmentRatio) || input.adjustmentRatio <= 0) {
-    return state;
-  }
+  const plan = holding && planManualCorporateAction(state, holding, input);
+  return plan?.status === "ready" ? commitManualCorporateAction(state, input, plan) : state;
+}
 
-  const cashReturnPerShare =
-    input.cashReturnPerShare !== undefined &&
-    Number.isFinite(input.cashReturnPerShare) &&
-    input.cashReturnPerShare > 0
-      ? input.cashReturnPerShare
-      : 0;
-  const quantityBefore = holding.quantity;
-  const buyPriceBefore = holding.buyPrice;
-  const totalCostBefore = quantityBefore * buyPriceBefore;
-  const cashReturnTotal = cashReturnPerShare * quantityBefore;
-  const totalCostAfter = Math.max(totalCostBefore - cashReturnTotal, 0);
-  const quantityAfter = quantityBefore * input.adjustmentRatio;
-  if (!Number.isFinite(quantityAfter) || quantityAfter <= 0) return state;
-
-  const buyPriceAfter = totalCostAfter / quantityAfter;
+function commitManualCorporateAction(
+  state: PortfolioStorage,
+  input: Omit<ManualCorporateActionInput, "holdingId">,
+  plan: ShareAdjustmentPlan
+): PortfolioStorage {
+  const { holding, terms, sourceEventId } = plan;
   const now = new Date().toISOString();
-  const sourceEventId = `manual:${holding.id}:${input.effectiveDate}:${input.actionType}:${input.adjustmentRatio}`;
-  if (hasHandledCorporateAction(state, holding.id, sourceEventId)) return state;
-
   const record: CorporateActionRecord = {
     id: newId(),
     holdingId: holding.id,
@@ -1155,21 +1054,50 @@ export function applyManualCorporateAction(
     source: "manual",
     sourceEventId,
     adjustmentRatio: input.adjustmentRatio,
-    cashReturnPerShare: cashReturnPerShare || undefined,
-    quantityBefore,
-    quantityAfter,
-    buyPriceBefore,
-    buyPriceAfter,
-    totalCostBefore,
-    totalCostAfter,
+    cashReturnPerShare: input.cashReturnPerShare || undefined,
+    ...terms,
     priceHistoryAdjustedAt: now,
+    usesEffectiveDateShares: true,
     note: input.note?.trim() || undefined,
     createdAt: now,
   };
+  return commitShareAdjustment(state, record, plan);
+}
 
+function commitShareAdjustment(
+  state: PortfolioStorage,
+  record: CorporateActionRecord,
+  plan: ShareAdjustmentPlan
+): PortfolioStorage {
+  const { holding, cashReturnTotal, balance, currentBuyPrice, revisedActions, sales } = plan;
+  const { effectiveDate, sourceEventId, createdAt: now } = record;
+  const adjustmentRatio = corporateActionAdjustmentRatio(record);
+  const corporateActions = [...state.corporateActions.map((action) => {
+    const revised = revisedActions.get(action.id);
+    return revised ? { ...revised, updatedAt: nextRecordTime(action.updatedAt ?? action.createdAt) } : action;
+  }), record];
+  const applicableActions = holdingActions(corporateActions, holding);
+  const dates = new Set([effectiveDate, ...sales.map((sale) => sale.sellDate)]);
+  const saleIds = new Set(sales.map((sale) => sale.id));
+  const closingSale = balance === 0 ? sales.reduce<SaleTransaction | undefined>((latest, sale) =>
+    !latest || sale.sellDate > latest.sellDate || (sale.sellDate === latest.sellDate && sale.createdAt >= latest.createdAt)
+      ? sale : latest, undefined) : undefined;
   let withRecord: PortfolioStorage = {
     ...state,
-    corporateActions: [...state.corporateActions, record],
+    corporateActions,
+    sales: state.sales.map((sale) => {
+      if (!saleIds.has(sale.id)) return sale;
+      const buyPrice = Math.max(0, costOnDate(currentBuyPrice, applicableActions, sale.sellDate));
+      const positionClosed = closingSale?.id === sale.id;
+      if (buyPrice === sale.buyPrice && !positionClosed) return sale;
+      const costBasis = buyPrice * sale.quantity;
+      return {
+        ...sale, buyPrice, costBasis,
+        realizedPnl: sale.realizedPnl + (sale.costBasis - costBasis),
+        positionClosed: positionClosed || sale.positionClosed,
+        updatedAt: nextRecordTime(sale.updatedAt ?? sale.createdAt),
+      };
+    }),
   };
 
   if (cashReturnTotal > 0) {
@@ -1180,18 +1108,19 @@ export function applyManualCorporateAction(
         {
           id: newId(),
           type: "capital_return",
+          corporateActionEventId: sourceEventId,
           holdingId: holding.id,
           assetType: "stock",
           name: holding.name,
           symbol: holding.symbol,
           market: holding.market,
-          date: input.effectiveDate,
+          date: effectiveDate,
           amount: cashReturnTotal,
           fee: 0,
           tax: 0,
           quality: "complete",
           source: "corporate_action",
-          note: input.note?.trim() || undefined,
+          note: record.note,
           createdAt: now,
           updatedAt: now,
         },
@@ -1204,32 +1133,35 @@ export function applyManualCorporateAction(
     priceHistory: rebaseHistoricalPricesBeforeDate(
       withRecord.priceHistory,
       holding.id,
-      input.effectiveDate,
-      input.adjustmentRatio
+      effectiveDate,
+      adjustmentRatio
     ),
   };
 
   const withAdjustedLedger = rebaseTransactionsBeforeDate(
     withAdjustedHistory,
     holding.id,
-    input.effectiveDate,
-    input.adjustmentRatio,
+    effectiveDate,
+    adjustmentRatio,
     now
   );
 
-  return persistPnlSummariesForDates(
-    updateHolding(withAdjustedLedger, holding.id, {
-      quantity: quantityAfter,
-      buyPrice: buyPriceAfter,
-      ...rebaseCurrentPriceBeforeDate(
-        holding,
-        input.effectiveDate,
-        input.adjustmentRatio
-      ),
-      lastError: undefined,
-    }),
-    [input.effectiveDate]
-  );
+  const updated = closingSale ? {
+    ...withAdjustedLedger,
+    holdings: withAdjustedLedger.holdings.filter((item) => item.id !== holding.id),
+  } : updateHolding(withAdjustedLedger, holding.id, {
+    quantity: balance,
+    buyPrice: currentBuyPrice,
+    ...rebaseCurrentPriceBeforeDate(holding, effectiveDate, adjustmentRatio),
+    lastError: undefined,
+  });
+  const reconciled = reconcileCorporateDistributions(updated, holding.id);
+  for (const date of reconciled.dates) dates.add(date);
+  // 換發會影響生效日後的剩餘股數，因此行情報價日期也須重算。
+  for (const point of updated.priceHistory[holding.id] ?? []) {
+    if (point.date >= effectiveDate) dates.add(point.date);
+  }
+  return persistPnlSummariesForDates(reconciled.storage, [...dates]);
 }
 
 export function applyManualCorporateActionToGroup(
@@ -1241,14 +1173,10 @@ export function applyManualCorporateActionToGroup(
     (holding) => holding.assetType === "stock" && holdingGroupKey(holding) === groupKey
   );
 
-  return lots.reduce(
-    (next, holding) =>
-      applyManualCorporateAction(next, {
-        ...input,
-        holdingId: holding.id,
-      }),
-    state
-  );
+  const plans = lots.map((holding) => planManualCorporateAction(state, holding, input));
+  if (plans.some((plan) => plan?.status === "conflict")) return state;
+  return plans.reduce((next, plan) => plan?.status === "ready"
+    ? commitManualCorporateAction(next, input, plan) : next, state);
 }
 
 /** 將匯入的歷史價格寫入 priceHistory，並以最新一筆更新持倉現價 */

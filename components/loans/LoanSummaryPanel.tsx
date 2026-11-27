@@ -47,7 +47,8 @@ export function LoanSummaryPanel({
           <span className="text-muted">擔保／循環額度 {riskSummary.monitoredLoanCount} 筆</span>
           <span className={riskSummary.criticalCount > 0 ? "font-medium text-rose-500" : "text-muted"}>需處理 {riskSummary.criticalCount}</span>
           <span className={riskSummary.warningCount > 0 ? "font-medium text-amber-600 dark:text-amber-300" : "text-muted"}>警示 {riskSummary.warningCount}</span>
-          <span className="text-muted">最低維持率 {riskSummary.lowestMaintenanceRatioPercent === null ? "—" : `${riskSummary.lowestMaintenanceRatioPercent.toFixed(1)}%`}</span>
+          <span className="text-muted">{riskSummary.unknownCount > 0 ? "已估算最低維持率" : "最低維持率"} {riskSummary.lowestMaintenanceRatioPercent === null ? "—" : `${riskSummary.lowestMaintenanceRatioPercent.toFixed(1)}%`}</span>
+          {riskSummary.collateralOverlaps.length > 0 ? <Link href="/loans" className="font-medium text-amber-700 underline underline-offset-2 dark:text-amber-300">擔保數量待核對 {riskSummary.collateralOverlaps.length} 筆持倉</Link> : null}
         </div>
       ) : null}
       {reminders.length > 0 ? (

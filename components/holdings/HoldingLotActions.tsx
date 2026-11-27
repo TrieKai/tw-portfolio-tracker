@@ -1,5 +1,6 @@
 "use client";
 
+import { formatQuantity } from "@/lib/portfolio/quantity";
 import {
   formatPercent,
   formatQuotePrice,
@@ -61,7 +62,7 @@ export function HoldingLotDetailPanel({
         </div>
         <div>
           <dt className="text-muted">數量</dt>
-          <dd className="tabular-nums">{lot.quantity}</dd>
+          <dd className="tabular-nums">{formatQuantity(lot.quantity)}</dd>
         </div>
         <div>
           <dt className="text-muted">投入 / 損益</dt>

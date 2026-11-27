@@ -1,8 +1,10 @@
 import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
+import { cashReturnPerShareBetween, cashReturnsOnPriceBasis, holdingActions } from "@/lib/corporate-actions/adjustment";
 import { hasNewerTradeOnSummaryDate } from "@/lib/portfolio/dividend-pnl";
 import { linkSaleEvents } from "@/lib/portfolio/sale-events";
 import type {
   AssetType,
+  CorporateActionRecord,
   PortfolioStorage,
   StockMarket,
 } from "@/lib/types/holding";
@@ -61,6 +63,7 @@ export interface PnlCalendarContribution {
   marketPnl: number;
   tradePnl: number;
   dividend: number;
+  capitalReturnAdjustment?: number;
   fee: number;
   tax: number;
   gapStartDate?: string;
@@ -115,6 +118,7 @@ interface CalendarInstrument {
 }
 
 interface ContributionAccumulator extends PnlCalendarContribution {
+  capitalReturnAdjustment: number;
   previousPriceTotal: number;
   currentPriceTotal: number;
   priceQuantity: number;
@@ -135,7 +139,7 @@ function matchesFilter(
   if (item.assetType === "property") return false;
   if (filter.kind === "investment") return true;
   if (filter.kind === "assetType") return item.assetType === filter.assetType;
-  return (item.id ?? item.holdingId) === filter.holdingId;
+  return (item.holdingId ?? item.id) === filter.holdingId;
 }
 
 function quantityAtEndOfDay(
@@ -261,6 +265,7 @@ function getContribution(
     marketPnl: 0,
     tradePnl: 0,
     dividend: 0,
+    capitalReturnAdjustment: 0,
     fee: 0,
     tax: 0,
     previousPriceTotal: 0,
@@ -364,6 +369,20 @@ export function buildPnlCalendar(
   const purchaseByHolding = new Map(buys.map((transaction) => [transaction.holdingId, transaction]));
   const contributionsByDate = new Map<string, DayAccumulator>();
   const retentionStart = priceHistoryStartDate();
+  const actionsByHolding = new Map<string, CorporateActionRecord[]>();
+  for (const action of storage.corporateActions) {
+    const actions = actionsByHolding.get(action.holdingId) ?? [];
+    actions.push(action);
+    actionsByHolding.set(action.holdingId, actions);
+  }
+  const returnsByHolding = new Map(instruments.map((instrument) => [
+    instrument.id, cashReturnsOnPriceBasis(holdingActions(actionsByHolding.get(instrument.id) ?? [], instrument)),
+  ]));
+
+  // 退還股款僅沖抵跨過減資日的價格比較，單獨退還本金時不認列損益。
+  function capitalReturnForInterval(holdingId: string, from: string, to: string, quantity: number) {
+    return cashReturnPerShareBetween(returnsByHolding.get(holdingId) ?? [], from, to) * quantity;
+  }
 
   for (const instrument of instruments) {
     const points = (storage.priceHistory[instrument.id] ?? [])
@@ -394,7 +413,11 @@ export function buildPnlCalendar(
         : previous.date < instrument.buyDate && instrument.buyPrice !== undefined
           ? instrument.buyPrice
           : previous.price;
-      const contribution = (current.price - previousPrice) * quantity;
+      const previousDate = openingInterval ? purchase.date : previous.date;
+      const comparisonStart = previousDate < instrument.buyDate ? instrument.buyDate : previousDate;
+      const marketPnl = (current.price - previousPrice) * quantity;
+      const capitalReturnAdjustment = capitalReturnForInterval(instrument.id, comparisonStart, current.date, quantity);
+      const contribution = marketPnl + capitalReturnAdjustment;
       const existing =
         contributionsByDate.get(current.date) ?? emptyDayAccumulator();
       existing.pnl += contribution;
@@ -403,7 +426,8 @@ export function buildPnlCalendar(
       existing.totalHoldingIds.add(instrument.id);
       const detail = getContribution(existing, instrument);
       detail.pnl += contribution;
-      detail.marketPnl += contribution;
+      detail.marketPnl += marketPnl;
+      detail.capitalReturnAdjustment += capitalReturnAdjustment;
       addPriceRange(detail, previousPrice, current.price, quantity);
       if (openingInterval) {
         if (!detail.gapStartDate || purchase.date < detail.gapStartDate) detail.gapStartDate = purchase.date;
@@ -476,15 +500,18 @@ export function buildPnlCalendar(
     const existing =
       contributionsByDate.get(transaction.date) ?? emptyDayAccumulator();
     const tradePnl = (sellPrice - previous.price) * quantity;
-    existing.pnl += tradePnl - transaction.fee - transaction.tax;
+    const capitalReturnAdjustment = capitalReturnForInterval(instrument.id, previous.date, transaction.date, quantity);
+    const pnl = tradePnl + capitalReturnAdjustment - transaction.fee - transaction.tax;
+    existing.pnl += pnl;
     existing.baseValue += previous.price * quantity;
     existing.pricedHoldingIds.add(transaction.holdingId);
     existing.totalHoldingIds.add(transaction.holdingId);
     const detail = getContribution(existing, instrument);
     detail.tradePnl += tradePnl;
+    detail.capitalReturnAdjustment += capitalReturnAdjustment;
     detail.fee += transaction.fee;
     detail.tax += transaction.tax;
-    detail.pnl += tradePnl - transaction.fee - transaction.tax;
+    detail.pnl += pnl;
     addPriceRange(detail, previous.price, sellPrice, quantity);
     notePriceGap(detail, previous.date, transaction.date);
     contributionsByDate.set(transaction.date, existing);
@@ -587,6 +614,9 @@ export function buildPnlCalendar(
             marketPnl: roundResult(contribution.marketPnl),
             tradePnl: roundResult(contribution.tradePnl),
             dividend: roundResult(contribution.dividend),
+            ...(contribution.capitalReturnAdjustment > 0
+              ? { capitalReturnAdjustment: roundResult(contribution.capitalReturnAdjustment) }
+              : {}),
             fee: roundResult(contribution.fee),
             tax: roundResult(contribution.tax),
             gapStartDate: contribution.gapStartDate,

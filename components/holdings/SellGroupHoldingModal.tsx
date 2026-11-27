@@ -8,6 +8,7 @@ import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { holdingSaleTerms } from "@/lib/corporate-actions/adjustment";
 import { usePortfolio } from "@/providers/PortfolioProvider";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
+import { formatQuantity, removeQuantityRoundoff, quantityAvailability } from "@/lib/portfolio/quantity";
 import { allocateFifoSell } from "@/lib/portfolio/holding-groups";
 import type { HoldingGroupWithMetrics } from "@/lib/portfolio/holding-groups";
 import type { SellHoldingInput } from "@/lib/types/holding";
@@ -25,9 +26,7 @@ export function SellGroupHoldingModal({
   const { formatAmount, formatQuoteAmount } = useAmountPrivacy();
   const { storage: { corporateActions } } = usePortfolio();
   const unitLabel = getSellUnitLabel(group.assetType);
-  const totalQty = group.quantity;
-
-  const [quantity, setQuantity] = useState(String(totalQty));
+  const [quantity, setQuantity] = useState<string | null>(null);
   const [sellPrice, setSellPrice] = useState(
     group.currentPrice !== undefined ? String(group.currentPrice) : ""
   );
@@ -48,6 +47,14 @@ export function SellGroupHoldingModal({
     [corporateActions, group.lots, sellDate]
   );
   const availableOnDate = eligibleLots.reduce((sum, lot) => sum + lot.quantity, 0);
+  const quantityInput = quantity ?? String(removeQuantityRoundoff(availableOnDate));
+  const qty = Number(quantityInput);
+  const price = Number(sellPrice);
+  const feeAmount = Number(fee);
+  const taxAmount = Number(tax);
+  const validPrice = Number.isFinite(price) && price > 0;
+  const validFee = Number.isFinite(feeAmount) && feeAmount >= 0;
+  const validTax = Number.isFinite(taxAmount) && taxAmount >= 0;
 
   function changeSellDate(date: string) {
     if (group.lots.some((lot) =>
@@ -55,53 +62,28 @@ export function SellGroupHoldingModal({
       holdingSaleTerms(lot, corporateActions, sellDate).shareFactor
     )) setSellPrice("");
     setSellDate(date);
+    setError(null);
   }
 
-  const allocation = useMemo(() => {
-    const qty = Number.parseFloat(quantity);
-    if (Number.isNaN(qty) || qty <= 0) return [];
-    return allocateFifoSell(eligibleLots, qty);
-  }, [quantity, eligibleLots]);
-
-  const preview = useMemo(() => {
-    const qty = Number.parseFloat(quantity);
-    const price = Number.parseFloat(sellPrice);
-    const feeAmount = fee.trim() ? Number.parseFloat(fee) : 0;
-    const taxAmount = tax.trim() ? Number.parseFloat(tax) : 0;
-    if (
-      Number.isNaN(qty) ||
-      qty <= 0 ||
-      qty > availableOnDate ||
-      Number.isNaN(price) ||
-      price <= 0 ||
-      allocation.length === 0 ||
-      !Number.isFinite(feeAmount) ||
-      !Number.isFinite(taxAmount)
-    ) {
-      return null;
-    }
-    const proceeds = price * qty;
-    const cost = allocation.reduce((s, a) => s + a.buyPrice * a.quantity, 0);
-    const realizedPnl = proceeds - cost - feeAmount - taxAmount;
-    const isFullSell = eligibleLots.length === group.lots.length && qty >= availableOnDate;
-    return { proceeds, realizedPnl, isFullSell, cost };
-  }, [quantity, sellPrice, fee, tax, allocation, availableOnDate, eligibleLots.length, group.lots.length]);
+  const allocation = useMemo(() => allocateFifoSell(eligibleLots, qty), [eligibleLots, qty]);
+  const allocatedQuantity = allocation.reduce((sum, item) => sum + item.quantity, 0);
+  const cost = allocation.reduce((sum, item) => sum + item.buyPrice * item.quantity, 0);
+  const preview = allocation.length > 0 && validPrice && validFee && validTax ? {
+    proceeds: price * allocatedQuantity,
+    realizedPnl: price * allocatedQuantity - cost - feeAmount - taxAmount,
+    isFullSell: eligibleLots.length === group.lots.length && quantityAvailability(qty, availableOnDate) === "full",
+  } : null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
     setError(null);
 
-    const qty = Number.parseFloat(quantity);
-    const price = Number.parseFloat(sellPrice);
-    const feeAmount = fee.trim() ? Number.parseFloat(fee) : 0;
-    const taxAmount = tax.trim() ? Number.parseFloat(tax) : 0;
-
-    if (Number.isNaN(qty) || qty <= 0) {
+    if (!Number.isFinite(qty) || qty <= 0) {
       setError("請輸入有效賣出數量");
       return;
     }
-    if (Number.isNaN(price) || price <= 0) {
+    if (!validPrice) {
       setError("請輸入有效賣出價格");
       return;
     }
@@ -109,36 +91,31 @@ export function SellGroupHoldingModal({
       setError(`賣出日須介於最早買入日 ${earliestBuyDate} 與今天之間。`);
       return;
     }
-    if (!Number.isFinite(feeAmount) || feeAmount < 0) {
+    if (!validFee) {
       setError("請輸入有效手續費");
       return;
     }
-    if (!Number.isFinite(taxAmount) || taxAmount < 0) {
+    if (!validTax) {
       setError("請輸入有效交易稅");
       return;
     }
 
-    const allocated = allocateFifoSell(eligibleLots, qty);
-    const allocatedQty = allocated.reduce((s, a) => s + a.quantity, 0);
-    if (qty > availableOnDate || allocatedQty + Number.EPSILON * qty < qty) {
-      setError(`${sellDate} 已買入且可賣出 ${availableOnDate} ${unitLabel}，請調整日期或數量。`);
+    if (allocation.length === 0) {
+      setError(`${sellDate} 最多可賣出 ${formatQuantity(availableOnDate)} ${unitLabel}，請調整日期或數量。`);
       return;
     }
 
-    let distributedFee = 0;
-    let distributedTax = 0;
+    let remainingFee = feeAmount;
+    let remainingTax = taxAmount;
     setSaving(true);
     const saved = await onSave(
-      allocated.map((a, index) => {
-        const isLast = index === allocated.length - 1;
-        const lotFee = isLast
-          ? feeAmount - distributedFee
-          : feeAmount * (a.quantity / qty);
-        const lotTax = isLast
-          ? taxAmount - distributedTax
-          : taxAmount * (a.quantity / qty);
-        distributedFee += lotFee;
-        distributedTax += lotTax;
+      allocation.map((a, index) => {
+        const isLast = index === allocation.length - 1;
+        const proportion = a.quantity / allocatedQuantity;
+        const lotFee = isLast ? remainingFee : Math.min(remainingFee, feeAmount * proportion);
+        const lotTax = isLast ? remainingTax : Math.min(remainingTax, taxAmount * proportion);
+        remainingFee -= lotFee;
+        remainingTax -= lotTax;
         return {
           id: a.id,
           quantity: a.quantity,
@@ -165,7 +142,7 @@ export function SellGroupHoldingModal({
         </h3>
         <p className="text-sm text-muted">
           {group.name}（{group.symbol}）· 共 {group.lots.length} 筆買入 · 合計{" "}
-          {totalQty} {unitLabel} · 加權均價{" "}
+          {formatQuantity(group.quantity)} {unitLabel} · 加權均價{" "}
           {formatQuoteAmount(group.avgBuyPrice, group.assetType)}
         </p>
         <p className="text-xs text-muted">
@@ -181,16 +158,24 @@ export function SellGroupHoldingModal({
               type="number"
               step="any"
               min="0"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
+              inputMode="decimal"
+              value={quantityInput}
+              onChange={(e) => {
+                setQuantity(e.target.value);
+                setError(null);
+              }}
               className="input-field min-w-0 flex-1"
               required
             />
             <button
               type="button"
-              onClick={() => setQuantity(String(availableOnDate))}
+              onClick={() => {
+                setQuantity(null);
+                setError(null);
+              }}
               disabled={availableOnDate <= 0}
               aria-label="填入當日可賣數量"
+              aria-pressed={quantity === null}
               className="btn-secondary shrink-0 text-xs"
             >
               全部
@@ -207,7 +192,7 @@ export function SellGroupHoldingModal({
                   {formatQuoteAmount(a.buyPrice, group.assetType)}
                 </span>
                 <span>
-                  賣 {a.quantity} {unitLabel}
+                  賣 {formatQuantity(a.quantity)} {unitLabel}
                 </span>
               </li>
             ))}
@@ -241,7 +226,7 @@ export function SellGroupHoldingModal({
                 max={todayIsoDate()}
               />
               <p className="mt-1 text-xs text-muted">數量與單價以成交日為準。</p>
-              <p className="mt-1 text-xs text-muted">當日可賣出 {availableOnDate} {unitLabel}</p>
+              <p className="mt-1 text-xs text-muted">當日可賣出 {formatQuantity(availableOnDate)} {unitLabel}</p>
             </div>
           </label>
         </div>

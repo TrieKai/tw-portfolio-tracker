@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildPnlCalendar } from "@/lib/portfolio/pnl-calendar";
-import { addHolding, applyPriceUpdate, sellHolding } from "@/lib/storage/portfolio-store";
+import { addHolding, applyManualCorporateAction, applyPriceUpdate, sellHolding } from "@/lib/storage/portfolio-store";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
 import type { PortfolioStorage } from "@/lib/types/holding";
 
@@ -39,6 +39,58 @@ function portfolioWithOneHolding(): PortfolioStorage {
 }
 
 describe("buildPnlCalendar", () => {
+  it("recomputes a saved price comparison when a cash reduction was recorded later", () => {
+    let state = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "減資測試", quantity: 100,
+      buyPrice: 100, buyDate: "2026-10-01",
+    });
+    const id = state.holdings[0].id;
+    state = applyPriceUpdate(state, id, 100, "2026-10-29", "manual");
+    state = applyPriceUpdate(state, id, 140, "2026-11-03", "manual");
+    state = applyManualCorporateAction(state, {
+      holdingId: id, actionType: "capital_reduction", effectiveDate: "2026-10-30",
+      adjustmentRatio: 0.5, cashReturnPerShare: 30,
+    });
+
+    const calendar = buildPnlCalendar(state, {
+      month: "2026-11", asOfDate: "2026-11-10", filter: { kind: "investment" },
+    });
+    expect(calendar.days).toMatchObject([{
+      date: "2026-11-03", pnl: 0, returnBase: 10_000, returnRate: 0,
+      contributions: [{ marketPnl: -3_000, capitalReturnAdjustment: 3_000, dividend: 0 }],
+    }]);
+    expect(state.pnlTracking.dailySummaries["2026-11-03"].pnl).toBe(0);
+  });
+
+  it("allocates the cash adjustment to the sold and retained shares across a later split", () => {
+    let state = addHolding(defaultPortfolioStorage(), {
+      assetType: "stock", symbol: "2330", name: "減資測試", quantity: 100,
+      buyPrice: 100, buyDate: "2026-10-01",
+    });
+    const id = state.holdings[0].id;
+    state = applyPriceUpdate(state, id, 100, "2026-10-29", "manual");
+    state = applyManualCorporateAction(state, {
+      holdingId: id, actionType: "capital_reduction", effectiveDate: "2026-10-30",
+      adjustmentRatio: 0.5, cashReturnPerShare: 30,
+    });
+    state = sellHolding(state, { id, quantity: 20, sellPrice: 140, sellDate: "2026-11-02" });
+    state = applyPriceUpdate(state, id, 140, "2026-11-04", "manual");
+    state = applyManualCorporateAction(state, {
+      holdingId: id, actionType: "split", effectiveDate: "2026-11-05", adjustmentRatio: 2,
+    });
+    state = applyPriceUpdate(state, id, 75, "2026-11-06", "manual");
+
+    const calendar = buildPnlCalendar(state, {
+      month: "2026-11", asOfDate: "2026-11-10", filter: { kind: "holding", holdingId: id },
+    });
+    expect(calendar.days).toMatchObject([
+      { date: "2026-11-02", pnl: 0, contributions: [{ tradePnl: -1_200, capitalReturnAdjustment: 1_200 }] },
+      { date: "2026-11-04", pnl: 0, contributions: [{ marketPnl: -1_800, capitalReturnAdjustment: 1_800 }] },
+      { date: "2026-11-06", pnl: 300, contributions: [{ marketPnl: 300 }] },
+    ]);
+    expect(calendar.summary.pnl).toBe(300);
+  });
+
   it("keeps gross pnl and subtracts investment financing costs on request", () => {
     const storage = portfolioWithOneHolding();
     storage.loans.push({

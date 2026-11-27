@@ -1,5 +1,6 @@
 "use client";
 
+import { formatQuantity } from "@/lib/portfolio/quantity";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { ErrorAlert } from "@/components/ui/ErrorAlert";
@@ -293,8 +294,8 @@ function SaleReview({
             <legend className="max-w-full break-words px-1 text-sm font-medium">{sale.name}（{sale.symbol}）</legend>
             <p className="text-sm text-muted">
               {isOversold
-                ? `換算後合計賣出 ${conflict.mergedQuantity?.toLocaleString("zh-TW")} ${getSellUnitLabel(sale.assetType)}，原始持倉只有 ${conflict.capacity?.toLocaleString("zh-TW")} ${getSellUnitLabel(sale.assetType)}。`
-                : `${sale.sellDate} · 每筆 ${sale.quantity} ${getSellUnitLabel(sale.assetType)} · ${formatQuoteAmount(sale.sellPrice, sale.assetType)}`}
+                ? `換算後合計賣出 ${conflict.mergedQuantity === undefined ? "—" : formatQuantity(conflict.mergedQuantity)} ${getSellUnitLabel(sale.assetType)}，原始持倉只有 ${conflict.capacity === undefined ? "—" : formatQuantity(conflict.capacity)} ${getSellUnitLabel(sale.assetType)}。`
+                : `${sale.sellDate} · 每筆 ${formatQuantity(sale.quantity)} ${getSellUnitLabel(sale.assetType)} · ${formatQuoteAmount(sale.sellPrice, sale.assetType)}`}
             </p>
             {options.filter(({ choice }) => isPortfolioImportChoiceAllowed(conflict, choice)).map(({ choice, label, sales }) => (
               <label key={choice} className="flex min-h-11 cursor-pointer items-start gap-2 rounded-lg bg-surface-raised px-3 py-2 text-sm">
@@ -304,7 +305,7 @@ function SaleReview({
                   <span>{label} · {sales.length} 筆 · 已實現 {formatAmount(sales.reduce((sum, item) => sum + item.realizedPnl, 0))}</span>
                   {isOversold && sales.map((record) => (
                     <span key={record.id} className="mt-1 block text-muted">
-                      {record.sellDate} · {record.quantity} {getSellUnitLabel(record.assetType)} · {formatQuoteAmount(record.sellPrice, record.assetType)}
+                      {record.sellDate} · {formatQuantity(record.quantity)} {getSellUnitLabel(record.assetType)} · {formatQuoteAmount(record.sellPrice, record.assetType)}
                     </span>
                   ))}
                 </span>

@@ -159,8 +159,12 @@ export interface CorporateActionRecord {
   totalCostAfter?: number;
   /** 已將生效日前歷史價按股數倍率調整，避免日/月未實現用錯價格基準 */
   priceHistoryAdjustedAt?: string;
+  /** 已按生效日持股及成交日股數核對換發與成本。 */
+  usesEffectiveDateShares?: boolean;
   note?: string;
   createdAt: string;
+  /** 補登較早的公司行動後，重算此筆事件的股數和成本。 */
+  updatedAt?: string;
 }
 
 export interface ManualCorporateActionInput {

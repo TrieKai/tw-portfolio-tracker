@@ -28,6 +28,30 @@ export function shareAdjustmentAfter(actions: CorporateActionRecord[], date: str
   );
 }
 
+/** 依已入帳的股數異動，把每原股退還金額換算成歷史行情使用的股數單位。 */
+export function cashReturnsOnPriceBasis(actions: CorporateActionRecord[]) {
+  const ordered = [...actions].sort((a, b) =>
+    a.effectiveDate.localeCompare(b.effectiveDate) || a.createdAt.localeCompare(b.createdAt)
+  ).reverse();
+  const returns: { date: string; perShare: number }[] = [];
+  let shareFactor = 1;
+  for (const action of ordered) {
+    shareFactor *= corporateActionAdjustmentRatio(action);
+    if (action.cashReturnPerShare && action.cashReturnPerShare > 0) {
+      returns.push({ date: action.effectiveDate, perShare: action.cashReturnPerShare / shareFactor });
+    }
+  }
+  return returns;
+}
+
+export function cashReturnPerShareBetween(
+  returns: ReturnType<typeof cashReturnsOnPriceBasis>,
+  from: string,
+  to: string
+): number {
+  return returns.reduce((sum, cash) => cash.date > from && cash.date <= to ? sum + cash.perShare : sum, 0);
+}
+
 /** 由目前成本回推成交日的每股成本，保留成本更正的差額。 */
 export function costOnDate(cost: number, actions: CorporateActionRecord[], date: string): number {
   return actionsAfter(actions, date).reverse().reduce((price, action) =>

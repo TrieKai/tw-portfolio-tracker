@@ -1,5 +1,6 @@
 "use client";
 
+import { formatQuantity } from "@/lib/portfolio/quantity";
 import { useAmountPrivacy } from "@/providers/AmountPrivacyProvider";
 import { getAssetTypeLabel } from "@/lib/portfolio/asset-labels";
 import type { HoldingLotSummary } from "@/lib/portfolio/portfolio-timeline";
@@ -35,7 +36,7 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
                 {formatQuoteAmount(lot.buyPrice, lot.assetType)}
               </dd>
               <dt className="text-muted">數量</dt>
-              <dd className="text-right tabular-nums">{lot.quantity}</dd>
+              <dd className="text-right tabular-nums">{formatQuantity(lot.quantity)}</dd>
               <dt className="text-muted">投入成本</dt>
               <dd className="text-right font-medium tabular-nums">
                 {formatAmount(lot.costBasis)}
@@ -80,7 +81,7 @@ export function HoldingLotsTable({ lots }: { lots: HoldingLotSummary[] }) {
                 <td className="px-3 py-2 tabular-nums">
                   {formatQuoteAmount(lot.buyPrice, lot.assetType)}
                 </td>
-                <td className="px-3 py-2 tabular-nums">{lot.quantity}</td>
+                <td className="px-3 py-2 tabular-nums">{formatQuantity(lot.quantity)}</td>
                 <td className="px-3 py-2 tabular-nums font-medium">
                   {formatAmount(lot.costBasis)}
                 </td>

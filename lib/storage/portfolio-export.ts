@@ -1,18 +1,22 @@
 import { corporateActionAdjustmentRatio, costOnDate, holdingActions, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
-import { reconcileCorporateDividends } from "@/lib/portfolio/corporate-dividends";
+import { reconcileCorporateDistributions } from "@/lib/portfolio/corporate-distributions";
 import { linkSaleEvents } from "@/lib/portfolio/sale-events";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
 import { priceHistoryStartDate } from "@/lib/portfolio/chart-date-range";
 import { pnlDatesUsingChangedPrices, restoreLatestQuote } from "@/lib/portfolio/price-history";
+import { quantityAvailability } from "@/lib/portfolio/quantity";
 import type { CorporateActionRecord, Holding, HoldingRemoval, PortfolioStorage, PortfolioTransaction, PricePoint, SaleTransaction } from "@/lib/types/holding";
-import { mergePriceHistory, persistPnlSummariesForDates, repairCorporateActionPriceHistory } from "@/lib/storage/portfolio-store";
+import { persistPnlSummariesForDates } from "@/lib/portfolio/persist-pnl-summaries";
+import { mergePriceHistory, repairCorporateActionPriceHistory } from "@/lib/storage/portfolio-store";
 import { mergeDailyPnlSummaries } from "@/lib/storage/merge-daily-pnl";
+import { repairCorporateActionAccounting } from "@/lib/storage/repair-corporate-action-accounting";
 import type { Loan, LoanPaymentRecord } from "@/lib/types/loan";
 import type { RecordImportReview } from "@/lib/types/portfolio-import";
 import { decodePortfolioStorage, hasPortfolioData, type PortfolioDecodeResult } from "@/lib/storage/parse-portfolio";
 import { isRecord } from "@/lib/storage/portfolio-shape";
 import { resolveLoanVersions } from "@/lib/loans/history";
 import { loanPhaseConflicts, repairLoanPhaseClosures } from "@/lib/loans/phases";
+import { restoreCollateralShareBases } from "@/lib/loans/collateral";
 
 /** 匯出檔外層格式（含版本與時間戳，方便日後遷移） */
 export interface PortfolioExportFile {
@@ -63,6 +67,10 @@ function mergeRecords<T extends { id: string }>(
     }
   }
   return [...records.values()];
+}
+
+function fitsSaleCapacity(quantity: number, capacity: number): boolean {
+  return quantity <= capacity || quantityAvailability(quantity, capacity) === "full";
 }
 
 function mergeManualDividends(transactions: PortfolioTransaction[]): PortfolioTransaction[] {
@@ -427,8 +435,8 @@ export function mergePortfolioStorage(
   backup: PortfolioStorage,
   choices: PortfolioImportChoices = {}
 ): PortfolioStorage {
-  const current = repairCorporateActionPriceHistory(local);
-  const incoming = repairCorporateActionPriceHistory(backup);
+  const current = restoreCollateralShareBases(repairCorporateActionPriceHistory(repairCorporateActionAccounting(local)));
+  const incoming = restoreCollateralShareBases(repairCorporateActionPriceHistory(repairCorporateActionAccounting(backup)));
   const removals = new Map<string, HoldingRemoval>();
   for (const removal of [...(current.holdingRemovals ?? []), ...(incoming.holdingRemovals ?? [])]) {
     const previous = removals.get(removal.holding.id);
@@ -444,7 +452,8 @@ export function mergePortfolioStorage(
   );
   for (const action of incoming.corporateActions) {
     const key = `${action.holdingId}:${action.sourceEventId}`;
-    if (!actionsByEvent.has(key)) actionsByEvent.set(key, action);
+    const previous = actionsByEvent.get(key);
+    if (!previous || (action.updatedAt ?? "") > (previous.updatedAt ?? "")) actionsByEvent.set(key, action);
   }
   const corporateActions = [...actionsByEvent.values()];
   const currentById = new Map(current.holdings.map((holding) => [holding.id, holding]));
@@ -470,6 +479,21 @@ export function mergePortfolioStorage(
   const incomingById = new Map(incoming.holdings.map((holding) => [holding.id, holding]));
   const selectedKeys = new Map(selectedHoldings.map((holding) => [holding.id, holdingGroupKey(holding)]));
   const selectedById = new Map(selectedHoldings.map((holding) => [holding.id, holding]));
+  const balances = new Map(selectedHoldings.map((holding) => {
+    const source = sources.get(holding)!;
+    const originalActions = holdingActions(source.corporateActions, holding);
+    const actions = holdingActions(corporateActions, holding);
+    const ratio = shareAdjustmentAfter(actions, holding.buyDate) /
+      shareAdjustmentAfter(originalActions, holding.buyDate);
+    // 先換算買入股數，再扣除按成交日股數單位換算的賣出。
+    const quantity = source.sales.reduce((balance, sale) => {
+      if (sale.holdingId !== holding.id) return balance;
+      const previousFactor = shareAdjustmentAfter(originalActions, sale.sellDate) * ratio;
+      const mergedFactor = shareAdjustmentAfter(actions, sale.sellDate);
+      return balance + (previousFactor - mergedFactor) * sale.quantity;
+    }, holding.quantity * ratio);
+    return [holding.id, { quantity, actions, originalActions }] as const;
+  }));
   const mergedSales = mergeRecords(current.sales, incoming.sales, (sale) => sale.updatedAt ?? sale.createdAt);
   const saleImportReviews = mergeRecords(current.saleImportReviews ?? [], incoming.saleImportReviews ?? [],
     (review) => review.reviewedAt).sort(compareImportReviews);
@@ -481,10 +505,9 @@ export function mergePortfolioStorage(
     const id = group.local[0].holdingId;
     const holding = selectedById.get(id);
     const fromCurrent = holding && currentById.get(id) === holding;
-    const source = fromCurrent ? current : incoming;
     const sourceIds = fromCurrent ? currentSalesIds : incomingSalesIds;
-    const actions = holding ? holdingActions(corporateActions, holding) : [];
-    const sourceActions = holding ? holdingActions(source.corporateActions, holding) : [];
+    const balance = balances.get(id);
+    const actions = balance?.actions ?? [];
     const trades = mergedSales.filter((sale) => sale.holdingId === id);
     const addedQuantity = trades.reduce((sum, sale) => {
       const wasSold = sourceIds.has(sale.id);
@@ -495,8 +518,7 @@ export function mergePortfolioStorage(
     // 使用各筆成交日期的股數換算，並預留同一批次其他備份成交。
     const canKeepBoth = Boolean(holding && currentById.has(id) && incomingIds.has(id) &&
       !trades.some((sale) => sale.positionClosed && isRetained(sale)) &&
-      addedQuantity <= holding.quantity * shareAdjustmentAfter(actions, holding.buyDate) /
-        shareAdjustmentAfter(sourceActions, holding.buyDate));
+      fitsSaleCapacity(addedQuantity, balance?.quantity ?? 0));
     return {
       ...group,
       kind: "duplicate",
@@ -542,16 +564,14 @@ export function mergePortfolioStorage(
     let capacity: number;
     if (holding) {
       const source = sources.get(holding)!;
-      const originalBasis = holdingActions(source.corporateActions, holding);
-      const factor = shareAdjustmentAfter(actions, holding.buyDate) / shareAdjustmentAfter(originalBasis, holding.buyDate);
-      capacity = holding.quantity * factor + sumQuantity(source.sales.filter((sale) => sale.holdingId === id));
+      capacity = balances.get(id)!.quantity + sumQuantity(source.sales.filter((sale) => sale.holdingId === id));
     } else {
       capacity = archivedOpenings.get(id)?.quantity ?? Math.max(
         sumQuantity(current.sales.filter((sale) => sale.holdingId === id)),
         sumQuantity(incoming.sales.filter((sale) => sale.holdingId === id)),
       );
     }
-    const within = (quantity: number) => quantity <= capacity + 8 * Number.EPSILON * Math.max(capacity, quantity);
+    const within = (quantity: number) => fitsSaleCapacity(quantity, capacity);
     if (within(total)) continue;
     oversold.push({
       kind: "oversold",
@@ -594,13 +614,8 @@ export function mergePortfolioStorage(
     const fromCurrent = currentById.get(holding.id) === holding;
     const sourceSaleIds = fromCurrent ? currentSalesIds : incomingSalesIds;
     const source = fromCurrent ? current : incoming;
-    const matchesHolding = (action: PortfolioStorage["corporateActions"][number]) =>
-      action.holdingId === holding.id &&
-      holdingGroupKey({ ...action, id: holding.id }) === selectedKeys.get(holding.id);
-    const mergedBasis = corporateActions.filter(matchesHolding);
-    const sourceBasis = source.corporateActions.filter(matchesHolding);
-    const quantityRatio = shareAdjustmentAfter(mergedBasis, holding.buyDate) /
-      shareAdjustmentAfter(sourceBasis, holding.buyDate);
+    const balance = balances.get(holding.id)!;
+    const mergedBasis = balance.actions;
     const soldQuantity = holdingSales.reduce((quantity, sale) =>
       sourceSaleIds.has(sale.id) ? quantity : quantity + sale.quantity * shareAdjustmentAfter(mergedBasis, sale.sellDate),
       0
@@ -611,18 +626,21 @@ export function mergePortfolioStorage(
         ? quantity + sale.quantity * shareAdjustmentAfter(mergedBasis, sale.sellDate)
         : quantity, 0
     );
-    const quantity = holding.quantity * quantityRatio + restoredQuantity - soldQuantity;
-    const sourceActions = new Set(sourceBasis.map((action) => action.sourceEventId));
-    const costReduction = mergedBasis.reduce((total, action) => {
-      if (sourceActions.has(action.sourceEventId) || action.effectiveDate <= holding.buyDate) return total;
-      const returned = (action.cashReturnPerShare ?? 0) / corporateActionAdjustmentRatio(action);
-      return total + returned / shareAdjustmentAfter(mergedBasis, action.effectiveDate);
-    }, 0);
-    const cost = Math.max(0, holding.buyPrice / quantityRatio - costReduction);
+    const available = balance.quantity + restoredQuantity;
+    const quantity = available - soldQuantity;
+    const sourceActions = new Set(balance.originalActions.map((action) => action.sourceEventId));
+    const laterActions = mergedBasis.filter((action) => action.effectiveDate > holding.buyDate).sort((a, b) =>
+      a.effectiveDate.localeCompare(b.effectiveDate) || a.createdAt.localeCompare(b.createdAt)
+    );
+    const needsRebasing = laterActions.some((action) => !sourceActions.has(action.sourceEventId) &&
+      (corporateActionAdjustmentRatio(action) !== 1 || (action.cashReturnPerShare ?? 0) > 0));
+    const cost = needsRebasing ? laterActions.reduce((price, action) =>
+      Math.max(0, price - (action.cashReturnPerShare ?? 0)) / corporateActionAdjustmentRatio(action),
+      costOnDate(holding.buyPrice, balance.originalActions, holding.buyDate)) : holding.buyPrice;
     mergedCosts.set(holding.id, { holding, cost, actions: mergedBasis });
     if (removals.has(holding.id) || currentClosed.has(holding.id) || closedInBackup ||
         holdingSales.some((sale) => sale.positionClosed === true) ||
-        quantity <= Number.EPSILON * Math.max(holding.quantity, soldQuantity)) return [];
+        quantity <= 0 || quantityAvailability(soldQuantity, available) === "full") return [];
     const sameInstrument = (candidate?: Holding): candidate is Holding =>
       !!candidate && holdingGroupKey(candidate) === holdingGroupKey(holding);
     const currentQuote = currentById.get(holding.id);
@@ -632,7 +650,7 @@ export function mergePortfolioStorage(
         (backupQuote.priceDate ?? "") > (currentQuote.priceDate ?? ""))
       ? backupQuote
       : sameInstrument(currentQuote) && currentQuote.currentPrice !== undefined ? currentQuote : holding;
-    const quoteBasis = (sources.get(quote) ?? source).corporateActions.filter(matchesHolding);
+    const quoteBasis = holdingActions((sources.get(quote) ?? source).corporateActions, holding);
     const priceRatio = quote.priceDate
       ? shareAdjustmentAfter(quoteBasis, quote.priceDate) / shareAdjustmentAfter(mergedBasis, quote.priceDate)
       : 1;
@@ -655,18 +673,27 @@ export function mergePortfolioStorage(
     if (!cost || holdingGroupKey({ ...sale, id: sale.holdingId }) !== holdingGroupKey(cost.holding)) return sale;
     const saleWasLocal = localSales.get(sale.id) === sale;
     const costIsLocal = currentById.get(sale.holdingId) === cost.holding;
-    if (saleWasLocal === costIsLocal) return sale;
+    const saleSource = saleWasLocal ? current : incoming;
+    const saleActions = new Set(holdingActions(saleSource.corporateActions, { ...sale, id: sale.holdingId })
+      .map((action) => action.sourceEventId));
+    const effectiveAdjustments = cost.actions.filter((action) => action.effectiveDate <= sale.sellDate &&
+      action.effectiveDate > cost.holding.buyDate && !saleActions.has(action.sourceEventId) &&
+      (corporateActionAdjustmentRatio(action) !== 1 || (action.cashReturnPerShare ?? 0) > 0));
     const version = positionVersion(cost.holding, costIsLocal ? localVersions : backupVersions);
     const salePosition = (saleWasLocal ? currentById : incomingById).get(sale.holdingId);
     const acquisition = saleWasLocal ? localVersions : backupVersions;
     const salePositionVersion = salePosition
       ? positionVersion(salePosition, acquisition) : acquisition.get(sale.holdingId);
-    if (!salePositionVersion || version <= salePositionVersion) return sale;
+    const acquisitionChanged = saleWasLocal !== costIsLocal && !!salePositionVersion && version > salePositionVersion;
+    if (!acquisitionChanged && !effectiveAdjustments.length) return sale;
     const buyPrice = Math.max(0, costOnDate(cost.cost, cost.actions, sale.sellDate));
     if (buyPrice === sale.buyPrice) return sale;
     const costBasis = buyPrice * sale.quantity;
     const previousTime = Date.parse(sale.updatedAt ?? sale.createdAt);
-    const correctionTime = Date.parse(version);
+    const correctionTime = Math.max(
+      acquisitionChanged ? Date.parse(version) || 0 : 0,
+      ...effectiveAdjustments.map((action) => Date.parse(action.updatedAt ?? action.createdAt) || 0)
+    );
     const updatedAt = Number.isFinite(correctionTime)
       ? new Date(Math.max(correctionTime, Number.isFinite(previousTime) ? previousTime + 1 : 0)).toISOString()
       : sale.updatedAt;
@@ -739,7 +766,7 @@ export function mergePortfolioStorage(
       uiPreferences: current.settings.uiPreferences ?? incoming.settings.uiPreferences,
     },
   };
-  const reconciled = reconcileCorporateDividends(result);
+  const reconciled = reconcileCorporateDistributions(result);
   const { dailySummaries, changedDates } = mergeDailyPnlSummaries(
     { portfolio: current, transactions: currentTransactions, changedPrices: changedPrices.current },
     { portfolio: incoming, transactions: incomingTransactions, changedPrices: changedPrices.incoming },
@@ -764,9 +791,10 @@ export function applyImportMode(
   choices?: PortfolioImportChoices
 ): PortfolioStorage {
   if (mode === "replace") {
-    const { loans, loanRevisions } = mergeLoans(incoming, { ...incoming, loans: [], loanRevisions: [] });
+    const repaired = restoreCollateralShareBases(repairCorporateActionAccounting(incoming));
+    const { loans, loanRevisions } = mergeLoans(repaired, { ...repaired, loans: [], loanRevisions: [] });
     return {
-      ...incoming,
+      ...repaired,
       loans,
       loanRevisions,
       settings: {

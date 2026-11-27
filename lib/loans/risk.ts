@@ -1,9 +1,12 @@
 import { parseIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot } from "@/lib/loans/calculations";
+import { collateralQuantityOn } from "@/lib/loans/collateral";
 import { loansWithConsistentPhases } from "@/lib/loans/phases";
-import type { Holding } from "@/lib/types/holding";
+import { quantityAvailability } from "@/lib/portfolio/quantity";
+import type { CorporateActionRecord, Holding } from "@/lib/types/holding";
 import type {
   Loan,
+  LoanCollateralOverlap,
   LoanCollateralValuation,
   LoanRiskLevel,
   PortfolioLoanRiskSummary,
@@ -92,42 +95,63 @@ function collateralRiskLevel(options: {
   return "safe";
 }
 
-/**
- * 維持率 = 擔保品目前市值 ÷ 目前本金。只有有效最新價格才納入；
- * 缺價時標示未知，不以成本價冒充市價。
- */
-export function calculateLoanCollateralValuation(
+function collateralQuantities(
   loan: Loan,
-  holdings: Holding[],
-  asOfDate: string
-): LoanCollateralValuation {
-  const principal = calculateLoanSnapshot(loan, asOfDate).currentPrincipal;
-  const holdingById = new Map(holdings.map((holding) => [holding.id, holding]));
-  let trackedCollateralValue = 0;
-  let missingPositionCount = 0;
-
+  holdingById: ReadonlyMap<string, Holding>,
+  date: string,
+  corporateActions: CorporateActionRecord[]
+): Map<string, number> {
+  const quantities = new Map<string, number>();
   for (const position of loan.collateralPositions ?? []) {
     const holding = holdingById.get(position.holdingId);
+    const quantity = holding
+      ? collateralQuantityOn(position, holding, corporateActions, date, loan.contractUpdatedAt ?? loan.createdAt)
+      : position.quantity;
+    const previous = quantities.get(position.holdingId) ?? 0;
+    quantities.set(position.holdingId, quantity > 0 ? previous + quantity : NaN);
+  }
+  return quantities;
+}
+
+function valueLoanCollateral(
+  loan: Loan,
+  holdingById: ReadonlyMap<string, Holding>,
+  quantities: ReadonlyMap<string, number>,
+  asOfDate: string,
+  overlaps?: ReadonlyMap<string, LoanCollateralOverlap>
+): LoanCollateralValuation {
+  const principal = calculateLoanSnapshot(loan, asOfDate).currentPrincipal;
+  let trackedCollateralValue = 0;
+  let missingPositionCount = 0;
+  let overlappingPositionCount = 0;
+
+  for (const [holdingId, quantity] of quantities) {
+    if (overlaps?.get(holdingId)?.loanIds.includes(loan.id)) {
+      overlappingPositionCount += 1;
+      continue;
+    }
+    const holding = holdingById.get(holdingId);
     if (
       !holding ||
       holding.assetType === "property" ||
       !holding.currentPrice ||
       holding.currentPrice <= 0 ||
-      position.quantity <= 0
+      !Number.isFinite(quantity) || quantity <= 0
     ) {
       missingPositionCount += 1;
       continue;
     }
-    const recognizedQuantity = Math.min(position.quantity, holding.quantity);
+    const recognizedQuantity = Math.min(quantity, holding.quantity);
     trackedCollateralValue += holding.currentPrice * recognizedQuantity;
-    if (position.quantity > holding.quantity) missingPositionCount += 1;
+    if (!quantityAvailability(quantity, holding.quantity)) missingPositionCount += 1;
   }
 
   const manualCollateralValue = Math.max(0, loan.manualCollateralValue ?? 0);
   const collateralMarketValue = trackedCollateralValue + manualCollateralValue;
   const secured = hasCollateralRisk(loan);
+  // 可核對的部分市值仍可顯示，但資料不全時不以部分市值判斷是否達到追繳門檻。
   const maintenanceRatioPercent =
-    secured && principal > 0 && collateralMarketValue > 0
+    secured && overlappingPositionCount === 0 && missingPositionCount === 0 && principal > 0 && collateralMarketValue > 0
       ? (collateralMarketValue / principal) * 100
       : null;
   const creditLimit = loan.creditLimit;
@@ -152,6 +176,7 @@ export function calculateLoanCollateralValuation(
     trackedCollateralValue,
     manualCollateralValue,
     missingPositionCount,
+    overlappingPositionCount,
     maintenanceRatioPercent,
     warningBufferPercent: priceDropBuffer(
       maintenanceRatioPercent,
@@ -170,20 +195,49 @@ export function calculateLoanCollateralValuation(
   };
 }
 
-export function calculatePortfolioLoanRiskSummary(
+/** 各筆擔保數量先換成估值日股數。同一持倉的可用股數在組合中只計一次。 */
+export function calculatePortfolioLoanRisk(
   loans: Loan[],
   holdings: Holding[],
-  asOfDate: string
-): PortfolioLoanRiskSummary {
+  asOfDate: string,
+  corporateActions: CorporateActionRecord[] = []
+) {
   const monitoredLoans = loansWithConsistentPhases(loans).filter(
     (loan) =>
       hasFlexibleCredit(loan) &&
       loan.trackingStartDate <= asOfDate &&
-      (!loan.closedAt || loan.closedAt > asOfDate)
+      (loan.closedAt ? loan.closedAt > asOfDate : loan.status === "active")
   );
+  const holdingById = new Map(holdings.map((holding) => [holding.id, holding]));
+  const quantitiesByLoan = new Map(monitoredLoans.map((loan) => [
+    loan.id, collateralQuantities(loan, holdingById, asOfDate, corporateActions),
+  ]));
+  const claims = new Map<string, { quantity: number; loanIds: string[] }>();
+  for (const loan of monitoredLoans) {
+    if (!hasCollateralRisk(loan)) continue;
+    for (const [id, quantity] of quantitiesByLoan.get(loan.id) ?? []) {
+      if (!Number.isFinite(quantity) || quantity <= 0) continue;
+      const claimed = claims.get(id) ?? { quantity: 0, loanIds: [] };
+      claimed.quantity += quantity;
+      claimed.loanIds.push(loan.id);
+      claims.set(id, claimed);
+    }
+  }
+  const overlaps = new Map<string, LoanCollateralOverlap>();
+  let trackedCollateralValue = 0;
+  for (const [id, { quantity, loanIds }] of claims) {
+    const holding = holdingById.get(id);
+    if (!holding || holding.assetType === "property") continue;
+    if (loanIds.length > 1 && !quantityAvailability(quantity, holding.quantity)) {
+      overlaps.set(id, { holdingId: id, requestedQuantity: quantity, availableQuantity: holding.quantity, loanIds });
+    }
+    if (holding.currentPrice && holding.currentPrice > 0) {
+      trackedCollateralValue += Math.min(quantity, holding.quantity) * holding.currentPrice;
+    }
+  }
+
   const valuations = monitoredLoans.map((loan) =>
-    calculateLoanCollateralValuation(loan, holdings, asOfDate)
-  );
+    valueLoanCollateral(loan, holdingById, quantitiesByLoan.get(loan.id)!, asOfDate, overlaps));
   const ratios = valuations
     .map((valuation) => valuation.maintenanceRatioPercent)
     .filter((ratio): ratio is number => ratio !== null);
@@ -192,7 +246,7 @@ export function calculatePortfolioLoanRiskSummary(
     .filter((date): date is string => !!date && date >= asOfDate)
     .sort();
 
-  return {
+  const summary: PortfolioLoanRiskSummary = {
     monitoredLoanCount: monitoredLoans.length,
     criticalCount: valuations.filter(
       (valuation) => valuation.riskLevel === "critical"
@@ -206,9 +260,31 @@ export function calculatePortfolioLoanRiskSummary(
     lowestMaintenanceRatioPercent:
       ratios.length > 0 ? Math.min(...ratios) : null,
     nextMaturityDate: maturityDates[0] ?? null,
-    totalCollateralMarketValue: valuations.reduce(
-      (sum, valuation) => sum + valuation.collateralMarketValue,
+    totalCollateralMarketValue: trackedCollateralValue + valuations.reduce(
+      (sum, valuation) => sum + valuation.manualCollateralValue,
       0
     ),
+    collateralOverlaps: [...overlaps.values()],
   };
+  return { summary, valuations: new Map(valuations.map((valuation) => [valuation.loanId, valuation])) };
+}
+
+/** 供單一獨立貸款或已結束的契約檢視。 */
+export function calculateLoanCollateralValuation(
+  loan: Loan,
+  holdings: Holding[],
+  asOfDate: string,
+  corporateActions: CorporateActionRecord[] = []
+): LoanCollateralValuation {
+  const holdingById = new Map(holdings.map((holding) => [holding.id, holding]));
+  return valueLoanCollateral(loan, holdingById, collateralQuantities(loan, holdingById, asOfDate, corporateActions), asOfDate);
+}
+
+export function calculatePortfolioLoanRiskSummary(
+  loans: Loan[],
+  holdings: Holding[],
+  asOfDate: string,
+  corporateActions: CorporateActionRecord[] = []
+): PortfolioLoanRiskSummary {
+  return calculatePortfolioLoanRisk(loans, holdings, asOfDate, corporateActions).summary;
 }

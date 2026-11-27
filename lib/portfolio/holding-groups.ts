@@ -3,6 +3,7 @@
  */
 
 import { normalizeStockSymbol } from "@/lib/prices/stock-symbol";
+import { removeQuantityRoundoff, quantityAvailability } from "@/lib/portfolio/quantity";
 import type {
   AssetType,
   Holding,
@@ -167,35 +168,29 @@ export function groupHoldingsWithMetrics(
 
 /**
  * 依買入日先進先出，將賣出數量分攤到各筆買入。
- * 回傳各 lot 應賣數量；若總量不足則只分攤到可用上限。
+ * 回傳各批次應賣數量，超過可用上限時回傳空陣列。
  */
 export function allocateFifoSell(
   lots: Pick<Holding, "id" | "quantity" | "buyDate" | "buyPrice">[],
   sellQuantity: number
 ): { id: string; quantity: number; buyPrice: number; buyDate: string }[] {
-  if (!Number.isFinite(sellQuantity) || sellQuantity <= 0) return [];
+  const sorted = lots.filter((lot) => lot.quantity > 0).sort((a, b) => a.buyDate.localeCompare(b.buyDate));
+  const available = sorted.reduce((total, lot) => total + lot.quantity, 0);
+  const status = quantityAvailability(sellQuantity, available);
+  if (!status) return [];
+  if (status === "full") return sorted.map(({ id, buyDate, buyPrice, quantity }) => ({
+    id, buyDate, buyPrice, quantity: removeQuantityRoundoff(quantity),
+  }));
 
-  const sorted = [...lots].sort((a, b) => a.buyDate.localeCompare(b.buyDate));
-  let remaining = sellQuantity;
-  const result: {
-    id: string;
-    quantity: number;
-    buyPrice: number;
-    buyDate: string;
-  }[] = [];
-
-  for (const lot of sorted) {
-    if (remaining <= 0) break;
-    const qty = Math.min(lot.quantity, remaining);
-    if (qty > 0) {
-      result.push({
-        id: lot.id,
-        quantity: qty,
-        buyPrice: lot.buyPrice,
-        buyDate: lot.buyDate,
-      });
-      remaining -= qty;
-    }
+  const result: typeof sorted = [];
+  let allocated = 0;
+  for (const { id, buyDate, buyPrice, quantity: lotQuantity } of sorted) {
+    const throughLot = allocated + lotQuantity;
+    const lotStatus = quantityAvailability(sellQuantity, throughLot);
+    const quantity = lotStatus === "partial" ? sellQuantity - allocated : lotQuantity;
+    result.push({ id, buyDate, buyPrice, quantity: removeQuantityRoundoff(quantity) });
+    if (lotStatus) break;
+    allocated = throughLot;
   }
 
   return result;

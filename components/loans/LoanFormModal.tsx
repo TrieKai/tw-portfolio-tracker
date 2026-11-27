@@ -5,12 +5,14 @@ import { FormEvent, useState } from "react";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { addDaysToIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { loanTrackingStartIssue } from "@/lib/loans/history";
+import { collateralQuantityOn, collateralShareFactor } from "@/lib/loans/collateral";
+import { quantityAvailability, removeQuantityRoundoff } from "@/lib/portfolio/quantity";
 import {
   LOAN_PURPOSE_LABELS,
   LOAN_TYPE_LABELS,
   REPAYMENT_METHOD_LABELS,
 } from "@/lib/loans/labels";
-import type { Holding } from "@/lib/types/holding";
+import type { CorporateActionRecord, Holding } from "@/lib/types/holding";
 import type {
   CreateLoanInput,
   Loan,
@@ -78,6 +80,7 @@ export function LoanFormModal({
   restartOf,
   predecessor,
   holdings,
+  corporateActions,
   onSave,
   onClose,
 }: {
@@ -85,6 +88,7 @@ export function LoanFormModal({
   restartOf?: Loan;
   predecessor?: Loan;
   holdings: Holding[];
+  corporateActions: CorporateActionRecord[];
   onSave: (input: CreateLoanInput) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -168,15 +172,24 @@ export function LoanFormModal({
     loan?.manualCollateralValue ? String(loan.manualCollateralValue) : ""
   );
   const [collateralQuantities, setCollateralQuantities] = useState<
-    Record<string, string>
-  >(() =>
-    Object.fromEntries(
-      (loan?.collateralPositions ?? []).map((position) => [
-        position.holdingId,
-        String(position.quantity),
-      ])
-    )
-  );
+    Record<string, { quantity: string; shareBasisFactor?: number }>
+  >(() => {
+    const grouped = new Map<string, { quantity: number; shareBasisFactor?: number }>();
+    for (const position of loan?.collateralPositions ?? []) {
+      const existing = grouped.get(position.holdingId);
+      const holding = holdings.find((item) => item.id === position.holdingId);
+      const shareBasisFactor = holding?.assetType === "stock"
+        ? collateralShareFactor(holding, corporateActions, today)
+        : existing ? existing.shareBasisFactor : position.shareBasisFactor;
+      const quantity = holding && loan
+        ? collateralQuantityOn(position, holding, corporateActions, today, loan.contractUpdatedAt ?? loan.createdAt)
+        : position.quantity * ((shareBasisFactor ?? 1) / (position.shareBasisFactor ?? 1));
+      grouped.set(position.holdingId, { quantity: (existing?.quantity ?? 0) + quantity, shareBasisFactor });
+    }
+    return Object.fromEntries([...grouped].map(([id, position]) => [id, {
+      quantity: String(removeQuantityRoundoff(position.quantity)), shareBasisFactor: position.shareBasisFactor,
+    }]));
+  });
   const [error, setError] = useState<string | null>(null);
 
   const propertyHoldings = holdings.filter(
@@ -214,14 +227,19 @@ export function LoanFormModal({
     }
   }
 
-  function toggleCollateral(holdingId: string, quantity: number) {
+  function collateralDraft(holding: Holding, quantity: string) {
+    const shareBasisFactor = holding.assetType === "stock" ? collateralShareFactor(holding, corporateActions, today) : undefined;
+    return { quantity, shareBasisFactor };
+  }
+
+  function toggleCollateral(holding: Holding) {
     setCollateralQuantities((current) => {
-      if (holdingId in current) {
+      if (holding.id in current) {
         const next = { ...current };
-        delete next[holdingId];
+        delete next[holding.id];
         return next;
       }
-      return { ...current, [holdingId]: String(quantity) };
+      return { ...current, [holding.id]: collateralDraft(holding, String(removeQuantityRoundoff(holding.quantity))) };
     });
   }
 
@@ -262,18 +280,19 @@ export function LoanFormModal({
       : undefined;
     const collateralPositions: LoanCollateralPosition[] = [];
     if (collateralLoan) {
-      for (const [holdingId, rawQuantity] of Object.entries(
+      for (const [holdingId, draft] of Object.entries(
         collateralQuantities
       )) {
-        const quantity = Number.parseFloat(rawQuantity);
+        const quantity = Number(draft.quantity);
         if (!Number.isFinite(quantity) || quantity <= 0) {
           return setError("擔保品數量必須大於 0");
         }
         const holding = collateralHoldings.find((item) => item.id === holdingId);
-        if (holding && quantity > holding.quantity) {
+        const position = { holdingId, quantity, shareBasisFactor: draft.shareBasisFactor };
+        if (holding && !quantityAvailability(collateralQuantityOn(position, holding, corporateActions, today, ""), holding.quantity)) {
           return setError(`${holding.name} 的擔保數量不可超過目前持有數量`);
         }
-        collateralPositions.push({ holdingId, quantity });
+        collateralPositions.push(position);
       }
     }
 
@@ -569,21 +588,30 @@ export function LoanFormModal({
               ) : (
                 <div className="mt-2 space-y-2">
                   {collateralHoldings.map((holding) => {
-                    const selected = holding.id in collateralQuantities;
+                    const draft = collateralQuantities[holding.id];
+                    const currentBasis = holding.assetType === "stock" ? collateralShareFactor(holding, corporateActions, today) : undefined;
+                    const draftNumber = Number(draft?.quantity);
+                    const inputQuantity = draft && draft.shareBasisFactor !== currentBasis && Number.isFinite(draftNumber) && draftNumber > 0
+                      ? String(removeQuantityRoundoff(draftNumber * ((currentBasis ?? 1) / (draft.shareBasisFactor ?? 1))))
+                      : draft?.quantity;
                     return (
                       <div key={holding.id} className="grid gap-2 rounded-lg bg-surface-raised p-3 sm:grid-cols-[1fr_160px] sm:items-center">
                         <label className="flex items-center gap-3 text-sm">
-                          <input type="checkbox" checked={selected} onChange={() => toggleCollateral(holding.id, holding.quantity)} />
+                          <input type="checkbox" checked={!!draft} onChange={() => toggleCollateral(holding)} />
                           <span>{holding.name} · {holding.symbol || "無代號"}</span>
                         </label>
-                        {selected ? (
-                          <input aria-label={`${holding.name} 擔保數量`} type="number" min="0" step="0.0001" className="input-field" value={collateralQuantities[holding.id]} onChange={(event) => setCollateralQuantities((current) => ({ ...current, [holding.id]: event.target.value }))} />
+                        {draft ? (
+                          <input aria-label={`${holding.name} 擔保數量`} type="number" min="0" step="any" inputMode="decimal" className="input-field" value={inputQuantity} onChange={(event) => {
+                            const next = { quantity: event.target.value, shareBasisFactor: currentBasis };
+                            setCollateralQuantities((current) => ({ ...current, [holding.id]: next }));
+                          }} />
                         ) : null}
                       </div>
                     );
                   })}
                 </div>
               )}
+              <p className="mt-2 text-xs text-muted">股票拆併或換發後會換算擔保股數。股利及退還股款可依實際認列調整。</p>
             </div>
             <Field label="其他／未追蹤擔保品目前市值（選填）">
               <input type="number" min="0" step="1" className="input-field" value={manualCollateralValue} onChange={(event) => setManualCollateralValue(event.target.value)} />
