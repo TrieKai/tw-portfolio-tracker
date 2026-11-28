@@ -13,10 +13,12 @@ export function LoanSummaryPanel({
   summary,
   riskSummary,
   reminders = [],
+  historicalDate,
 }: {
   summary: PortfolioLoanSummary;
   riskSummary?: PortfolioLoanRiskSummary;
   reminders?: LoanReminder[];
+  historicalDate?: string;
 }) {
   const { formatAmount, maskAmount } = useAmountPrivacy();
   if (summary.activeLoanCount === 0 && summary.investmentFinancingCostToDate === 0 && !summary.hasIncompleteData) {
@@ -38,7 +40,7 @@ export function LoanSummaryPanel({
       <dl className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Metric label="貸款總額" value={formatAmount(summary.totalDebt)} />
         <Metric label="累計投資融資成本" value={maskAmount(formatFinancingCostImpact(summary.investmentFinancingCostToDate))} loss={summary.investmentFinancingCostToDate > 0} gain={summary.investmentFinancingCostToDate < 0} />
-        <Metric label="本月融資成本" value={maskAmount(formatFinancingCostImpact(summary.monthlyInvestmentFinancingCost))} loss={summary.monthlyInvestmentFinancingCost > 0} gain={summary.monthlyInvestmentFinancingCost < 0} />
+        <Metric label={historicalDate ? `${Number(historicalDate.slice(5, 7))} 月融資成本（截至當日）` : "本月融資成本"} value={maskAmount(formatFinancingCostImpact(summary.monthlyInvestmentFinancingCost))} loss={summary.monthlyInvestmentFinancingCost > 0} gain={summary.monthlyInvestmentFinancingCost < 0} />
         <Metric label="扣息後淨損益" value={formatAmount(summary.netInvestmentPnl)} gain={netPositive} loss={!netPositive} />
       </dl>
       {summary.hasIncompleteData ? <p className="mt-3 text-xs text-amber-600 dark:text-amber-300">部分貸款採估算或待補資料；詳細可信範圍請至貸款頁查看。</p> : null}

@@ -14,7 +14,7 @@ import { ErrorAlert } from "@/components/ui/ErrorAlert";
 import { Modal } from "@/components/ui/Modal";
 import { parseIsoDate, todayIsoDate } from "@/lib/date/iso-date";
 import { calculateLoanSnapshot, loanInstallmentOptions } from "@/lib/loans/calculations";
-import { earliestLoanClosureDate, isDateInLoanTracking, loanPaymentInterestPeriod } from "@/lib/loans/history";
+import { earliestLoanClosureDate, isDateInLoanTracking, isRecordedLoanPaymentInTracking, loanPaymentInterestPeriod } from "@/lib/loans/history";
 import { conflictingLoanPhaseIds } from "@/lib/loans/phases";
 import { getSellUnitLabel } from "@/lib/portfolio/asset-labels";
 import { formatQuantity } from "@/lib/portfolio/quantity";
@@ -626,7 +626,7 @@ function LoanHistoryDetails({ loan }: { loan: Loan }) {
     .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
   const hasReferenceRecords = referenceBalances.length > 0 ||
     rates.some((change) => !isDateInLoanTracking(loan, change.effectiveDate)) ||
-    payments.some((payment) => !isDateInLoanTracking(loan, payment.paymentDate) ||
+    payments.some((payment) => !isRecordedLoanPaymentInTracking(loan, payment.paymentDate) ||
       (payment.interestPeriodStartDate && payment.interestPeriodStartDate < loan.trackingStartDate));
   if (payments.length === 0 && rates.length === 0 && referenceBalances.length === 0) return null;
 
@@ -651,7 +651,8 @@ function LoanHistoryDetails({ loan }: { loan: Loan }) {
             {payments.slice(0, visiblePayments).map((payment) => {
               const cashOutflow = payment.principalPaid + payment.interestPaid + payment.feePaid - payment.subsidyReceived;
               const statement = loanPaymentInterestPeriod(loan, payment);
-              const tracked = isDateInLoanTracking(loan, payment.paymentDate);
+              const tracked = isRecordedLoanPaymentInTracking(loan, payment.paymentDate);
+              const canAssign = isDateInLoanTracking(loan, payment.paymentDate);
               const hasEarlierStatement = payment.interestPeriodStartDate && payment.interestPeriodStartDate < loan.trackingStartDate;
               const status = !tracked
                 ? "超出追蹤期間，僅供核對"
@@ -671,13 +672,13 @@ function LoanHistoryDetails({ loan }: { loan: Loan }) {
                     {status}{payment.remainingPrincipalAfter !== undefined ? ` · 餘額 ${formatAmount(payment.remainingPrincipalAfter)}` : ""}
                   </p>
                   {payment.note && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted">{payment.note}</p>}
-                  {tracked && (installments.length > 0 || payment.installmentDueDate) && (
+                  {canAssign && (installments.length > 0 || payment.installmentDueDate) && (
                     <button type="button" className="btn-secondary mt-2 text-sm" aria-expanded={editing}
                       onClick={(event) => { assignmentTrigger.current = event.currentTarget; setEditingPaymentId(editing ? null : payment.id); }}>
                       {payment.installmentDueDate ? "更改期別" : "指定期別"}
                     </button>
                   )}
-                  {tracked && editing && <LoanInstallmentEditForm installments={installments} payment={payment}
+                  {canAssign && editing && <LoanInstallmentEditForm installments={installments} payment={payment}
                     onCancel={closeAssignment}
                     onSave={async (dueDate) => {
                       const saved = await assignLoanPaymentInstallment(loan.id, payment.id, dueDate);

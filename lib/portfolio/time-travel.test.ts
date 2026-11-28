@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPortfolioTimelineBetween } from "@/lib/portfolio/portfolio-timeline";
-import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
+import { buildDashboardHistoryDates, buildPortfolioHistory } from "@/lib/portfolio/time-travel";
+import { addLoan } from "@/lib/storage/loan-store";
 import { defaultPortfolioStorage } from "@/lib/storage/parse-portfolio";
 import { addHolding, applyManualCorporateAction, applyPriceUpdate, sellHolding } from "@/lib/storage/portfolio-store";
 
@@ -16,6 +17,34 @@ function startingPortfolio() {
 }
 
 describe("historical portfolio positions", () => {
+  it("offers dates with recorded loan activity even when there is no asset price that day", () => {
+    const state = addLoan(startingPortfolio(), {
+      name: "測試房貸", loanType: "mortgage", purpose: "property", investmentUsePercent: 0,
+      openingBalance: 900_000, trackingStartDate: "2026-11-01", firstPaymentDate: "2026-11-04",
+      annualInterestRate: 2, rateType: "floating", repaymentMethod: "equal_principal",
+      remainingTermMonths: 60, dataQuality: "complete",
+    });
+    const loan = {
+      ...state.loans[0], status: "paid_off" as const, closedAt: "2026-11-20",
+      balanceHistory: [
+        { effectiveDate: "2026-11-08", balance: 800_000, recordedAt: "2026-11-08T12:00:00Z" },
+        { effectiveDate: "2026-11-23", balance: 700_000, recordedAt: "2026-11-23T12:00:00Z" },
+      ],
+      rateHistory: [{ id: "rate", effectiveDate: "2026-11-12", annualInterestRate: 2.1, createdAt: "2026-11-12T12:00:00Z" }],
+      paymentHistory: [{ id: "receipt", paymentDate: "2026-11-16", principalPaid: 10_000,
+        interestPaid: 100, feePaid: 0, subsidyReceived: 0, createdAt: "2026-11-16T12:00:00Z" }],
+    };
+    const assetDates = buildPortfolioHistory(state).dates;
+
+    expect(buildDashboardHistoryDates(assetDates, [loan], "2026-11-30")).toEqual([
+      "2026-11-01", "2026-11-02", "2026-11-08", "2026-11-12", "2026-11-16", "2026-11-20",
+    ]);
+    expect(buildDashboardHistoryDates([], [loan], "2026-11-10")).toEqual(["2026-11-01", "2026-11-08"]);
+    expect(buildDashboardHistoryDates([], [{ ...loan, closedAt: undefined }], "2026-11-30"))
+      .toEqual(["2026-11-01", "2026-11-16"]);
+    expect(assetDates).toEqual(["2026-11-02"]);
+  });
+
   it("restores the historical quantity across partial and complete sales", () => {
     let state = startingPortfolio();
     const id = state.holdings[0].id;

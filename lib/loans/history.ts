@@ -21,10 +21,13 @@ export function loanActualEntryEndDate(loan: Loan, today = todayIsoDate()): stri
   return loan.closedAt && loan.closedAt < today ? loan.closedAt : today;
 }
 
-export function loanPaymentsInTracking(loan: Loan) {
+export function isRecordedLoanPaymentInTracking(loan: Loan, date: string): boolean {
   // 舊貸款缺少清償日時，仍可使用已有日期的實付單據。
-  return (loan.paymentHistory ?? []).filter((payment) => isDateInLoanTracking(loan, payment.paymentDate) ||
-    (!loan.closedAt && !!parseIsoDate(payment.paymentDate) && payment.paymentDate >= loan.trackingStartDate));
+  return !!parseIsoDate(date) && date >= loan.trackingStartDate && (!loan.closedAt || date <= loan.closedAt);
+}
+
+export function loanPaymentsInTracking(loan: Loan) {
+  return (loan.paymentHistory ?? []).filter((payment) => isRecordedLoanPaymentInTracking(loan, payment.paymentDate));
 }
 
 export function loanPaymentInterestPeriod(loan: Loan, payment: LoanPaymentRecord) {

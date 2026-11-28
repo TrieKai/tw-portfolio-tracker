@@ -1,6 +1,8 @@
 import { normalizeToIsoDate } from "@/lib/date/iso-date";
 import { costInCurrentUnits, costOnDate, holdingActions, shareAdjustmentAfter } from "@/lib/corporate-actions/adjustment";
+import { isDateInLoanTracking, loanPaymentsInTracking } from "@/lib/loans/history";
 import { holdingGroupKey } from "@/lib/portfolio/holding-groups";
+import type { Loan } from "@/lib/types/loan";
 import type {
   CorporateActionRecord,
   Holding,
@@ -187,3 +189,19 @@ export function buildPortfolioHistory(storage: PortfolioStorage) {
 }
 
 export type PortfolioHistory = ReturnType<typeof buildPortfolioHistory>;
+
+export function buildDashboardHistoryDates(assetDates: string[], loans: Loan[], asOfDate: string): string[] {
+  const dates = new Set(assetDates);
+  for (const loan of loans) {
+    dates.add(loan.trackingStartDate);
+    if (loan.closedAt && isDateInLoanTracking(loan, loan.closedAt)) dates.add(loan.closedAt);
+    for (const snapshot of loan.balanceHistory ?? []) {
+      if (isDateInLoanTracking(loan, snapshot.effectiveDate)) dates.add(snapshot.effectiveDate);
+    }
+    for (const change of loan.rateHistory ?? []) {
+      if (isDateInLoanTracking(loan, change.effectiveDate)) dates.add(change.effectiveDate);
+    }
+    for (const payment of loanPaymentsInTracking(loan)) dates.add(payment.paymentDate);
+  }
+  return [...dates].filter((date) => date <= asOfDate).sort();
+}

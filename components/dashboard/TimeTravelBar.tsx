@@ -58,7 +58,7 @@ export function TimeTravelBar({
           <div>
             <p className="font-semibold">時間旅行</p>
             <p className="text-xs text-muted">
-              {active ? formatDate(dates[activeIndex]) : "拖曳時間軸，回看資產當時的樣子"}
+              {active ? formatDate(dates[activeIndex]) : "選擇日期，回看當時的資產與貸款"}
             </p>
           </div>
         </div>

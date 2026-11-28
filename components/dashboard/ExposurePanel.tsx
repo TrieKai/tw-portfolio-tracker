@@ -86,7 +86,7 @@ export function ExposurePanel({
 
   return (
     <section className="exposure-panel min-w-0 space-y-4">
-      <div className="exposure-header flex flex-col gap-2">
+      <div className="exposure-header gap-2">
         <div>
           <h2 className="text-lg font-semibold">曝險分析</h2>
           <p className="mt-1 text-sm text-muted">

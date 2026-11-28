@@ -37,7 +37,7 @@ import { buildLoanReminders } from "@/lib/loans/reminders";
 import { computePortfolioHealth } from "@/lib/portfolio/health";
 import { computeInvestmentWeather } from "@/lib/portfolio/weather";
 import { todayIsoDate } from "@/lib/date/iso-date";
-import { buildPortfolioHistory } from "@/lib/portfolio/time-travel";
+import { buildDashboardHistoryDates, buildPortfolioHistory } from "@/lib/portfolio/time-travel";
 import { PnlValueWithBreakdown } from "@/components/ui/PnlBreakdownTooltip";
 import type { DashboardSectionId } from "@/lib/types/ui-preferences";
 import { DEFAULT_UI_PREFERENCES } from "@/lib/ui/preferences";
@@ -54,23 +54,26 @@ export default function DashboardPage() {
   const { ready, holdings, summary, exposure, loanSummary, loanRiskSummary, loanReminders, pnlBreakdowns, storage, sales, setExposureSettings, setAllocationTargets } = usePortfolio();
   const { preferences } = useUiPreferences();
   const { formatAmount } = useAmountPrivacy();
-  const [travelDate, setTravelDate] = useState<string | null>(null);
+  const [selectedDate, setTravelDate] = useState<string | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const today = todayIsoDate();
+  const portfolioHistory = useMemo(() => buildPortfolioHistory(storage), [storage]);
+  const historyDates = useMemo(
+    () => buildDashboardHistoryDates(portfolioHistory.dates, storage.loans, today),
+    [portfolioHistory.dates, storage.loans, today]
+  );
+  const travelDate = selectedDate && historyDates.includes(selectedDate) ? selectedDate : null;
+  if (selectedDate && !travelDate) setTravelDate(null);
   const pnlCalendar = useMemo(
     () =>
       buildPnlCalendar(storage, {
         month: travelDate?.slice(0, 7) ?? currentYearMonthPrefix(),
-        asOfDate: travelDate ?? todayIsoDate(),
+        asOfDate: travelDate ?? today,
         filter: { kind: "investment" },
       }),
-    [storage, travelDate]
+    [storage, today, travelDate]
   );
 
-  const portfolioHistory = useMemo(() => buildPortfolioHistory(storage), [storage]);
-  const historyDates = useMemo(
-    () => portfolioHistory.dates.filter((date) => date <= todayIsoDate()),
-    [portfolioHistory]
-  );
   const travelState = useMemo(() => {
     if (!travelDate) return null;
     const rawHoldings = portfolioHistory.snapshotOn(travelDate);
@@ -143,7 +146,7 @@ export default function DashboardPage() {
   const shownHealth = computePortfolioHealth(
     shownHoldings,
     shownHistory,
-    travelDate ?? todayIsoDate()
+    travelDate ?? today
   );
   const shownWeather = computeInvestmentWeather(
     shownSummary,
@@ -170,7 +173,7 @@ export default function DashboardPage() {
     : visibleLayout;
   const loanPanel = shownLoanSummary.activeLoanCount > 0 || shownLoanSummary.investmentFinancingCostToDate !== 0 || shownLoanSummary.hasIncompleteData ? (
     <div data-grid-width="full">
-      <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} reminders={shownLoanReminders} />
+      <LoanSummaryPanel summary={shownLoanSummary} riskSummary={shownLoanRiskSummary} reminders={shownLoanReminders} historicalDate={travelDate ?? undefined} />
     </div>
   ) : null;
 
@@ -197,7 +200,7 @@ export default function DashboardPage() {
       <WeeklyPortfolioReport
         storage={storage}
         portfolioHistory={portfolioHistory}
-        asOfDate={travelDate ?? todayIsoDate()}
+        asOfDate={travelDate ?? today}
         view={viewFor("weeklyReport")}
       />
     ),
@@ -228,7 +231,7 @@ export default function DashboardPage() {
         <p className="text-sm text-muted">
           {travelDate
             ? `回看 ${formatIsoDateZh(travelDate)} · 依當日持有的部位與可用估值重建`
-            : `截至 ${formatIsoDateZh(todayIsoDate())} · 各筆採最新可用估值`}
+            : `截至 ${formatIsoDateZh(today)} · 各筆採最新可用估值`}
         </p>
         <PortfolioSummaryCards summary={shownSummary} pnlBreakdowns={shownBreakdowns} view={viewFor("summary")} asOfDate={travelDate ?? undefined} />
       </section>

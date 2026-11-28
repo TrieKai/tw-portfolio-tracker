@@ -281,6 +281,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .exposure-header {
+    display: flex;
+    flex-direction: column;
+  }
+
   @container (min-width: 28rem) {
     .exposure-metrics,
     .exposure-form-grid {

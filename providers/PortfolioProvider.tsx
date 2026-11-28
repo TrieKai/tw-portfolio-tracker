@@ -536,6 +536,7 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loans = storage?.loans ?? EMPTY_LOANS;
+  const asOfDate = todayIsoDate();
   const grossInvestmentPnl = useMemo(
     () =>
       holdings
@@ -549,32 +550,31 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
   const loanSummary = useMemo(
     () =>
       calculatePortfolioLoanSummary(loans, {
-        asOfDate: todayIsoDate(),
+        asOfDate,
         grossInvestmentPnl,
       }),
-    [grossInvestmentPnl, loans]
+    [asOfDate, grossInvestmentPnl, loans]
   );
-  const riskDate = todayIsoDate();
   const { summary: loanRiskSummary, valuations: loanRiskValuations } = useMemo(
     () =>
       calculatePortfolioLoanRisk(
         loans,
         storage?.holdings ?? [],
-        riskDate,
+        asOfDate,
         storage?.corporateActions
       ),
-    [loans, storage?.holdings, storage?.corporateActions, riskDate]
+    [asOfDate, loans, storage?.holdings, storage?.corporateActions]
   );
   const loanReminders = useMemo(
     () =>
       buildLoanReminders(
         loans,
         storage?.holdings ?? [],
-        riskDate,
+        asOfDate,
         storage?.corporateActions,
         loanRiskValuations
       ),
-    [loans, storage?.holdings, storage?.corporateActions, riskDate, loanRiskValuations]
+    [asOfDate, loans, storage?.holdings, storage?.corporateActions, loanRiskValuations]
   );
 
   const exposure = useMemo(
@@ -582,9 +582,10 @@ export function PortfolioProvider({ children }: { children: React.ReactNode }) {
       computePortfolioExposure(
         holdings,
         { netAssets: storage?.settings.netAssets },
-        loans
+        loans,
+        asOfDate
       ),
-    [holdings, loans, storage?.settings.netAssets]
+    [asOfDate, holdings, loans, storage?.settings.netAssets]
   );
 
   const pnlBreakdowns = useMemo(
